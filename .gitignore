@@ -1,0 +1,15 @@
+# Dipendenze e build
+node_modules/
+dist/
+
+# Generati da scripts/copy-pdfjs-assets.mjs (copia da pdfjs-dist)
+public/pdfjs/
+
+# Il repository e' PUBBLICO: nessun PDF o disegno reale.
+# Unica eccezione: i PDF di prova FITTIZI generati da scripts/make-test-pdfs.mjs.
+*.pdf
+!public/test-pdfs/*.pdf
+
+# Sistema
+.DS_Store
+*.log
