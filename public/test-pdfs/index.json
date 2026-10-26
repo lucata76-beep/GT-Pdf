@@ -1,0 +1,32 @@
+[
+  {
+    "file": "a4-vettoriale.pdf",
+    "titolo": "A4 vettoriale",
+    "note": "font standard non incorporati (prova gli asset di PDF.js)"
+  },
+  {
+    "file": "a3-vettoriale.pdf",
+    "titolo": "A3 vettoriale",
+    "note": "pagina grande: 17.403.188 px a 300 dpi"
+  },
+  {
+    "file": "a4-rotate90.pdf",
+    "titolo": "A4 con /Rotate 90",
+    "note": "vista ruotata"
+  },
+  {
+    "file": "a4-cropbox.pdf",
+    "titolo": "A4 con CropBox",
+    "note": "area visibile 400 x 550 pt"
+  },
+  {
+    "file": "a4-scansione.pdf",
+    "titolo": "A4 scansione (immagine)",
+    "note": "sola immagine in grigi, 150 dpi"
+  },
+  {
+    "file": "misto-3-pagine.pdf",
+    "titolo": "3 pagine miste",
+    "note": "A4, A3, A4 ruotata"
+  }
+]
