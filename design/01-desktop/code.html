@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+
+<html lang="it"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"secondary-fixed-dim":"#55d7ed","tertiary-container":"#008376","inverse-on-surface":"#edf1fb","on-background":"#171c23","on-tertiary-fixed":"#00201c","outline":"#8f7066","outline-variant":"#e3bfb2","surface-container":"#eaeef8","on-secondary":"#ffffff","tertiary":"#00685d","surface-container-lowest":"#ffffff","on-secondary-fixed-variant":"#004e59","on-surface":"#171c23","surface-dim":"#d6dae4","inverse-primary":"#ffb59a","surface":"#f8f9ff","surface-variant":"#dee2ec","on-primary":"#ffffff","surface-bright":"#f8f9ff","error-container":"#ffdad6","secondary-container":"#69e8fe","on-secondary-fixed":"#001f24","tertiary-fixed-dim":"#70d8c8","on-secondary-container":"#006774","secondary-fixed":"#9eefff","on-tertiary":"#ffffff","inverse-surface":"#2c3138","error":"#ba1a1a","surface-tint":"#a83900","tertiary-fixed":"#8df5e4","surface-container-highest":"#dee2ec","surface-container-high":"#e4e8f2","primary-fixed":"#ffdbcf","surface-container-low":"#f0f4fd","on-tertiary-fixed-variant":"#005048","on-error":"#ffffff","on-primary-fixed-variant":"#802a00","background":"#f8f9ff","on-primary-container":"#fffbff","on-primary-fixed":"#380d00","on-surface-variant":"#5a4138","on-error-container":"#93000a","secondary":"#006876","primary-container":"#cd4700","primary-fixed-dim":"#ffb59a","on-tertiary-container":"#f4fffb","primary":"#a43700"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-lg":"0.75rem","space-sm":"0.25rem","space-xl":"1rem","gutter":"0.5rem","space-md":"0.5rem","space-xs":"0.125rem","margin":"0.75rem"},"fontFamily":{"headline-md":["Inter"],"body-md":["Inter"],"label-numeric-sm":["JetBrains Mono"],"label-micro-header":["Inter"],"headline-sm":["Inter"],"headline-lg":["Inter"],"label-numeric-lg":["JetBrains Mono"],"label-numeric-md":["JetBrains Mono"],"body-sm":["Inter"]},"fontSize":{"headline-md":["1rem",{"lineHeight":"1.25rem","letterSpacing":"0","fontWeight":"600"}],"body-md":["0.875rem",{"lineHeight":"1.25rem","fontWeight":"400"}],"label-numeric-sm":["0.6875rem",{"lineHeight":"0.75rem","fontWeight":"400"}],"label-micro-header":["0.625rem",{"lineHeight":"0.75rem","letterSpacing":"0.06em","fontWeight":"700"}],"headline-sm":["0.875rem",{"lineHeight":"1.125rem","letterSpacing":"0.01em","fontWeight":"600"}],"headline-lg":["1.25rem",{"lineHeight":"1.5rem","letterSpacing":"-0.01em","fontWeight":"600"}],"label-numeric-lg":["0.875rem",{"lineHeight":"1rem","letterSpacing":"-0.02em","fontWeight":"500"}],"label-numeric-md":["0.75rem",{"lineHeight":"0.875rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-sm":["0.75rem",{"lineHeight":"1rem","fontWeight":"400"}]}}}}</script></head><body class="bg-surface-dim font-body-md text-on-surface select-none overflow-x-hidden"><header class="fixed top-0 left-0 right-0 z-50 bg-surface-container-high border-b border-surface-container-highest"><div class="h-10 px-margin flex items-center justify-between text-on-surface"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-xs"><span class="font-headline-sm text-headline-sm text-on-surface tracking-tight uppercase">Editor PDF con quote</span><span class="px-space-xs py-space-xs bg-surface-container-highest text-on-surface-variant font-label-micro-header text-label-micro-header rounded-DEFAULT tracking-wider">OFFICINA CNC</span></div><nav class="flex items-center gap-space-xs font-body-sm text-body-sm" data-active-classes="bg-surface-container text-on-surface font-semibold"><div class="relative group"><button class="px-space-sm py-space-xs text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface rounded-DEFAULT transition-colors flex items-center gap-space-xs" type="button">File <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span></button><div class="absolute left-0 top-full hidden group-hover:flex flex-col bg-surface-container-lowest border border-surface-container-highest shadow-[0_4px_12px_rgba(30,35,42,0.16)] py-space-xs min-w-[170px] z-50 rounded-DEFAULT"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="nuovo-progetto" href="#"><span>Nuovo</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+N</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="apri-pdf" href="#"><span>Apri...</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+O</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="salva-documento" href="#"><span>Salva con nome</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+S</span></a><div class="h-[1px] bg-surface-container-highest my-space-xs"></div><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="esporta-pdf-quotato" href="#"><span>Esporta PDF</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+E</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="chiudi-sessione" href="#"><span>Chiudi</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+W</span></a></div></div><div class="relative group"><button class="px-space-sm py-space-xs text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface rounded-DEFAULT transition-colors flex items-center gap-space-xs" type="button">Modifica <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span></button><div class="absolute left-0 top-full hidden group-hover:flex flex-col bg-surface-container-lowest border border-surface-container-highest shadow-[0_4px_12px_rgba(30,35,42,0.16)] py-space-xs min-w-[160px] z-50 rounded-DEFAULT"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="annulla-azione" href="#"><span>Annulla</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+Z</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="ripeti-azione" href="#"><span>Ripeti</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+Y</span></a><div class="h-[1px] bg-surface-container-highest my-space-xs"></div><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="copia-oggetti" href="#"><span>Copia</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+C</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="incolla-oggetti" href="#"><span>Incolla</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+V</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="duplica-oggetti" href="#"><span>Duplica</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Ctrl+D</span></a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-between font-body-sm text-body-sm" data-path="elimina-oggetti" href="#"><span>Elimina</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">Canc</span></a></div></div><div class="relative group"><button class="px-space-sm py-space-xs text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface rounded-DEFAULT transition-colors flex items-center gap-space-xs" type="button">Inserisci <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span></button><div class="absolute left-0 top-full hidden group-hover:flex flex-col bg-surface-container-lowest border border-surface-container-highest shadow-[0_4px_12px_rgba(30,35,42,0.16)] py-space-xs min-w-[210px] z-50 rounded-DEFAULT"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="geometria-retta" href="#">Retta infinita</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="geometria-linea" href="#">Linea (continua, tratto...)</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="geometria-cerchio" href="#">Cerchio</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="geometria-arco" href="#">Arco</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="geometria-raccordo" href="#">Raccordo</a><div class="h-[1px] bg-surface-container-highest my-space-xs"></div><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="inserisci-quota" href="#">Quota Lineare</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="inserisci-testo" href="#">Testo tecnico</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="copertura-bianca" href="#">Copertura bianca (maschera)</a></div></div><div class="relative group"><button class="px-space-sm py-space-xs text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface rounded-DEFAULT transition-colors flex items-center gap-space-xs" type="button">Zoom <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span></button><div class="absolute left-0 top-full hidden group-hover:flex flex-col bg-surface-container-lowest border border-surface-container-highest shadow-[0_4px_12px_rgba(30,35,42,0.16)] py-space-xs min-w-[170px] z-50 rounded-DEFAULT"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="zoom-pagina" href="#">Adatta alla pagina</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="zoom-larghezza" href="#">Adatta alla larghezza</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="zoom-100" href="#">100% effettivo</a><div class="h-[1px] bg-surface-container-highest my-space-xs"></div><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="zoom-in" href="#">Zoom +</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-body-sm text-body-sm" data-path="zoom-out" href="#">Zoom -</a></div></div></nav></div><div class="flex items-center gap-space-md"><div class="flex items-center bg-surface-container border border-surface-container-highest rounded-DEFAULT px-space-xs"><button class="px-space-xs py-space-xs font-label-numeric-sm text-label-numeric-sm text-on-surface-variant hover:text-on-surface" title="Diminuisci testo interfaccia" type="button">A-</button><div class="w-[1px] h-3 bg-surface-container-highest"></div><button class="px-space-xs py-space-xs font-label-numeric-sm text-label-numeric-sm text-on-surface-variant hover:text-on-surface" title="Aumenta testo interfaccia" type="button">A+</button></div><div class="flex items-center bg-surface-container border border-surface-container-highest rounded-DEFAULT px-space-xs gap-space-xs"><button class="p-space-xs text-on-surface-variant hover:text-on-surface" title="Zoom out documento" type="button"><span class="material-symbols-outlined text-[16px]">remove</span></button><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface px-space-xs">100%</span><button class="p-space-xs text-on-surface-variant hover:text-on-surface" title="Zoom in documento" type="button"><span class="material-symbols-outlined text-[16px]">add</span></button></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><aside class="fixed left-0 top-10 bottom-7 w-12 bg-surface-container-high border-r border-surface-container-highest z-40 flex flex-col items-center py-space-sm"><nav class="w-full flex flex-col items-center gap-space-xs" data-active-classes="bg-surface-container-lowest text-primary border-primary font-bold"><a aria-current="page" class="w-9 h-9 flex items-center justify-center rounded-DEFAULT bg-surface-container-lowest text-primary border-primary font-bold" data-path="cad-canvas" href="#" title="Selezione [S]"><span class="material-symbols-outlined text-[20px]">near_me</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="geometria-linea" href="#" title="Linea [L]"><span class="material-symbols-outlined text-[20px]">horizontal_rule</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="geometria-cerchio" href="#" title="Cerchio [C]"><span class="material-symbols-outlined text-[20px]">radio_button_unchecked</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="geometria-arco" href="#" title="Arco [A]"><span class="material-symbols-outlined text-[20px]">architecture</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="geometria-raccordo" href="#" title="Raccordo [F]"><span class="material-symbols-outlined text-[20px]">rounded_corner</span></a><div class="w-6 h-[1px] bg-surface-container-highest my-space-xs"></div><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="inserisci-quota" href="#" title="Quota lineare [D]"><span class="material-symbols-outlined text-[20px]">straighten</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="inserisci-testo" href="#" title="Testo tecnico [T]"><span class="material-symbols-outlined text-[20px]">title</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="copertura-bianca" href="#" title="Copertura bianca [W]"><span class="material-symbols-outlined text-[20px]">layers_clear</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="distanza-rilievo" href="#" title="Misura distanza [M]"><span class="material-symbols-outlined text-[20px]">square_foot</span></a><a class="w-9 h-9 flex items-center justify-center rounded-DEFAULT border border-transparent text-on-surface-variant hover:bg-surface-dim hover:text-on-surface" data-path="calibra-scala" href="#" title="Calibra scala metrica"><span class="material-symbols-outlined text-[20px]">tune</span></a></nav></aside><div class="pl-12 pr-[280px]"><main class="w-full pt-10 pb-7 bg-surface-dim min-h-screen"><div class="flex flex-col w-full">
+<!-- Precision HUD & Secondary Tool Command Ribbon -->
+<div class="w-full bg-surface-container-high px-space-md py-space-xs flex items-center justify-between shadow-sm z-30">
+<div class="flex items-center gap-space-md">
+<!-- Quick Action Group -->
+<div class="flex items-center gap-space-xs bg-surface-container-lowest p-space-xs rounded-DEFAULT shadow-sm">
+<button class="w-7 h-7 flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Annulla [Ctrl+Z]" type="button">
+<span class="material-symbols-outlined text-[16px]">undo</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Ripeti [Ctrl+Y]" type="button">
+<span class="material-symbols-outlined text-[16px]">redo</span>
+</button>
+<div class="w-[1px] h-4 bg-surface-container-highest"></div>
+<button class="w-7 h-7 flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Salva rapido [Ctrl+S]" type="button">
+<span class="material-symbols-outlined text-[16px]">save</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Stampa vettoriale" type="button">
+<span class="material-symbols-outlined text-[16px]">print</span>
+</button>
+</div>
+<!-- Active Tool Feedback Banner -->
+<div class="flex items-center gap-space-sm bg-primary text-on-primary px-space-md py-space-xs rounded-DEFAULT shadow-sm">
+<span class="material-symbols-outlined text-[16px]">straighten</span>
+<span class="font-headline-sm text-headline-sm uppercase tracking-wider">Quota Lineare Attiva</span>
+<span class="font-label-numeric-sm text-label-numeric-sm bg-primary-container text-on-primary-container px-space-xs rounded-DEFAULT">P1 Selezionato &gt; Snap P2...</span>
+</div>
+<!-- Drawing Mode Radios -->
+<div class="flex items-center gap-space-xs bg-surface-container p-space-xs rounded-DEFAULT">
+<button class="px-space-sm py-space-xs rounded-DEFAULT bg-surface-container-lowest text-on-surface font-headline-sm text-headline-sm shadow-sm flex items-center gap-space-xs" type="button">
+<span class="material-symbols-outlined text-[14px] text-tertiary">check</span> Allineata
+        </button>
+<button class="px-space-sm py-space-xs rounded-DEFAULT text-on-surface-variant hover:text-on-surface font-body-sm text-body-sm" type="button">
+          Orizzontale
+        </button>
+<button class="px-space-sm py-space-xs rounded-DEFAULT text-on-surface-variant hover:text-on-surface font-body-sm text-body-sm" type="button">
+          Verticale
+        </button>
+<button class="px-space-sm py-space-xs rounded-DEFAULT text-on-surface-variant hover:text-on-surface font-body-sm text-body-sm" type="button">
+          Diametro (Ø)
+        </button>
+</div>
+</div>
+<!-- Active Metric Coordinates & Scale Status -->
+<div class="flex items-center gap-space-md font-label-numeric-sm text-label-numeric-sm">
+<div class="flex items-center gap-space-xs bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT shadow-sm">
+<span class="text-on-surface-variant">LUNGHEZZA:</span>
+<span class="font-headline-sm text-headline-sm text-primary">35.000 mm</span>
+</div>
+<div class="flex items-center gap-space-xs bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT shadow-sm">
+<span class="text-on-surface-variant">ANGOLO:</span>
+<span class="text-on-surface">90.00°</span>
+</div>
+<div class="flex items-center gap-space-xs text-on-surface-variant bg-surface-container px-space-sm py-space-xs rounded-DEFAULT">
+<span class="material-symbols-outlined text-[14px]">grid_4x4</span>
+<span>Passo Griglia: 5.00 mm</span>
+</div>
+</div>
+</div>
+<!-- CAD Drafting Area with Canvas & Rulers -->
+<div class="relative w-full overflow-hidden flex flex-col bg-surface-dim select-none" style="height: calc(100vh - 68px);">
+<!-- Horizontal Precision Metric Ruler -->
+<div class="w-full h-5 bg-surface-container-high flex items-center shadow-sm z-20 overflow-hidden pl-5">
+<svg class="w-full h-full text-on-surface-variant" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<pattern height="20" id="ruler-x" patternunits="userSpaceOnUse" width="50">
+<line stroke="currentColor" stroke-width="1" x1="0" x2="0" y1="12" y2="20"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="10" x2="10" y1="16" y2="20"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="20" x2="20" y1="16" y2="20"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="30" x2="30" y1="16" y2="20"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="40" x2="40" y1="16" y2="20"></line>
+<text fill="currentColor" font-family="JetBrains Mono" font-size="8" x="3" y="10">50</text>
+</pattern>
+</defs>
+<rect fill="url(#ruler-x)" height="100%" width="100%"></rect>
+</svg>
+</div>
+<div class="flex flex-1 relative overflow-auto">
+<!-- Vertical Precision Metric Ruler -->
+<div class="w-5 bg-surface-container-high flex flex-col items-center shadow-sm z-20 overflow-hidden shrink-0">
+<svg class="w-full h-full text-on-surface-variant" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<pattern height="50" id="ruler-y" patternunits="userSpaceOnUse" width="20">
+<line stroke="currentColor" stroke-width="1" x1="12" x2="20" y1="0" y2="0"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="16" x2="20" y1="10" y2="10"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="16" x2="20" y1="20" y2="20"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="16" x2="20" y1="30" y2="30"></line>
+<line stroke="currentColor" stroke-width="0.75" x1="16" x2="20" y1="40" y2="40"></line>
+<text fill="currentColor" font-family="JetBrains Mono" font-size="8" x="2" y="8">50</text>
+</pattern>
+</defs>
+<rect fill="url(#ruler-y)" height="100%" width="100%"></rect>
+</svg>
+</div>
+<!-- Main Canvas Viewport Area -->
+<div class="flex-1 overflow-auto p-space-xl flex items-center justify-center relative bg-surface-dim">
+<!-- Interactive CAD Floating Mini-Toolbar for Quick Editing -->
+<div class="absolute top-space-lg left-space-xl z-30 bg-surface-container-lowest p-space-xs rounded-DEFAULT shadow-md flex items-center gap-space-xs">
+<button class="p-space-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Centra Vista" type="button">
+<span class="material-symbols-outlined text-[18px]">fit_screen</span>
+</button>
+<button class="p-space-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Riquadro Maschera Bianca" type="button">
+<span class="material-symbols-outlined text-[18px]">crop_square</span>
+</button>
+<button class="p-space-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-DEFAULT" title="Allinea Quote Automaticamente" type="button">
+<span class="material-symbols-outlined text-[18px]">format_align_center</span>
+</button>
+<div class="w-[1px] h-4 bg-surface-container-highest"></div>
+<span class="font-label-numeric-sm text-label-numeric-sm text-tertiary px-space-xs uppercase font-semibold">Foglio A3 [420x297]</span>
+</div>
+<!-- Sheet Shadow Wrapper (A3 Landscape representation) -->
+<div class="relative bg-surface-container-lowest shadow-2xl transition-transform duration-150 origin-center" style="width: 1040px; height: 735px; min-width: 1040px; min-height: 735px;">
+<!-- Outer Sheet Border & Margin Ring (ISO standard) -->
+<div class="absolute inset-3 pointer-events-none z-10 flex flex-col justify-between">
+<!-- Grid Reference Letters & Numbers -->
+<div class="flex justify-between items-center px-4 font-label-numeric-sm text-label-numeric-sm text-on-surface-variant opacity-60">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>
+</div>
+<div class="flex justify-between items-center px-4 font-label-numeric-sm text-label-numeric-sm text-on-surface-variant opacity-60">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>
+</div>
+</div>
+<!-- Technical Drawing Vector Graphic Plane -->
+<svg class="w-full h-full" viewbox="0 0 1040 735" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<!-- Arrowhead Marker (Standard ISO 129 Technical Dimension Red) -->
+<marker id="arrow-red" markerheight="6" markerwidth="6" orient="auto-start-reverse" refx="10" refy="5" viewbox="0 0 10 10">
+<path d="M 0 2 L 10 5 L 0 8 z" fill="#BA1A1A"></path>
+</marker>
+<!-- Arrowhead Marker (Active Dimension Orange) -->
+<marker id="arrow-orange" markerheight="6" markerwidth="6" orient="auto-start-reverse" refx="10" refy="5" viewbox="0 0 10 10">
+<path d="M 0 2 L 10 5 L 0 8 z" fill="#CD4700"></path>
+</marker>
+<!-- Arrowhead Marker (Standard Drafting Black) -->
+<marker id="arrow-black" markerheight="6" markerwidth="6" orient="auto-start-reverse" refx="10" refy="5" viewbox="0 0 10 10">
+<path d="M 0 2 L 10 5 L 0 8 z" fill="#171C23"></path>
+</marker>
+<!-- Technical 45-degree Cross Hatching Pattern for Section View -->
+<pattern height="8" id="iso-hatch" patterntransform="rotate(45 0 0)" patternunits="userSpaceOnUse" width="8">
+<line stroke="#171C23" stroke-opacity="0.7" stroke-width="0.6" x1="0" x2="0" y1="0" y2="8"></line>
+</pattern>
+<!-- Background Technical Engineering Grid Sub-Layer -->
+<pattern height="20" id="blueprint-grid" patternunits="userSpaceOnUse" width="20">
+<path d="M 20 0 L 0 0 0 20" fill="none" stroke="#F0F4FD" stroke-width="0.75"></path>
+</pattern>
+</defs>
+<!-- Sheet Background Grid Tint -->
+<rect fill="url(#blueprint-grid)" height="711" width="1016" x="12" y="12"></rect>
+<!-- Sheet Inner Solid Framing (20mm border offset) -->
+<rect fill="none" height="685" stroke="#171C23" stroke-width="1.5" width="990" x="25" y="25"></rect>
+<!-- ========================================== -->
+<!-- VISTA FRONTALE FLANGIA CNC (PROIEZIONE X-Y) -->
+<!-- Centro: X=360, Y=330                       -->
+<!-- ========================================== -->
+<!-- Asse di Simmetria Verticale & Orizzontale (Tratto-Punto ISO) -->
+<g opacity="0.85" stroke="#006876" stroke-dasharray="14,3,3,3" stroke-width="0.75">
+<line x1="160" x2="560" y1="330" y2="330"></line>
+<line x1="360" x2="360" y1="130" y2="530"></line>
+<!-- Diagonal Axis for Hole Pattern -->
+<line x1="220" x2="500" y1="190" y2="470"></line>
+<line x1="220" x2="500" y1="470" y2="190"></line>
+</g>
+<!-- Diametro Esterno Ø 120 mm (R=180px in scala grafica) -->
+<circle cx="360" cy="330" fill="#FFFFFF" fill-opacity="0.9" r="180" stroke="#171C23" stroke-width="2"></circle>
+<!-- Diametro Circonferenza Primitiva PCD 90 mm (R=135px, Tratto-Punto) -->
+<circle cx="360" cy="330" fill="none" r="135" stroke="#006876" stroke-dasharray="8,3,2,3" stroke-width="0.8"></circle>
+<!-- Foro Centrale Ø 50 mm (R=75px) -->
+<circle cx="360" cy="330" fill="#FFFFFF" r="75" stroke="#171C23" stroke-width="2"></circle>
+<!-- Sede Linguetta / Chiavetta DIN 6885 (Keyway Slot) -->
+<path d="M 353 255 L 367 255 L 367 267 A 75 75 0 0 1 353 267 Z" fill="#FFFFFF" stroke="#171C23" stroke-width="2"></path>
+<!-- 4x Fori di Fissaggio su PCD 90 (Ø 10.5 mm = R=15.75px) a 45°, 135°, 225°, 315° -->
+<!-- Hole 1 (45°: X = 360 + 95.4 = 455.4, Y = 330 - 95.4 = 234.6) -->
+<circle cx="455.4" cy="234.6" fill="#FFFFFF" r="15.75" stroke="#171C23" stroke-width="1.8"></circle>
+<circle cx="455.4" cy="234.6" fill="#171C23" r="1.5"></circle>
+<!-- Hole 2 (135°: X = 455.4, Y = 425.4) -->
+<circle cx="455.4" cy="425.4" fill="#FFFFFF" r="15.75" stroke="#171C23" stroke-width="1.8"></circle>
+<circle cx="455.4" cy="425.4" fill="#171C23" r="1.5"></circle>
+<!-- Hole 3 (225°: X = 264.6, Y = 425.4) -->
+<circle cx="264.6" cy="425.4" fill="#FFFFFF" r="15.75" stroke="#171C23" stroke-width="1.8"></circle>
+<circle cx="264.6" cy="425.4" fill="#171C23" r="1.5"></circle>
+<!-- Hole 4 (315°: X = 264.6, Y = 234.6) -->
+<circle cx="264.6" cy="234.6" fill="#FFFFFF" r="15.75" stroke="#171C23" stroke-width="1.8"></circle>
+<circle cx="264.6" cy="234.6" fill="#171C23" r="1.5"></circle>
+<!-- Smusso di Ingresso 2x45° tratteggio concentrico sottile -->
+<circle cx="360" cy="330" fill="none" r="176" stroke="#171C23" stroke-dasharray="3,2" stroke-width="0.75"></circle>
+<!-- ==================================================== -->
+<!-- SEZIONE A-A (VISTA LATERALE CON CAMPITURA MECCANICA) -->
+<!-- Centro: X=780, Y=330                                 -->
+<!-- ==================================================== -->
+<!-- Linea di Asse Sezione -->
+<line stroke="#006876" stroke-dasharray="14,3,3,3" stroke-width="0.75" x1="680" x2="880" y1="330" y2="330"></line>
+<!-- Campitura Flangia Metà Superiore (Tratteggio Sezione ISO) -->
+<path d="M 720 150 L 840 150 L 840 255 L 772.5 255 L 772.5 190 L 720 190 Z" fill="url(#iso-hatch)" stroke="#171C23" stroke-width="2"></path>
+<!-- Campitura Flangia Metà Inferiore (Tratteggio Sezione ISO) -->
+<path d="M 720 510 L 840 510 L 840 405 L 772.5 405 L 772.5 470 L 720 470 Z" fill="url(#iso-hatch)" stroke="#171C23" stroke-width="2"></path>
+<!-- Fori passanti in sezione (Superiore e Inferiore) -->
+<rect fill="#FFFFFF" height="31.5" stroke="#171C23" stroke-width="1.5" width="52.5" x="720" y="218.85"></rect>
+<line stroke="#006876" stroke-dasharray="8,2,2,2" stroke-width="0.5" x1="710" x2="780" y1="234.6" y2="234.6"></line>
+<rect fill="#FFFFFF" height="31.5" stroke="#171C23" stroke-width="1.5" width="52.5" x="720" y="409.65"></rect>
+<line stroke="#006876" stroke-dasharray="8,2,2,2" stroke-width="0.5" x1="710" x2="780" y1="425.4" y2="425.4"></line>
+<!-- Gradino Spallamento Flangia (Hub) -->
+<line stroke="#171C23" stroke-dasharray="2,2" stroke-width="1" x1="772.5" x2="772.5" y1="150" y2="510"></line>
+<!-- Etichetta Sezione A-A -->
+<text fill="#171C23" font-family="Inter" font-size="13" font-weight="700" text-anchor="middle" x="750" y="110">SEZIONE A - A</text>
+<!-- ============================================== -->
+<!-- QUOTE DIN/ISO COMPLETE (MARKUP TECNICO ROSSO)  -->
+<!-- Colore: #BA1A1A (Rosso Tecnico Normato)        -->
+<!-- ============================================== -->
+<!-- 1. QUOTA DIAMETRO ESTERNO Ø 120 ±0.1 -->
+<g stroke="#BA1A1A" stroke-width="1">
+<!-- Linee di estensione -->
+<line x1="360" x2="110" y1="150" y2="150"></line>
+<line x1="360" x2="110" y1="510" y2="510"></line>
+<!-- Linea di quota con frecce -->
+<line marker-end="url(#arrow-red)" marker-start="url(#arrow-red)" x1="125" x2="125" y1="150" y2="510"></line>
+</g>
+<!-- Badge Quota Ø 120 -->
+<g transform="translate(95, 330) rotate(-90)">
+<rect fill="#FFFFFF" height="18" rx="1" stroke="#BA1A1A" stroke-width="1" width="84" x="-42" y="-9"></rect>
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="4">Ø 120 ±0.1</text>
+</g>
+<!-- 2. QUOTA FORO CENTRALE Ø 50 H7 -->
+<g stroke="#BA1A1A" stroke-width="1">
+<line x1="307" x2="220" y1="383" y2="470"></line>
+<line x1="220" x2="140" y1="470" y2="470"></line>
+<!-- Freccia puntatore su diametro -->
+<line marker-start="url(#arrow-red)" x1="307" x2="313" y1="383" y2="377"></line>
+</g>
+<g transform="translate(180, 464)">
+<rect fill="#FFFFFF" height="18" rx="1" stroke="#BA1A1A" stroke-width="1" width="70" x="-35" y="-12"></rect>
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="1">Ø 50 H7</text>
+</g>
+<!-- 3. QUOTA PCD 90 mm (Circonferenza Primitiva Fori) -->
+<g stroke="#BA1A1A" stroke-width="1">
+<path d="M 455 235 A 135 135 0 0 1 475 270" fill="none"></path>
+<line x1="470" x2="550" y1="260" y2="230"></line>
+<line x1="550" x2="615" y1="230" y2="230"></line>
+<circle cx="455.4" cy="234.6" fill="#BA1A1A" r="2"></circle>
+</g>
+<g transform="translate(580, 224)">
+<rect fill="#FFFFFF" height="18" rx="1" stroke="#BA1A1A" stroke-width="1" width="60" x="-30" y="-12"></rect>
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="1">PCD 90</text>
+</g>
+<!-- 4. QUOTA 4x FORI Ø 10.5 mm -->
+<g stroke="#BA1A1A" stroke-width="1">
+<line x1="466" x2="540" y1="436" y2="510"></line>
+<line x1="540" x2="640" y1="510" y2="510"></line>
+<line marker-start="url(#arrow-red)" x1="466" x2="460" y1="436" y2="430"></line>
+</g>
+<g transform="translate(590, 504)">
+<rect fill="#FFFFFF" height="18" rx="1" stroke="#BA1A1A" stroke-width="1" width="84" x="-42" y="-12"></rect>
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="1">4x Ø 10.5</text>
+</g>
+<!-- 5. QUOTA ALTEZZA FLANGIA IN SEZIONE: H = 35.00 mm -->
+<g stroke="#BA1A1A" stroke-width="1">
+<line x1="720" x2="720" y1="140" y2="70"></line>
+<line x1="840" x2="840" y1="140" y2="70"></line>
+<line marker-end="url(#arrow-red)" marker-start="url(#arrow-red)" x1="720" x2="840" y1="80" y2="80"></line>
+</g>
+<g transform="translate(780, 75)">
+<rect fill="#FFFFFF" height="18" rx="1" stroke="#BA1A1A" stroke-width="1" width="96" x="-48" y="-10"></rect>
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="3">H = 35.00 mm</text>
+</g>
+<!-- 6. QUOTA SMUSSO 2x45° -->
+<g stroke="#BA1A1A" stroke-width="1">
+<line x1="840" x2="880" y1="150" y2="120"></line>
+<line x1="880" x2="940" y1="120" y2="120"></line>
+<line marker-start="url(#arrow-red)" x1="840" x2="845" y1="150" y2="146"></line>
+</g>
+<g transform="translate(910, 114)">
+<text fill="#BA1A1A" font-family="JetBrains Mono" font-size="10" font-weight="700" x="0" y="0">2 x 45°</text>
+</g>
+<!-- ======================================================= -->
+<!-- LIVE DRAFTING ACTION: QUOTATURA IN CORSO (SAFETY ORANGE) -->
+<!-- ======================================================= -->
+<g id="active-dimension-layer">
+<!-- Linea di Estensione Origine P1 (Spallamento Hub) -->
+<line stroke="#CD4700" stroke-dasharray="3,3" stroke-width="1.25" x1="772.5" x2="772.5" y1="510" y2="570"></line>
+<!-- Linea di Estensione Target P2 (Faccia Anteriore Flangia) -->
+<line stroke="#CD4700" stroke-dasharray="3,3" stroke-width="1.25" x1="840" x2="840" y1="510" y2="570"></line>
+<!-- Vettore di Quota Dinamico con frecce arancio alta visibilità -->
+<line marker-end="url(#arrow-orange)" marker-start="url(#arrow-orange)" stroke="#CD4700" stroke-width="1.5" x1="772.5" x2="840" y1="555" y2="555"></line>
+<!-- Valore Quota Fluttuante (HUD Badge) -->
+<g transform="translate(806, 555)">
+<rect fill="#FFFFFF" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.15))" height="22" rx="2" stroke="#CD4700" stroke-width="1.5" width="64" x="-32" y="-11"></rect>
+<text fill="#CD4700" font-family="JetBrains Mono" font-size="11" font-weight="700" text-anchor="middle" x="0" y="4">18.50 mm</text>
+</g>
+<!-- SNAP INDICATOR (Punto Intersezione / Spigolo Attivo: X=840, Y=510) -->
+<!-- Cyan Precision Target Indicator -->
+<g transform="translate(840, 510)">
+<!-- Translucent Halo -->
+<circle cx="0" cy="0" fill="#008376" fill-opacity="0.18" r="14"></circle>
+<!-- Reticolo Target -->
+<rect fill="none" height="12" stroke="#008376" stroke-width="2" width="12" x="-6" y="-6"></rect>
+<line stroke="#008376" stroke-width="1.5" x1="-9" x2="9" y1="0" y2="0"></line>
+<line stroke="#008376" stroke-width="1.5" x1="0" x2="0" y1="-9" y2="9"></line>
+<!-- Snap Tooltip Monospace -->
+<g transform="translate(18, -12)">
+<rect fill="#171C23" height="20" rx="1" width="86" x="0" y="0"></rect>
+<text fill="#8DF5E4" font-family="JetBrains Mono" font-size="9.5" font-weight="600" x="6" y="14">SNAP: SPIGOLO</text>
+</g>
+</g>
+<!-- Linea Guida Dinamica del Cursore Reticolo -->
+<line opacity="0.6" stroke="#006876" stroke-dasharray="2,4" stroke-width="0.5" x1="840" x2="840" y1="20" y2="700"></line>
+<line opacity="0.6" stroke="#006876" stroke-dasharray="2,4" stroke-width="0.5" x1="20" x2="1000" y1="510" y2="510"></line>
+</g>
+<!-- ============================================== -->
+<!-- CARTELLINO TITOLO UNIFICATO (TITLE BLOCK DIN)  -->
+<!-- Posizione Angolo Inferiore Destro              -->
+<!-- ============================================== -->
+<g transform="translate(635, 595)">
+<!-- Bordo Cartiglio Principale (ISO 7200) -->
+<rect fill="#FFFFFF" height="115" stroke="#171C23" stroke-width="1.5" width="380" x="0" y="0"></rect>
+<!-- Griglia Interna Cartiglio -->
+<line stroke="#171C23" stroke-width="1" x1="0" x2="380" y1="30" y2="30"></line>
+<line stroke="#171C23" stroke-width="1" x1="0" x2="380" y1="65" y2="65"></line>
+<line stroke="#171C23" stroke-width="1" x1="0" x2="380" y1="90" y2="90"></line>
+<line stroke="#171C23" stroke-width="1" x1="190" x2="190" y1="0" y2="65"></line>
+<line stroke="#171C23" stroke-width="1" x1="285" x2="285" y1="0" y2="65"></line>
+<line stroke="#171C23" stroke-width="1" x1="95" x2="95" y1="65" y2="115"></line>
+<line stroke="#171C23" stroke-width="1" x1="260" x2="260" y1="65" y2="115"></line>
+<!-- Testi Cartiglio -->
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="8" y="12">AZIENDA / COMMITTENTE</text>
+<text fill="#171C23" font-family="Inter" font-size="10" font-weight="700" x="8" y="24">OFFICINA MECCANICA CNC S.R.L.</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="198" y="12">DISEGNATORE</text>
+<text fill="#171C23" font-family="Inter" font-size="9" x="198" y="24">M. FERRARI (CAD/CAM)</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="293" y="12">DATA APPROVAZIONE</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="9" x="293" y="24">2025-05-14</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="8" y="44">DENOMINAZIONE COMPONENTE</text>
+<text fill="#171C23" font-family="Inter" font-size="12" font-weight="700" x="8" y="58">FLANGIA DI ACCOPPIAMENTO Ø120</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="198" y="44">MATERIALE GREZZO</text>
+<text fill="#171C23" font-family="Inter" font-size="9" x="198" y="58">AISI 304 (1.4301)</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="293" y="44">PESO STIMATO</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="9" x="293" y="58">1.84 kg</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="8" y="77">SCALA METRICA</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="9" font-weight="700" x="8" y="87">1 : 1</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="103" y="77">TOLLERANZE GENERALI</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="8.5" x="103" y="87">ISO 2768-mK</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="268" y="77">NUMERO DISEGNO</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="9.5" font-weight="700" x="268" y="87">DWG-CNC-2025-048</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="8" y="104">FOGLIO</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="8" x="50" y="104">1 / 1 (A3)</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="103" y="104">RUGOSITÀ GENERALE</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="8" x="210" y="104">Ra 1.6 µm</text>
+<text fill="#5A4138" font-family="Inter" font-size="7.5" font-weight="700" x="268" y="104">STATO REVISIONE</text>
+<text fill="#171C23" font-family="JetBrains Mono" font-size="8" x="345" y="104">REV. B</text>
+</g>
+</svg>
+<!-- Floating Interactive Measure Tooltip near Cursor -->
+<div class="absolute top-[575px] left-[845px] z-30 bg-surface-container-lowest border border-surface-container-highest shadow-xl p-space-xs rounded-DEFAULT flex flex-col gap-space-xs pointer-events-none">
+<div class="flex items-center gap-space-xs text-on-surface">
+<span class="material-symbols-outlined text-[14px] text-primary">navigation</span>
+<span class="font-headline-sm text-headline-sm">Click: Conferma Quota</span>
+</div>
+<div class="flex items-center justify-between text-on-surface-variant font-label-numeric-sm text-label-numeric-sm border-t border-surface-container-highest pt-space-xs gap-space-md">
+<span>ΔX: +67.50 mm</span>
+<span>ΔY: 0.00 mm</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Interactive Coordinate Script for Visual Verification -->
+<script>
+    (function initCadCanvasInteractivity() {
+      const container = document.querySelector('svg');
+      if (!container) return;
+      
+      // Dynamic snap hover feedback simulation
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const activeLayer = document.getElementById('active-dimension-layer');
+          if (activeLayer) {
+            activeLayer.style.opacity = activeLayer.style.opacity === '0.3' ? '1' : '0.3';
+          }
+        }
+      });
+    })();
+  </script>
+</div></main></div><aside class="fixed right-0 top-10 bottom-7 w-[280px] bg-surface-container-low border-l border-surface-container-highest z-40 flex flex-col"><div class="h-8 px-space-md border-b border-surface-container-highest flex items-center justify-between bg-surface-container-high"><span class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase tracking-wider">Proprietà Oggetto</span><span class="material-symbols-outlined text-on-surface-variant text-[16px]">tune</span></div><div class="flex-1 overflow-y-auto p-space-md flex flex-col gap-space-md"><div class="flex flex-col gap-space-xs"><label class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase">Colore Linea</label><div class="flex items-center gap-space-xs"><div class="w-6 h-6 border border-surface-container-highest bg-on-surface rounded-DEFAULT"></div><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface">#171C23 (Nero Tecnico)</span></div></div><div class="flex flex-col gap-space-xs"><label class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase">Spessore Tratto</label><div class="flex items-center justify-between border border-surface-container-highest bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT"><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface">0.25 mm</span><span class="material-symbols-outlined text-[14px] text-on-surface-variant">unfold_more</span></div></div><div class="flex flex-col gap-space-xs"><label class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase">Tipo Linea</label><div class="flex items-center justify-between border border-surface-container-highest bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT"><span class="font-body-sm text-body-sm text-on-surface">Continua (ISO 128)</span><span class="material-symbols-outlined text-[14px] text-on-surface-variant">unfold_more</span></div></div><div class="flex flex-col gap-space-xs"><label class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase">Altezza Testo / Quota</label><div class="flex items-center justify-between border border-surface-container-highest bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT"><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface">3.50 mm</span><span class="material-symbols-outlined text-[14px] text-on-surface-variant">straighten</span></div></div><div class="h-[1px] bg-surface-container-highest my-space-xs"></div><div class="flex flex-col gap-space-xs"><label class="font-label-micro-header text-label-micro-header text-on-surface-variant uppercase">Precisione Tolleranza</label><div class="flex items-center justify-between border border-surface-container-highest bg-surface-container-lowest px-space-sm py-space-xs rounded-DEFAULT"><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface">± 0.05 mm</span><span class="font-label-numeric-sm text-label-numeric-sm text-on-surface-variant">DIN 7168</span></div></div></div></aside><footer class="fixed bottom-0 left-0 right-0 h-7 bg-surface-container-high border-t border-surface-container-highest z-50 flex items-center justify-between px-margin font-label-numeric-sm text-label-numeric-sm text-on-surface"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-sm"><span class="text-on-surface-variant">COORD</span><span class="text-on-surface bg-surface-container px-space-xs rounded-DEFAULT border border-surface-container-highest">X: 142.50 mm</span><span class="text-on-surface bg-surface-container px-space-xs rounded-DEFAULT border border-surface-container-highest">Y: 88.25 mm</span></div><div class="w-[1px] h-3 bg-surface-container-highest"></div><div class="flex items-center gap-space-xs"><span class="text-on-surface-variant">SCALA:</span><span class="text-tertiary font-semibold">1:1 (Calibrata: 100mm)</span></div></div><div class="flex items-center gap-space-xs"><span class="text-on-surface-variant mr-space-xs font-label-micro-header text-label-micro-header uppercase">Snap:</span><button class="px-space-xs py-space-xs rounded-DEFAULT border border-tertiary-container bg-surface-container-lowest text-tertiary font-semibold" type="button">Estremo</button><button class="px-space-xs py-space-xs rounded-DEFAULT border border-tertiary-container bg-surface-container-lowest text-tertiary font-semibold" type="button">Punto medio</button><button class="px-space-xs py-space-xs rounded-DEFAULT border border-tertiary-container bg-surface-container-lowest text-tertiary font-semibold" type="button">Centro</button><button class="px-space-xs py-space-xs rounded-DEFAULT border border-surface-container-highest text-on-surface-variant hover:text-on-surface" type="button">Intersezione</button><button class="px-space-xs py-space-xs rounded-DEFAULT border border-surface-container-highest text-on-surface-variant hover:text-on-surface" type="button">Ortogonale [F8]</button><button class="px-space-xs py-space-xs rounded-DEFAULT border border-surface-container-highest text-on-surface-variant hover:text-on-surface" type="button">Griglia [F7]</button></div></footer></body></html>
