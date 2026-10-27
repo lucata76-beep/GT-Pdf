@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mmToPt } from './pixels';
-import { REFERENCE_100MM_PT, calibrate, ptForRealMm, realMm, scaleN, sheetMm } from './scale';
+import { REFERENCE_100MM_PT, calibrate, ptForRealMm, realMm, scaleLabel, scaleN, sheetMm } from './scale';
 
 describe('formule di scala (DESIGN.md)', () => {
   it('100 mm sul foglio = 283.46 pt', () => {
@@ -51,5 +51,19 @@ describe('formule di scala (DESIGN.md)', () => {
     expect(calibrate(100, -3)).toBeNull();
     expect(calibrate(Number.NaN, 100)).toBeNull();
     expect(calibrate(100, Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe('etichetta della scala', () => {
+  const label = (dPt: number, realMm: number): string => {
+    const s = calibrate(dPt, realMm);
+    if (!s) throw new Error('scala non calcolata');
+    return scaleLabel(s);
+  };
+  it('1:N con "." e senza zeri inutili', () => {
+    expect(label(mmToPt(40), 2000)).toBe('1:50');
+    expect(label(mmToPt(40), 100)).toBe('1:2.5');
+    expect(label(mmToPt(20), 10)).toBe('1:0.5');
+    expect(label(283.46, 100)).toBe('1:1');
   });
 });

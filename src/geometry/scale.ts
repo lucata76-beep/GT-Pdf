@@ -3,6 +3,7 @@
 //   mm_reali_per_pt = L_reale_mm / d_pt
 //   scala 1:N con N = L_reale_mm / foglio_mm
 // Le distanze `d_pt` sono sempre in pt FISICI del foglio (1/72 in), mai pixel di schermo: la scala non dipende dallo zoom.
+import { fmtTrim } from './numbers';
 import { mmToPt, ptToMm } from './pixels';
 
 export interface PageScale {
@@ -30,3 +31,6 @@ export const ptForRealMm = (mm: number, s: PageScale): number => mm / s.mmPerPt;
 
 /** 100 mm sul foglio, in pt (riferimento dei PDF di prova). */
 export const REFERENCE_100MM_PT = mmToPt(100);
+
+/** Etichetta "1:N" (es. "1:50", "1:2.5", "1:0.5"), con "." come separatore decimale. */
+export const scaleLabel = (s: PageScale): string => `1:${fmtTrim(scaleN(s), 2)}`;
