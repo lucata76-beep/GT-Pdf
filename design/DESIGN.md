@@ -185,7 +185,8 @@ Regole:
 ## 3. Tipografia
 
 - UI: `Inter` (pesi 400, 500, 600, 700 solo per `label-micro-header`), fallback `-apple-system, "Segoe UI", sans-serif`.
-- Tutti i numeri (coordinate, quote, scale, input numerici, ΔX/ΔY): `JetBrains Mono`, fallback `"SF Mono", Consolas, monospace`, con `font-variant-numeric: tabular-nums`.
+- Tutti i numeri dell'interfaccia (coordinate, scale, input numerici, ΔX/ΔY, badge di Distanza, valori nel tastierino): `JetBrains Mono`, fallback `"SF Mono", Consolas, monospace`, con `font-variant-numeric: tabular-nums`.
+- Fanno eccezione i testi che stanno sul foglio e finiscono nel PDF esportato: i **testi** e le **etichette delle quote** sono in **Helvetica** (decisione 6 di `docs/PIANO.md`; l'esportazione non puo' incorporare JetBrains Mono e cosi' l'etichetta ha la stessa larghezza nell'app e nel file).
 - Scale e dimensioni: i token `typography.*` del frontmatter.
 - Font e icone vanno inclusi nel repository (self-host), non caricati da CDN. Verificare la licenza di ogni font/icona al momento dell'inclusione (NON VERIFICATO).
 
@@ -225,9 +226,9 @@ Campi numerici
 - Altezza 28px (desktop), >= 44px (iPhone). `JetBrains Mono` 12px. Fondo bianco, bordo 1px `cad.border`, raggio 2px. Focus: bordo 1px `cad.accent-stroke`, senza alone. Prefisso asse/grandezza (`X:`, `Y:`, `R:`, `L:`) in `cad.text-secondary`; unita' (`mm`, `°`) in `cad.text-secondary`.
 
 Quota sul disegno
-- Linee di estensione sottili, frecce, testo in `JetBrains Mono`. Etichetta in badge bianco, raggio 2px, bordo 1px. Colore: `dimension-default` (modificabile). In costruzione: `measure`.
+- Linee di estensione sottili, frecce, etichetta in **Helvetica** (non JetBrains Mono: vedi sezione 3). Etichetta in badge bianco, angoli vivi, bordo sottile. Colore: `dimension-default` (modificabile). In costruzione: `measure`.
 - Prefissi: `Ø` solo per quota di diametro, `R` solo per raggio.
-- Stile esatto di frecce e proporzioni (fissato in CP3, di progetto, NON da una norma): vedere "Testo, quote e tastierino (CP3)" sotto e `docs/PIANO.md` (Scelte di CP3). Nell'app l'etichetta e' in Helvetica (come nel PDF esportato, decisione 6) e non in JetBrains Mono.
+- Stile esatto di frecce e proporzioni (fissato in CP3, di progetto, NON da una norma): vedere "Testo, quote e tastierino (CP3)" sotto e `docs/PIANO.md` (Scelte di CP3).
 - Tipi di quota: lineare (allineata, orizzontale, verticale), diametro, raggio. Valore automatico dalla scala oppure digitato.
 
 Snap (V2: gli snap sugli oggetti, a partire da Estremo e Punto medio, non sono in V1; in V1 c'e' solo ORTO)
@@ -256,7 +257,7 @@ Dialog Calibra scala
 
 Barra contestuale e proprieta' della linea (CP2)
 - Compare sopra la barra di stato solo quando e' attivo uno strumento diverso da "Sposta vista" (su iPhone la palette e la barra di stato restano ferme). Una riga di testo guida con il passo corrente ("Retta: indica il secondo punto") e, sotto, il riquadro delle proprieta' (linea in miniatura con tipo, colore e spessore: apre il pannello), `Annulla` (scarta i punti in costruzione) e, per la Linea, `Fine`. Sul desktop il riquadro non c'e': le stesse proprieta' stanno nell'inspector.
-- Pannello proprieta': tipo (Continua, Tratto-punto, Tratteggiata), colore (8 della tavolozza + selettore nativo + campo `#RRGGBB`), spessore in pt (predefiniti 0.25, 0.5, 0.75, 1, 1.5, 2, 3 + campo digitabile 0.1-20), `Applica all'ultima linea`. Stato attivo: bordo 1px `cad.accent-stroke`.
+- Pannello proprieta': tipo (Continua, Tratto-punto, Tratteggiata), colore (8 della tavolozza + selettore nativo + campo `#RRGGBB`), spessore in pt (predefiniti 0.25, 0.5, 0.75, 1, 1.5, 2, 3 + campo digitabile 0.1-20). Stato attivo: bordo 1px `cad.accent-stroke`. Il pulsante `Applica all'ultima linea` di CP2 e' stato tolto in CP4: con Seleziona gli stessi controlli cambiano le proprieta' di un oggetto qualunque (vedi "Coperture e Seleziona (CP4)").
 - Barra di stato: `SCALA:` (tocco = calibra) e interruttore `ORTO` (attivo = fondo `cad.accent-fill`, testo bianco).
 - Misura (Distanza): linea e segni in `cad.measure`; badge bianco con `L`, `ΔX`, `ΔY` (livello 2). Cancella: la linea sotto il dito e' evidenziata in `cad.measure` prima di essere cancellata.
 - Pattern dei tipi di linea e valori predefiniti: vedere `docs/PIANO.md` (Scelte di CP2); sono in pt del foglio, in funzione dello spessore.
@@ -267,6 +268,15 @@ Testo, quote e tastierino (CP3)
 - Barra contestuale della Quota: una riga con i cinque tipi (Allineata, Orizz., Vert., Ø Diam., R Raggio), poi proprieta' (linea in miniatura + `Aa` con l'altezza), `Annulla`.
 - Tastierino: compare solo mentre si scrive; iPhone in verticale in basso al posto di barre, palette e pulsanti sul foglio; in orizzontale a destra del foglio; desktop sotto il foglio. Mostra titolo, riga informativa (valore automatico e scala, o "Pagina non calibrata"), il valore (non e' un campo di testo: la tastiera di sistema non compare) con il cursore in coda e, se il valore e' proposto, la selezione.
 - Tasti >= 44 x 44 pt.
+
+Coperture e Seleziona (CP4)
+- Copertura: strumento in palette (icona quadrato). Forme nella barra contestuale: `Rettangolo`, `Quadrato`, `Cerchio` (tre pulsanti >= 44 px). Rettangolo: due angoli opposti; Quadrato: un angolo e un secondo punto che da' direzione e misura (il lato e' il maggiore tra lo spostamento orizzontale e quello verticale sul foglio mostrato; il mirino e la lente mostrano gia' l'angolo squadrato); Cerchio: centro e un punto sul bordo. ORTO non si applica.
+- Aspetto: riempimento **bianco pieno, senza bordo**. Sullo schermo, **solo in costruzione e da selezionata**, un contorno sottile in `cad.measure` (1.5 px fissi); il contorno non fa parte del disegno e non viene esportato.
+- Ordine: le coperture stanno SEMPRE sotto linee, quote e testi, qualunque sia l'ordine di creazione (uno strato separato sotto agli altri oggetti); tra coperture vale l'ordine di creazione.
+- Seleziona: un tocco sceglie l'oggetto **in primo piano** entro la tolleranza (22 px col dito, 10 col mouse, la stessa di Cancella; le coperture, sotto tutto, vincono solo se non c'e' altro a portata). Evidenziazione in `cad.measure`: alone di 5 px sulle linee, cornice di 1.5 px con velo leggero su testi, badge e coperture. La barra contestuale dice "Selezionata: Retta" (testo breve: la barra non deve cambiare altezza, altrimenti il foglio si ridimensiona sotto il dito).
+- Spostare: trascinare l'oggetto **selezionato** lo sposta (segue il dito, un solo comando annullabile); trascinare altrove sposta la vista. Un secondo dito durante il trascinamento annulla lo spostamento e passa al pinch. Una quota spostata trasla tutti i suoi punti; il valore automatico non cambia.
+- Proprieta' dell'oggetto selezionato: gli stessi controlli dei nuovi oggetti (inspector su desktop, riquadro con la linea in miniatura su iPhone) lavorano sull'oggetto selezionato: linee e quote tipo/colore/spessore, testi e quote altezza; ogni modifica e' annullabile. La copertura non ha proprieta' (nessun riquadro). Senza selezione i controlli valgono per i nuovi oggetti, come prima.
+- Palette: con Seleziona le voci visibili su iPhone sono 9 (Distanza sta nella colonna sul foglio) e la barra scorre in orizzontale; 9 voci da 44 pt non entrano nei 390 px.
 
 Dialog Esporta PDF
 - Predefinito: **Copertura semplice** - "Il testo sotto le coperture resta nel file."
@@ -293,5 +303,6 @@ Tolleranze (campi, classi), Livelli, funzioni CNC, stampa, account/registrazione
 - Lente: forma e dimensioni definitive (provare su iPhone reale).
 - Separatore decimale: deciso il 27/10/2026: mostrato sempre ".", in digitazione la "," e' accettata e normalizzata a ".". Tasto segno meno per valori negativi: non serve nelle quote (valori positivi); aperto per il futuro.
 - Snap su Estremo e Punto medio: in V2 (decisione 27/10/2026), non in CP3.
-- Schermate non ancora disegnate: coperture bianche, copia/duplica, cancella, layout ABC e simboli, menu aperti. Realizzarle seguendo questo file.
+- Schermate non ancora disegnate: copia/duplica, menu aperti. Coperture, Seleziona, Cancella e i layout ABC e simboli sono stati realizzati in CP3-CP4 seguendo questo file.
+- Palette con 9 voci e colonna di pulsanti sul foglio (copre una striscia della pagina a pagina intera): proposte in `docs/PIANO.md` (CP4), da decidere dopo la prova su iPhone.
 - Layout iPhone definitivo da tarare su dispositivo.
