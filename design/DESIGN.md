@@ -227,10 +227,10 @@ Campi numerici
 Quota sul disegno
 - Linee di estensione sottili, frecce, testo in `JetBrains Mono`. Etichetta in badge bianco, raggio 2px, bordo 1px. Colore: `dimension-default` (modificabile). In costruzione: `measure`.
 - Prefissi: `Ø` solo per quota di diametro, `R` solo per raggio.
-- Stile esatto di frecce e proporzioni: da fissare in implementazione e mostrare all'utente (riferimento DIN/ISO NON VERIFICATO).
+- Stile esatto di frecce e proporzioni (fissato in CP3, di progetto, NON da una norma): vedere "Testo, quote e tastierino (CP3)" sotto e `docs/PIANO.md` (Scelte di CP3). Nell'app l'etichetta e' in Helvetica (come nel PDF esportato, decisione 6) e non in JetBrains Mono.
 - Tipi di quota: lineare (allineata, orizzontale, verticale), diametro, raggio. Valore automatico dalla scala oppure digitato.
 
-Snap
+Snap (V2: gli snap sugli oggetti, a partire da Estremo e Punto medio, non sono in V1; in V1 c'e' solo ORTO)
 - Marker 8x8px, tratto 1.5px: quadrato = estremo, triangolo = punto medio, cerchio = centro, croce = intersezione. Colori: `snap-topology` e `snap-vector`.
 - Etichetta del tipo di snap con i nomi: Estremo, Punto medio, Centro, Intersezione (non "Spigolo").
 - Nella barra di stato: toggle singoli `[Estremo] [Punto medio] [Centro] [Intersezione] [Ortogonale] [Griglia]`.
@@ -244,7 +244,7 @@ Lente (iPhone)
 Tastierino su schermo (iPhone)
 - Compare solo quando si scrive testo o quota. Mostra il valore in modifica, il tipo (`Ø`, `R`) e il pulsante di conferma.
 - Griglia: riga 1 `Ø` `R` `°` `±` `⌫`; poi `7 8 9` / `4 5 6` / `1 2 3` / `0 . 00`; colonna destra `ABC TESTO`, `#$& SIMBOLI`, `Annulla`, `OK`.
-- `ABC TESTO` e `#$& SIMBOLI` aprono layout con lettere e simboli nella stessa griglia (nei mockup non e' disegnato).
+- `ABC TESTO` e `#$& SIMBOLI` aprono layout con lettere e simboli nella stessa griglia (nei mockup non e' disegnato). Realizzato in CP3: lettere A-Z in ordine alfabetico su 7 colonne con `abc`/`ABC` e `spazio`, 27 simboli + `spazio`; la riga `Ø R ° ± ⌫` e i pulsanti `Annulla` e `OK` restano; nei layout con lettere e simboli la fila `123 NUMERI`, `#$& SIMBOLI` (o `ABC TESTO`), `Annulla`, `OK` sta sotto la griglia.
 
 Dialog Calibra scala
 - L'utente seleziona due punti noti; l'app mostra la distanza misurata in unita' PDF (pt, 1/72 in) e in mm sul foglio. Campo "Distanza reale" + unita' (`mm`). Pulsanti Applica e Annulla.
@@ -261,6 +261,13 @@ Barra contestuale e proprieta' della linea (CP2)
 - Misura (Distanza): linea e segni in `cad.measure`; badge bianco con `L`, `ΔX`, `ΔY` (livello 2). Cancella: la linea sotto il dito e' evidenziata in `cad.measure` prima di essere cancellata.
 - Pattern dei tipi di linea e valori predefiniti: vedere `docs/PIANO.md` (Scelte di CP2); sono in pt del foglio, in funzione dello spessore.
 
+Testo, quote e tastierino (CP3)
+- Testo: un tocco indica l'angolo in basso a sinistra della linea di base; una riga, sempre dritta sul foglio mostrato; Helvetica, corpo predefinito 10 pt (proprieta' "Altezza testo": 6-24 pt predefiniti, 2-200 digitabile). Colore: quello corrente.
+- Quota lineare: due punti misurati e un terzo punto per la linea di quota; Ø: due punti sul diametro; R: centro e punto sul bordo. Frecce piene (punta sull'estremo; fuori se la linea e' troppo corta), linee di estensione sottili con stacco e sporgenza, badge bianco con bordo sottile accanto alla linea. Valore: automatico dalla scala (mm, "." e 2 decimali, senza unita': `100.00`, `Ø25.40`, `R12.50`) oppure digitato; senza scala solo digitato.
+- Barra contestuale della Quota: una riga con i cinque tipi (Allineata, Orizz., Vert., Ø Diam., R Raggio), poi proprieta' (linea in miniatura + `Aa` con l'altezza), `Annulla`.
+- Tastierino: compare solo mentre si scrive; iPhone in verticale in basso al posto di barre, palette e pulsanti sul foglio; in orizzontale a destra del foglio; desktop sotto il foglio. Mostra titolo, riga informativa (valore automatico e scala, o "Pagina non calibrata"), il valore (non e' un campo di testo: la tastiera di sistema non compare) con il cursore in coda e, se il valore e' proposto, la selezione.
+- Tasti >= 44 x 44 pt.
+
 Dialog Esporta PDF
 - Predefinito: **Copertura semplice** - "Il testo sotto le coperture resta nel file."
 - **Appiattito** - "Le pagine diventano immagini: il testo sotto sparisce." Mostrare la scelta DPI (150, 300, 600).
@@ -271,9 +278,9 @@ Dialog Esporta PDF
 - Riepilogo: nome file, pagine, modalita', DPI. Pulsanti Annulla ed Esporta.
 
 Menu
-- File: Nuovo, Apri, Salva con nome, Esporta PDF, Chiudi.
+- File: Apri, Salva con nome, Esporta PDF, Chiudi (niente "Nuovo", decisione 27/10/2026).
 - Modifica: Annulla, Ripeti, Seleziona/sposta, Copia, Duplica, Cancella.
-- Inserisci: Linea (tipi di linea), Retta, Cerchio, Arco, Raccordo, Testo, Quota, Copertura bianca (rettangolo, quadrato, cerchio).
+- Inserisci: Linea (tipi di linea), Retta, Cerchio, Arco, Raccordo, Testo, Quota (allineata, orizzontale, verticale, diametro Ø, raggio R), Copertura bianca (rettangolo, quadrato, cerchio).
 - Zoom: zoom documento (separato da `A-` / `A+`).
 - Pulsante Distanza sempre raggiungibile.
 
@@ -284,6 +291,7 @@ Tolleranze (campi, classi), Livelli, funzioni CNC, stampa, account/registrazione
 ## 8. Punti aperti (da decidere o provare)
 
 - Lente: forma e dimensioni definitive (provare su iPhone reale).
-- Tasto segno meno per valori negativi e separatore decimale: accettare sia "." sia "," (proposta, da confermare).
+- Separatore decimale: deciso il 27/10/2026: mostrato sempre ".", in digitazione la "," e' accettata e normalizzata a ".". Tasto segno meno per valori negativi: non serve nelle quote (valori positivi); aperto per il futuro.
+- Snap su Estremo e Punto medio: in V2 (decisione 27/10/2026), non in CP3.
 - Schermate non ancora disegnate: coperture bianche, copia/duplica, cancella, layout ABC e simboli, menu aperti. Realizzarle seguendo questo file.
 - Layout iPhone definitivo da tarare su dispositivo.

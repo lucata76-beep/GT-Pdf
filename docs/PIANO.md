@@ -17,6 +17,9 @@ Il design resta in `design/DESIGN.md` (fonte unica). Questo file non lo sostitui
 | 8 | Quota Ø / R in V1 | Ø: due punti sul diametro. R: centro + punto sul bordo. Nessuno snap sulla geometria del PDF prima della V3 |
 | 9 | Offline | nessun service worker in V1; manifest e icona Home minimi |
 | 10 | Hosting | GitHub Pages, deploy con GitHub Actions, percorsi relativi |
+| 11 | Menu File (27/10, dopo CP2) | **Apri, Salva con nome, Esporta PDF, Chiudi**: niente "Nuovo" (tolto in CP3) |
+| 12 | Snap su Estremo e Punto medio (27/10) | restano in **V2**, non in CP3 |
+| 13 | Decimale e commit (27/10) | numeri con "."; in digitazione la "," e' accettata e normalizzata a "."; nei commit niente riga `Claude-Session`, resta `Co-Authored-By` |
 
 Altre scelte operative:
 - PDF.js: solo la build `legacy/` (la build normale richiede `Map.getOrInsertComputed`, quindi Safari/iOS 26.2+, senza polyfill).
@@ -37,7 +40,7 @@ Altre scelte operative:
 **CP0 - Scheletro e diagnostica.** Vite/TS/Vitest, workflow Pages, font e icone nel repository, pagina diagnostica: ambiente e funzioni del browser, apertura PDF, rendering con PDF.js legacy, zoom/pan/pinch di base, prova dei limiti del canvas, prova di condivisione/download. Nessuna funzione di editing.
 
 **CP1 - Interfaccia.** Barra superiore e menu (File: Nuovo, Apri, Chiudi; Modifica, Inserisci, Zoom in forma di struttura), **A-/A+** (dimensione interfaccia, separata dallo zoom del documento), palette strumenti, inspector, barra di stato, lente con mirino, punti con tocchi successivi, zoom del documento.
-- Nuovo: azzera la sessione (con conferma se ci sono modifiche) e apre il selettore file. Confermato: nessun foglio vuoto. Se si annulla il selettore, la sessione resta azzerata.
+- Nuovo: azzera la sessione (con conferma se ci sono modifiche) e apre il selettore file. **Tolto in CP3 (decisione 11).**
 - Chiudi: chiude il documento senza aprirne un altro.
 - Apri: il documento attuale resta finche' il nuovo non e' stato letto con successo.
 - In CP1 l'unico oggetto e' il **punto di prova** (tocchi successivi con lente), non salvato ne' esportato: conta come "modifica" per le conferme. Strumenti e voci di menu delle fasi successive sono presenti ma disabilitati, con il checkpoint accanto. (In CP2 il punto di prova e' stato tolto: la lente e i tocchi successivi servono ora agli strumenti veri.)
@@ -46,7 +49,7 @@ Altre scelte operative:
 
 **CP2 - Scala e disegno.** Calibrazione su due punti, **pulsante Distanza**, retta e linea, **tipi di linea**, **colore e spessore**, annulla/ripeti (command pattern), cancella.
 
-**CP3 - Testo e quote.** Testo, **quote allineata, orizzontale, verticale**, diametro Ø, raggio R, tastierino su schermo (numeri, "." e ",", simboli, lettere). Colore e spessore valgono anche per le quote.
+**CP3 - Testo e quote.** Testo, **quote allineata, orizzontale, verticale**, diametro Ø, raggio R, tastierino su schermo (numeri, ".", simboli, lettere; la "," digitata con la tastiera fisica diventa "."). Colore e spessore valgono anche per le quote. Cerchio e arco sono V2: Ø e R si riferiscono alla geometria del PDF indicata con punti.
 
 **CP4 - Coperture e selezione.** Coperture bianche (rettangolo, quadrato, cerchio), seleziona/sposta, cancella.
 
@@ -75,6 +78,32 @@ Non decise dall'utente: scelta la soluzione piu' semplice coerente con DESIGN.md
 | Annulla/ripeti | pila unica per documento (command pattern: aggiungi, cancella, proprieta', scala); "Ripeti" si azzera dopo una nuova azione; con una linea in costruzione "Annulla" toglie l'ultimo punto; annullare un'azione di un'altra pagina mostra quella pagina | |
 | Fine della Linea | pulsante **Fine**, oppure secondo tocco sullo stesso punto (entro 6 px), oppure Invio | |
 
+## Scelte di CP3 (27/10/2026)
+
+Lasciate a Claude dall'utente: scelta la soluzione piu' semplice coerente con DESIGN.md, con una riga di motivo.
+
+| Tema | Scelta | Perche' |
+|---|---|---|
+| Testo: punto e riga | un tocco = angolo in basso a sinistra della linea di base (come `drawText` di PDF); una sola riga; sempre **dritto sul foglio mostrato** (con /Rotate il PDF lo ruota di `PageGeometry.uprightAngleDeg`: 0, 90, 180, 270) | e' l'origine che usa pdf-lib; nessun angolo libero da gestire |
+| Testo: caratteri | ASCII stampabile + Latin-1 (Ø ° ± R, cifre, lettere, simboli); altri rifiutati in digitazione con messaggio | verificato: pdf-lib sostituisce con "?" i caratteri non codificabili in WinAnsi |
+| Dimensione del testo | "Altezza testo" = corpo del carattere in **pt fisici del foglio**; predefiniti 6, 8, 10, 12, 14, 18, 24, digitabile 2-200; predefinito **10 pt**; vale per testi ed etichette delle quote | come gli spessori (in CP5 si divide per `UserUnit`); un solo valore, non due |
+| Quota lineare | **3 punti**: due punti misurati + dove sta la linea di quota. Orizzontale/verticale = quelle che si vedono sul foglio (anche con /Rotate); allineata = parallela a p1-p2 | flusso standard dei CAD; la posizione serve a non coprire il disegno |
+| Quota Ø e R | Ø: **2 punti** sul diametro; R: **centro + punto sul bordo** (decisione 8); la linea di quota passa per i punti, l'etichetta sta accanto | cerchio e arco sono V2: la geometria del PDF si indica con punti |
+| Valore automatico | mm reali dalla scala della pagina, "." e **2 decimali**, senza unita', prefisso "Ø" o "R" solo per diametro e raggio (es. `100.00`, `Ø25.40`, `R12.50`); **segue le ricalibrazioni** della pagina | come Distanza (2 decimali); la quota e' una misura della pagina calibrata |
+| Valore digitato | testo mostrato com'e' (anche `Ø8 ±0.1`, `4x`); deve avere almeno una cifra; "," tra due cifre -> "."; non cambia con la scala | permette etichette che l'automatico non sa fare, senza campi di tolleranza |
+| Senza scala | **nessun valore automatico**: il tastierino parte vuoto (solo prefisso Ø/R), dice "Pagina non calibrata" e chiede di digitare; la quota resta col testo digitato | niente "mm del foglio" su un disegno: non si inventano unita' reali |
+| Valore proposto | con la scala il valore automatico e' **selezionato**: il primo tasto lo sostituisce (il prefisso Ø/R resta), ⌫ lo cancella; OK subito lo accetta (resta automatico) | digitare un altro valore senza dieci cancellazioni |
+| Stile delle quote | linea di quota e frecce a colore e spessore correnti; **freccia** piena lunga 0.8 x corpo (min 3 x spessore), semiapertura 1/6 della lunghezza; **linee di estensione** sottili (meta' spessore, min 0.25 pt), stacco 0.25 x corpo, sporgenza 0.4 x corpo; frecce **fuori** se la linea di quota e' piu' corta di 2.5 frecce; **badge** bianco, bordo 0.5 pt, margine 0.25 x corpo, angoli vivi, accanto alla linea dal lato opposto ai punti misurati (Ø, R, offset zero: dal lato "su") | proporzioni di progetto, NON da una norma; il badge accanto alla linea non copre le frecce |
+| Carattere dell'etichetta | **Helvetica** (decisione 6), non JetBrains Mono di DESIGN.md | l'export non puo' incorporare JetBrains Mono; il badge ha cosi' la stessa larghezza nell'app e nel PDF (tabella `helveticaWidths.ts` da pdf-lib, senza crenatura) |
+| Tastierino | tre layout nella stessa griglia: numeri (`7 8 9 / 4 5 6 / 1 2 3 / 0 . 00`), lettere A-Z in ordine alfabetico su 7 colonne (+ maiuscole/minuscole + spazio), 27 simboli + spazio; riga fissa `Ø R ° ± ⌫`; a destra o in basso `ABC/123 TESTO`, `#$& SIMBOLI`, `Annulla`, `OK`. Il Testo parte con le lettere, la Quota con i numeri | alfabetico (non QWERTY) perche' con 7 colonne i tasti restano >= 44 px su 390 px; si scrive solo in coda (niente cursore); su desktop vale anche la tastiera fisica |
+| Posizione con il tastierino | **iPhone in verticale**: tastierino in basso; spariscono barra superiore, barra contestuale, palette, barra di stato e pulsanti sul foglio; **in orizzontale**: tastierino a destra del foglio; **desktop**: sotto il foglio, il resto resta | piu' spazio al foglio; i pulsanti sul foglio coprirebbero il punto di lavoro |
+| Punto di lavoro | all'apertura la vista si sposta (o riduce lo zoom) quanto basta perche' punti e quota restino nella parte sopra il tastierino; lo stesso se la vista cambia (rotazione). Con il tastierino aperto un dito sposta la vista e due dita fanno pinch | "senza coprire il punto di lavoro" |
+| Annulla e scarto | testo/quota in corso: non sono nel documento; Annulla/Esc li scarta; cambiare strumento o pagina li scarta; Annulla/Ripeti in alto sono spenti. Dopo OK: un comando in annulla/ripeti | |
+| Proprieta' | colore, spessore (anche delle quote) e altezza testo sono quelli correnti; "Applica all'ultimo oggetto" cambia solo le proprieta' che l'oggetto ha (linea: tipo, colore, spessore; testo: colore, altezza; quota: colore, spessore, altezza) | |
+| Cancella | testo: tocco sul suo rettangolo; quota: tocco su linea di quota, linee di estensione o badge | |
+
+**Per l'esportazione (CP5).** Gli oggetti sono nello spazio utente (`TextObject.at`, `DimensionObject.p1/p2/a/b`); `layoutText`/`layoutDimension` danno le primitive nel foglio (linee, triangoli, badge, testi) e `exportRuns` riporta ogni testo nello spazio utente: origine, corpo diviso per `UserUnit`, angolo di rotazione. Anche spessori, frecce e badge sono in pt fisici: dividere per `UserUnit`. Verificato: pdf-lib scrive i testi con quei parametri e PDF.js li rilegge nel punto e dritti per /Rotate 0, 90, 180, 270 e UserUnit 1 e 2.5 (`layout.test.ts`). Linee, frecce e badge nel PDF NON sono ancora scritti ne' provati (CP5).
+
 ## Dispositivo di prova
 iPhone con iOS 27.2 (build 24B5099f), dichiarato dall'utente. La build ha un suffisso a lettera: potrebbe essere una versione di prova, quindi il comportamento puo' cambiare tra aggiornamenti (NON VERIFICATO). Prove su desktop: Chrome e Safari.
 
@@ -84,12 +113,19 @@ Implementati e provati su Chromium desktop e su Chromium con emulazione iPhone (
 ## Stato CP2 (27/10/2026)
 Implementati e provati su Chromium desktop (mouse) e su Chromium con emulazione iPhone (touch reale via CDP, 390 x 780, DPR 3; anche 780 x 390 e A+ al massimo): scala per pagina, Retta, Linea, tipi di linea, colore, spessore, ortogonale (anche con /Rotate 90 e CropBox), Distanza, annulla/ripeti, Cancella. Prove automatiche: `npm test` (formule di scala, decimali, annulla/ripeti, pattern dei tipi, ortogonale su pagina /Rotate 90 + CropBox, confronto della geometria con PDF.js su pagine vere) e `scripts/e2e-cp2.cjs` (Chromium). NESSUNA prova su Safari/iPhone reale: vedere sotto.
 
+## Stato CP3 (27/10/2026)
+Implementati e provati su Chromium desktop (mouse) e su Chromium con emulazione iPhone (touch reale via CDP; 390 x 780, 844 x 390, 780 x 390, 667 x 375, A+ al massimo, rotazione con tastierino aperto): Testo, le cinque quote, tastierino (numeri, lettere, simboli), annulla/ripeti, Cancella, pagina con /Rotate 90, menu File senza Nuovo. Prove automatiche: `npm test` (254, tra cui metriche contro pdf-lib, geometria delle quote su 4 rotazioni x UserUnit 1 e 2.5, andata e ritorno pdf-lib -> PDF.js dei testi), `scripts/e2e-cp3.cjs` (128 controlli) e `scripts/e2e-cp2.cjs` (122, regressione). NESSUNA prova su Safari/iPhone reale: vedere sotto.
+
 ## NON VERIFICATO (da chiudere con prove sul dispositivo)
+- CP3 su iPhone: ergonomia del tastierino (tasti >= 44 px provati solo come misura su Chromium; altezza lasciata al foglio con la barra di Safari e da icona Home; safe area in basso e a destra); tocchi rapidi su tasti diversi e doppio tocco (`touch-action: manipulation`); la tastiera di sistema NON deve comparire (il valore e' un riquadro, non un campo); lente e mira per il terzo punto della quota; tastierino in orizzontale con la barra di Safari (la vista e' piu' bassa di quella emulata: ripiego a scorrimento, mai visto); testo Helvetica su iOS (le larghezze del badge vengono da Helvetica di pdf-lib; su Chromium l'ambiente usa Liberation Sans, di larghezze uguali; Helvetica di iOS non e' stato misurato); leggibilita' di frecce e badge a zoom di adattamento; colonna dei pulsanti sul foglio (fuori dal tastierino).
+- Linee, frecce e badge delle quote nel PDF esportato: non scritti (CP5). Dei testi e' provata solo la posizione/orientamento con pdf-lib + PDF.js, non l'aspetto.
+- Quote su pagine con `UserUnit` diverso da 1: provate solo le formule e l'andata e ritorno dei testi, non un PDF reale.
+- Quota con PDF reali: tutte le prove usano i PDF di prova fittizi.
 - CP2 su iPhone: gesto di mira con la lente per Retta/Linea/Scala/Distanza (leggibilita', dito che copre, precisione); selettore colore nativo (`input type=color`) su iOS; tastierino decimale (`inputmode=decimal`) e tastiera che copre il dialogo di scala; layout della barra contestuale e del pannello proprieta' su iPhone reale (barra di Safari, safe area, da icona Home); layout in orizzontale; Cancella con il dito (tolleranza 22 px); doppio tocco per terminare la Linea; colonna dei pulsanti sul foglio ("Distanza" con le altre) che copre il lavoro.
 - Disegno su pagine con `/Rotate` e CropBox: provato su Chromium e con i PDF di prova; NON provato con PDF reali, con `UserUnit` diverso da 1 (solo test sulla geometria) ne' su Safari.
 - Tratteggi: proporzioni dei pattern scelte a occhio su schermo, non confrontate con una stampa.
 - `UserUnit` diverso da 1: scala, distanze, spessori e pattern di tratteggio sono in pt FISICI del foglio (1/72 in); gli oggetti sono salvati nello spazio utente. In CP5, scrivendo nello spazio utente, spessori e pattern vanno divisi per `UserUnit`. Coperto solo da test sulla geometria (confronto con PDF.js su pagine con `UserUnit` 2.5), non da un PDF reale.
-- CP1 su iPhone: `input.click()` dal pulsante di conferma del dialogo (Nuovo con modifiche); lente (80x80, 70 px sopra il dito, 3x) leggibile e non coperta dal dito; `drawImage` con zona sorgente parzialmente fuori dal canvas (lente ai bordi della pagina); pinch senza zoom della pagina in modo "Punto di prova"; barre e safe area in verticale e orizzontale; da icona Home.
+- CP1 su iPhone: `input.click()` dal pulsante di conferma del dialogo (Apri con modifiche non salvate: dal 27/10 Nuovo non c'e' piu'); lente (80x80, 70 px sopra il dito, 3x) leggibile e non coperta dal dito; `drawImage` con zona sorgente parzialmente fuori dal canvas (lente ai bordi della pagina); pinch senza zoom della pagina in modo "Punto di prova"; barre e safe area in verticale e orizzontale; da icona Home.
 - PDF.js legacy 6.4.299 e `@cantoo/pdf-lib` 2.11.1 su Safari/iOS (provati solo su Chromium desktop).
 - Limite di area del canvas e memoria su iOS 27.2. Nel sorgente WebKit `main` (`CanvasBase.cpp`) il limite d'area su iOS e' 8192 x 8192 = 67.108.864 px; la memoria e' un limite separato.
 - Condivisione di un PDF con `navigator.share` su iOS attuale; bug WebKit 263608; scadenza del gesto dopo un'elaborazione lunga.
