@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { History, type Command } from './history';
-import { AddObject, DocumentModel, type DimensionObject, type LineObject, RemoveObject, SetProps, SetScale, type TextObject, objectLabel, propsEqual, propsFor, propsOf } from './model';
+import { AddObject, DocumentModel, type DimensionObject, type LineObject, RemoveObject, SetProps, SetScale, type TextObject, objectLabel, propsEqual, propsOf } from './model';
 import { calibrate } from '../geometry/scale';
 import { DEFAULT_STROKE } from './stroke';
 
@@ -104,7 +104,6 @@ describe('DocumentModel con i comandi', () => {
     expect(m.objects(1).map((o) => o.id)).toEqual([1]);
     h.redo();
     expect(m.objects(1).map((o) => o.id)).toEqual([1, 2]);
-    expect(m.last(1)?.id).toBe(2);
   });
 
   it('cancella: l\'annullamento rimette l\'oggetto allo stesso posto', () => {
@@ -262,14 +261,10 @@ describe('testi e quote nell\'annulla/ripeti e nella cancellazione', () => {
     expect(m.get(1, 1)).toMatchObject({ color: '#1565C0', textPt: 14 });
   });
 
-  it('proprieta\' di sessione ridotte a quelle dell\'oggetto e confronto', () => {
-    const st = { style: 'dashed' as const, color: '#1565C0', widthPt: 2 };
-    expect(propsFor('segment', st, 12)).toEqual({ style: 'dashed', color: '#1565C0', widthPt: 2 });
-    expect(propsFor('text', st, 12)).toEqual({ color: '#1565C0', textPt: 12 });
-    expect(propsFor('dim', st, 12)).toEqual({ color: '#1565C0', widthPt: 2, textPt: 12 });
-    expect(propsEqual(propsOf(txt(1)), propsFor('text', { ...DEFAULT_STROKE }, 10))).toBe(true);
-    expect(propsEqual(propsOf(txt(1)), propsFor('text', { ...DEFAULT_STROKE }, 11))).toBe(false);
-    expect(propsEqual(propsOf(dim(1)), propsFor('dim', { ...DEFAULT_STROKE, widthPt: 2 }, 10))).toBe(false);
+  it('confronto delle proprieta\': uguali solo se tutte uguali', () => {
+    expect(propsEqual(propsOf(txt(1)), { color: '#D32F2F', textPt: 10 })).toBe(true);
+    expect(propsEqual(propsOf(txt(1)), { color: '#D32F2F', textPt: 11 })).toBe(false);
+    expect(propsEqual(propsOf(dim(1)), { color: '#D32F2F', widthPt: 2, textPt: 10 })).toBe(false);
   });
 
   it('nomi: retta, linea, testo e le cinque quote', () => {

@@ -210,14 +210,7 @@ async function mouseSuite(browser) {
   await page.keyboard.press('Enter');
   an = await annots(page);
   check('Altezza testo 14 pt dall\'inspector: il nuovo testo ha corpo 14', an.length === 3 && an[2].size === 14, JSON.stringify(an.map((a) => a.size)));
-  // "Applica all'ultimo oggetto" cambia solo l'ultimo
-  await insp.locator('.preset', { hasText: /^8$/ }).click();
-  await insp.getByRole('button', { name: "Applica all'ultimo oggetto" }).click();
-  an = await annots(page);
-  check("Applica all'ultimo oggetto: il testo ora e' 8 pt, gli altri no", an[2].size === 8 && an[1].size === 10, JSON.stringify(an.map((a) => a.size)));
-  await page.locator('.undo-ctl button').nth(0).click();
-  an = await annots(page);
-  check('...ed e\' annullabile', an[2].size === 14);
+  // ("Applica all'ultimo oggetto" e' stato tolto in CP4: si cambiano le proprieta' di un oggetto qualunque con Seleziona, provato in e2e-cp4.cjs)
   await insp.locator('.preset', { hasText: /^10$/ }).click();
 
   // Cancella: un tocco sul testo lo cancella; Annulla lo ripristina
@@ -352,12 +345,6 @@ async function mouseSuite(browser) {
   await page.locator('.undo-ctl button').nth(0).click();
   an = await annots(page);
   check('Annulla: la quota torna', an.length === 5 && an[1].id === alignedId);
-
-  // Applica all'ultimo oggetto su una quota
-  await insp.locator('.swatch').nth(1).click(); // blu
-  await insp.getByRole('button', { name: "Applica all'ultimo oggetto" }).click();
-  an = await annots(page);
-  check("Applica all'ultimo oggetto: la quota R diventa blu (linee e testo)", an[4].fill === '#1565C0' && an[4].paths[0].stroke === '#1565C0', JSON.stringify([an[4].fill, an[4].paths[0].stroke]));
 
   // Menu Inserisci > Quota raggio R seleziona strumento e tipo
   await page.getByRole('button', { name: 'Inserisci', exact: true }).click();

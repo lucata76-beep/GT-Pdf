@@ -1,7 +1,7 @@
 // Controlli delle proprieta': tipo di linea, colore, spessore e altezza del testo (pt del foglio). Servono sia
 // nell'inspector (desktop, tutte le sezioni) sia nel pannello aperto dalla barra contestuale (iPhone, solo quelle dello
-// strumento attivo). Valgono per i NUOVI oggetti; "Applica all'ultimo oggetto" le copia sull'ultimo oggetto disegnato
-// nella pagina (modificare oggetti qualunque richiede la selezione, CP4).
+// strumento attivo). Valgono per i NUOVI oggetti, oppure per l'oggetto selezionato quando lo strumento Seleziona ne ha
+// uno (lo decide il binding: ogni modifica diventa un comando annullabile).
 import { fmtTrim, parsePositive } from '../geometry/numbers';
 import {
   COLOR_PALETTE,
@@ -23,14 +23,13 @@ export interface StyleBinding {
   /** Corpo del testo per i nuovi testi e le nuove quote, in pt. */
   getTextPt(): number;
   setTextPt(pt: number): void;
-  /** Copia le proprieta' correnti sull'ultimo oggetto della pagina (quelle che l'oggetto ha). */
-  applyToLast(): void;
-  /** C'e' un ultimo oggetto e ha proprieta' diverse da quelle correnti. */
-  canApplyToLast(): boolean;
 }
 
-/** Quali sezioni mostrare: tutte (inspector) o quelle dello strumento (linea: tipo, colore, spessore; testo: colore, altezza; quota: colore, spessore, altezza). */
-export type StyleKind = 'all' | 'line' | 'text' | 'dim';
+/**
+ * Quali sezioni mostrare: tutte (inspector) o quelle dello strumento o dell'oggetto selezionato
+ * (linea: tipo, colore, spessore; testo: colore, altezza; quota: colore, spessore, altezza; nessuna: la copertura non ha proprieta').
+ */
+export type StyleKind = 'all' | 'line' | 'text' | 'dim' | 'none';
 
 export interface StyleControls {
   el: HTMLElement;
@@ -155,15 +154,14 @@ export function createStyleControls(b: StyleBinding): StyleControls {
     if (e.key === 'Enter') applyTextPt();
   });
 
-  const last = h('button', { class: 'btn', type: 'button', onclick: () => b.applyToLast() }, "Applica all'ultimo oggetto");
-
   const typeSec = h('section', { class: 'ctl-sec' }, heading('Tipo di linea'), styleRow);
   const colorSec = h('section', { class: 'ctl-sec' }, heading('Colore'), swatches, h('div', { class: 'field-row' }, colorPicker, hex));
   const widthSec = h('section', { class: 'ctl-sec' }, heading('Spessore'), presets, h('div', { class: 'field-row' }, h('span', { class: 'lbl num' }, 'S:'), width, h('span', { class: 'unit num' }, 'pt')));
   const textSec = h('section', { class: 'ctl-sec' }, heading('Altezza testo'), textPresets, h('div', { class: 'field-row' }, h('span', { class: 'lbl num' }, 'H:'), textPt, h('span', { class: 'unit num' }, 'pt')));
-  const el = h('div', { class: 'style-ctl' }, typeSec, colorSec, widthSec, textSec, msg, last);
+  const el = h('div', { class: 'style-ctl' }, typeSec, colorSec, widthSec, textSec, msg);
 
   const setKind = (kind: StyleKind): void => {
+    colorSec.hidden = kind === 'none';
     typeSec.hidden = !(kind === 'all' || kind === 'line');
     widthSec.hidden = !(kind === 'all' || kind === 'line' || kind === 'dim');
     textSec.hidden = !(kind === 'all' || kind === 'text' || kind === 'dim');
@@ -180,7 +178,6 @@ export function createStyleControls(b: StyleBinding): StyleControls {
     colorPicker.value = s.color.toLowerCase();
     if (document.activeElement !== hex) hex.value = s.color;
     if (document.activeElement !== width) width.value = fmtTrim(s.widthPt, 3);
-    last.disabled = !b.canApplyToLast();
   };
   refresh();
   return { el, refresh, setKind };

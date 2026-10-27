@@ -1,6 +1,6 @@
-// Distanze punto-segmento, punto-spezzata e punto-forma, per scegliere l'oggetto da cancellare con un tocco.
+// Distanze punto-segmento, punto-spezzata e punto-forma, per scegliere l'oggetto da selezionare o cancellare con un tocco.
 // Si lavora nel foglio (pt fisici, isotropo): la tolleranza in pt = pixel di schermo / zoom.
-import type { Shape, SheetRect } from './layout';
+import type { Shape, SheetCircle, SheetRect } from './layout';
 import type { Pt } from './page';
 
 export function distToSegment(p: Pt, a: Pt, b: Pt): number {
@@ -30,23 +30,27 @@ export function distToRect(p: Pt, r: SheetRect): number {
   return Math.hypot(dx, dy);
 }
 
+/** Distanza dal cerchio pieno: 0 dentro. */
+export function distToCircle(p: Pt, c: SheetCircle): number {
+  return Math.max(0, Math.hypot(p.x - c.c.x, p.y - c.c.y) - c.r);
+}
+
 export function distToShape(p: Pt, shape: Shape): number {
   let best = Infinity;
   for (const l of shape.lines) best = Math.min(best, distToPolyline(p, l));
   for (const r of shape.rects) best = Math.min(best, distToRect(p, r));
+  for (const c of shape.circles) best = Math.min(best, distToCircle(p, c));
   return best;
 }
 
-/** L'elemento piu' vicino a `p` entro `tol`; a parita' vince quello disegnato per ultimo (sopra). */
-export function pickNearest<T>(items: readonly T[], shapeOf: (item: T) => Shape, p: Pt, tol: number): T | null {
-  let best: T | null = null;
-  let bestD = Infinity;
-  for (const item of items) {
-    const d = distToShape(p, shapeOf(item));
-    if (d <= tol && d <= bestD) {
-      best = item;
-      bestD = d;
-    }
+/**
+ * Tra gli elementi entro `tol` da `p`, quello in primo piano. `items` e' nell'ordine di disegno, dal fondo al primo
+ * piano: vince l'ultimo che e' a portata (non il piu' vicino).
+ */
+export function pickTop<T>(items: readonly T[], shapeOf: (item: T) => Shape, p: Pt, tol: number): T | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i] as T;
+    if (distToShape(p, shapeOf(item)) <= tol) return item;
   }
-  return best;
+  return null;
 }

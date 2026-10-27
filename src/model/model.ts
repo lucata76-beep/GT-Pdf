@@ -1,5 +1,6 @@
 // Oggetti e scala della sessione, in memoria (nessun localStorage/IndexedDB: il salvataggio .json arriva in CP5).
 // Coordinate nello spazio utente PDF (pt), indipendenti dallo zoom. Si modifica solo tramite comandi (History).
+import { type CoverDef, coverInfo } from '../geometry/cover';
 import { type DimensionDef, dimInfo } from '../geometry/dimension';
 import type { UserPoint } from '../geometry/page';
 import type { PageScale } from '../geometry/scale';
@@ -46,7 +47,16 @@ export interface DimensionObject extends DimensionDef {
   textPt: number;
 }
 
-export type PageObject = LineObject | TextObject | DimensionObject;
+/**
+ * Copertura bianca (senza bordo): sta SEMPRE sotto linee, quote e testi, qualunque sia l'ordine di creazione
+ * (`drawOrder`). Nessuna proprieta' modificabile. Punti e significato: vedi `geometry/cover`.
+ */
+export interface CoverObject extends CoverDef {
+  id: number;
+  kind: 'cover';
+}
+
+export type PageObject = LineObject | TextObject | DimensionObject | CoverObject;
 
 export const isLine = (o: PageObject): o is LineObject => o.kind === 'segment' || o.kind === 'polyline';
 
@@ -59,14 +69,16 @@ export function objectLabel(o: PageObject): string {
       return 'Linea';
     case 'text':
       return 'Testo';
+    case 'cover':
+      return coverInfo(o.shape).label;
     default:
       return dimInfo(o.dim).label;
   }
 }
-const KIND_NOUN: Record<PageObject['kind'], string> = { segment: 'retta', polyline: 'linea', text: 'testo', dim: 'quota' };
+const KIND_NOUN: Record<PageObject['kind'], string> = { segment: 'retta', polyline: 'linea', text: 'testo', dim: 'quota', cover: 'copertura' };
 export const objectNoun = (o: PageObject): string => KIND_NOUN[o.kind];
 
-/** Proprieta' di un oggetto: ognuno ha solo le sue (linea: tipo, colore, spessore; testo: colore, corpo; quota: colore, spessore, corpo). */
+/** Proprieta' di un oggetto: ognuno ha solo le sue (linea: tipo, colore, spessore; testo: colore, corpo; quota: colore, spessore, corpo; copertura: nessuna). */
 export interface ObjectProps {
   style?: LineStyleId;
   color?: string;
@@ -77,20 +89,19 @@ export interface ObjectProps {
 export function propsOf(o: PageObject): ObjectProps {
   if (isLine(o)) return { style: o.stroke.style, color: o.stroke.color, widthPt: o.stroke.widthPt };
   if (o.kind === 'text') return { color: o.color, textPt: o.textPt };
+  if (o.kind === 'cover') return {};
   return { color: o.color, widthPt: o.widthPt, textPt: o.textPt };
 }
 
-/** Le proprieta' di sessione (nuovi oggetti) ridotte a quelle che ha un oggetto di quel tipo. */
-export function propsFor(kind: PageObject['kind'], stroke: Stroke, textPt: number): ObjectProps {
-  switch (kind) {
-    case 'segment':
-    case 'polyline':
-      return { style: stroke.style, color: stroke.color, widthPt: stroke.widthPt };
-    case 'text':
-      return { color: stroke.color, textPt };
-    default:
-      return { color: stroke.color, widthPt: stroke.widthPt, textPt };
-  }
+/** Le proprieta' dell'oggetto con `patch` applicato, limitato a quelle che l'oggetto ha (le altre chiavi di `patch` si ignorano). */
+export function patchedProps(o: PageObject, patch: ObjectProps): ObjectProps {
+  const b = propsOf(o);
+  const after: ObjectProps = {};
+  if (b.style !== undefined) after.style = patch.style ?? b.style;
+  if (b.color !== undefined) after.color = patch.color ?? b.color;
+  if (b.widthPt !== undefined) after.widthPt = patch.widthPt ?? b.widthPt;
+  if (b.textPt !== undefined) after.textPt = patch.textPt ?? b.textPt;
+  return after;
 }
 
 export const propsEqual = (a: ObjectProps, b: ObjectProps): boolean => a.style === b.style && a.color === b.color && a.widthPt === b.widthPt && a.textPt === b.textPt;
@@ -100,9 +111,53 @@ function assignProps(o: PageObject, p: ObjectProps): void {
     o.stroke = { style: p.style ?? o.stroke.style, color: p.color ?? o.stroke.color, widthPt: p.widthPt ?? o.stroke.widthPt };
     return;
   }
+  if (o.kind === 'cover') return;
   if (p.color !== undefined) o.color = p.color;
   if (p.textPt !== undefined) o.textPt = p.textPt;
   if (o.kind === 'dim' && p.widthPt !== undefined) o.widthPt = p.widthPt;
+}
+
+/** I punti che definiscono la posizione dell'oggetto (copie), nell'ordine fisso del tipo: spostare = cambiarli tutti. */
+export function pointsOf(o: PageObject): UserPoint[] {
+  if (isLine(o)) return o.points.map((p) => ({ ...p }));
+  switch (o.kind) {
+    case 'text':
+      return [{ ...o.at }];
+    case 'cover':
+      return [{ ...o.p1 }, { ...o.p2 }];
+    default:
+      return [{ ...o.p1 }, { ...o.p2 }, { ...o.a }, { ...o.b }];
+  }
+}
+
+function assignPoints(o: PageObject, pts: readonly UserPoint[]): void {
+  const at = (i: number): UserPoint => ({ ...(pts[i] as UserPoint) });
+  if (isLine(o)) {
+    o.points = pts.map((p) => ({ ...p }));
+    return;
+  }
+  switch (o.kind) {
+    case 'text':
+      o.at = at(0);
+      break;
+    case 'cover':
+      o.p1 = at(0);
+      o.p2 = at(1);
+      break;
+    default:
+      o.p1 = at(0);
+      o.p2 = at(1);
+      o.a = at(2);
+      o.b = at(3);
+  }
+}
+
+/**
+ * Ordine di disegno, dal fondo al primo piano: prima le coperture (nell'ordine di creazione), poi linee, testi e quote
+ * (nell'ordine di creazione). Cosi' una copertura sta sotto tutto, anche se e' stata disegnata dopo.
+ */
+export function drawOrder(objects: readonly PageObject[]): PageObject[] {
+  return [...objects.filter((o) => o.kind === 'cover'), ...objects.filter((o) => o.kind !== 'cover')];
 }
 
 interface PageData {
@@ -133,10 +188,6 @@ export class DocumentModel {
   }
   get(page: number, id: number): PageObject | undefined {
     return this.objects(page).find((o) => o.id === id);
-  }
-  /** L'ultimo oggetto della pagina (l'ultimo disegnato, in cima). */
-  last(page: number): PageObject | undefined {
-    return this.objects(page).at(-1);
   }
   scale(page: number): PageScale | null {
     return this.pages.get(page)?.scale ?? null;
@@ -175,6 +226,12 @@ export class DocumentModel {
     const o = this.get(page, id);
     if (!o) return;
     assignProps(o, props);
+    this.emit();
+  }
+  setPoints(page: number, id: number, pts: readonly UserPoint[]): void {
+    const o = this.get(page, id);
+    if (!o) return;
+    assignPoints(o, pts);
     this.emit();
   }
   setScale(page: number, scale: PageScale | null): void {
@@ -244,6 +301,31 @@ export class SetProps implements Command<DocumentModel> {
   }
   revert(m: DocumentModel): void {
     m.setProps(this.page, this.id, this.before);
+  }
+}
+
+/** Sposta un oggetto: sostituisce tutti i suoi punti (prima/dopo salvati, cosi' annulla e ripeti sono esatti). */
+export class MoveObject implements Command<DocumentModel> {
+  readonly label: string;
+  private readonly id: number;
+  private readonly before: UserPoint[];
+  private readonly after: UserPoint[];
+  constructor(
+    readonly page: number,
+    obj: PageObject,
+    dx: number,
+    dy: number,
+  ) {
+    this.id = obj.id;
+    this.label = `Sposta ${objectNoun(obj)}`;
+    this.before = pointsOf(obj);
+    this.after = this.before.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  apply(m: DocumentModel): void {
+    m.setPoints(this.page, this.id, this.after);
+  }
+  revert(m: DocumentModel): void {
+    m.setPoints(this.page, this.id, this.before);
   }
 }
 

@@ -405,6 +405,9 @@ body.app-mode {
 .viewer[data-mode='erase'] {
   cursor: pointer;
 }
+.viewer[data-mode='select'] {
+  cursor: default;
+}
 .viewer-layer {
   position: absolute;
   inset: 0;
@@ -428,11 +431,37 @@ body.app-mode {
 }
 /* Oggetto che si sta per cancellare */
 .sc-hl path,
-.sc-hl rect {
+.sc-hl rect,
+.sc-hl circle {
+  fill: none;
   stroke: var(--cad-measure);
   stroke-width: 7;
   vector-effect: non-scaling-stroke;
   opacity: 0.45;
+}
+/* Oggetto selezionato (CP4): alone sulle linee, cornice sottile e velo leggero su testi, badge e coperture. Solo a schermo. */
+.sc-sel path {
+  fill: none;
+  stroke: var(--cad-measure);
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.45;
+}
+.sc-sel rect,
+.sc-sel circle {
+  fill: var(--cad-measure);
+  fill-opacity: 0.1;
+  stroke: var(--cad-measure);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+/* Contorno sottile della copertura in costruzione: solo a schermo, non viene esportato */
+.sc-outline rect,
+.sc-outline circle {
+  fill: none;
+  stroke: var(--cad-measure);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 /* Badge di misura (livello 2: fondo bianco, bordo 1px, ombra leggera) */
 .measure-badge {
@@ -729,6 +758,9 @@ body.app-mode {
   .st-msg {
     order: 9;
     flex-basis: 100%;
+    /* La riga dei messaggi tiene sempre il suo posto: se comparisse solo con un messaggio, ogni messaggio (anche "Annullato")
+       cambierebbe l'altezza della barra e, a pagina intera, il foglio si riadatterebbe sotto il dito. */
+    min-height: 1rem;
   }
   .st-pager {
     order: 8;
@@ -908,6 +940,9 @@ body.app-mode {
   font-size: 0.75rem;
   min-height: var(--hit);
 }
+.ctx-style.ghost {
+  visibility: hidden;
+}
 .style-glyph {
   display: inline-flex;
   align-items: center;
@@ -1052,10 +1087,12 @@ body.app-mode {
   -webkit-user-select: none;
   user-select: none;
 }
-.ctx-types {
+.ctx-types,
+.ctx-covers {
   flex: 1 1 100%;
 }
-.ctx-types .seg-btn {
+.ctx-types .seg-btn,
+.ctx-covers .seg-btn {
   min-height: var(--hit);
   font-size: 0.75rem;
 }

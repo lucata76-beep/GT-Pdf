@@ -2,8 +2,11 @@
 // Pointer Events + touch-action: none. Il canvas non supera mai SCREEN_PIXEL_BUDGET: oltre, il rendering sfoca.
 // Modo 'pick': un dito (o il mouse) punta con la lente, il punto si inserisce al rilascio; due dita = pinch/pan.
 // Modo 'erase': un tocco fermo sceglie l'oggetto da cancellare; trascinando si sposta la vista.
+// Modo 'select': un tocco fermo sceglie l'oggetto da selezionare; trascinare l'oggetto selezionato lo sposta, trascinare
+// altrove sposta la vista. Durante il trascinamento l'oggetto segue il dito (solo a schermo); alla fine l'app crea UN comando.
 // Coordinate: gli oggetti sono nello spazio utente PDF; per lo schermo si passa da PageGeometry (src/geometry/page.ts),
 // che gestisce Rotate, CropBox e UserUnit come il viewport a scala 1 di PDF.js (confronto nei test).
+import type { SheetCover } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
 import { SCREEN_PIXEL_BUDGET, fitRenderSize } from '../geometry/pixels';
@@ -28,7 +31,7 @@ export interface ViewerStats {
   error: string | null;
 }
 
-export type ViewerMode = 'pan' | 'pick' | 'erase';
+export type ViewerMode = 'pan' | 'pick' | 'erase' | 'select';
 
 export interface ViewerHooks {
   /** Posizione del cursore sul foglio (pt fisici, origine in alto a sinistra); null quando esce dal foglio. */
@@ -43,15 +46,24 @@ export interface ViewerHooks {
   onErase?: (sheet: SheetPoint, tolPt: number) => void;
   /** Modo 'erase': posizione di dito o mouse per evidenziare l'oggetto che verrebbe cancellato; null quando finisce. */
   onErasePreview?: (sheet: SheetPoint | null, tolPt: number) => void;
+  /** Modo 'select': tocco o clic fermo, anche fuori dalla pagina. `tolPt` = tolleranza in pt del foglio (pixel di schermo / zoom). */
+  onSelect?: (sheet: SheetPoint, tolPt: number) => void;
+  /** Modo 'select': il punto premuto e' sull'oggetto selezionato (entro la tolleranza)? Se si', trascinare lo sposta. */
+  canGrab?: (sheet: SheetPoint, tolPt: number) => boolean;
+  /** Modo 'select': trascinamento dell'oggetto selezionato, spostamento dall'inizio in pt del foglio. */
+  onDragMove?: (dx: number, dy: number) => void;
+  onDragEnd?: (dx: number, dy: number) => void;
+  /** Trascinamento interrotto (secondo dito, annullamento del sistema, cambio di modo): l'oggetto torna dov'era. */
+  onDragCancel?: () => void;
   /** Mira rilasciata fuori dalla pagina. */
   onReject?: (reason: string) => void;
   /** Zoom o fit cambiati (pixel CSS per pt). */
   onView?: (v: { zoom: number; fit: number }) => void;
 }
 
-/** Tolleranza di scelta dell'oggetto da cancellare, in pixel CSS: piu' larga col dito (bersaglio >= 44 pt). */
-const ERASE_TOL_PX = { touch: 22, mouse: 10 } as const;
-/** Movimento oltre il quale un tocco in modo 'erase' diventa trascinamento (sposta la vista). */
+/** Tolleranza di scelta dell'oggetto da cancellare o selezionare, in pixel CSS: piu' larga col dito (bersaglio >= 44 pt). */
+const HIT_TOL_PX = { touch: 22, mouse: 10 } as const;
+/** Movimento oltre il quale un tocco in modo 'erase' o 'select' diventa trascinamento. */
 const TAP_SLOP_PX = 8;
 
 type Pt = { x: number; y: number };
@@ -94,6 +106,8 @@ export class PdfViewer {
   private aim: { id: number; pos: Pt; touch: boolean } | null = null;
   /** Tocco in corso in modo 'erase': diventa trascinamento se il dito si muove oltre TAP_SLOP_PX. */
   private tap: { id: number; start: Pt; moved: boolean; touch: boolean } | null = null;
+  /** Tocco in corso in modo 'select': `grab` = e' partito sull'oggetto selezionato, quindi trascinare lo sposta. */
+  private sel: { id: number; start: Pt; moved: boolean; grab: boolean; touch: boolean } | null = null;
   /** Ultima posizione del mouse senza tasti (per rifare l'anteprima). */
   private lastHover: Pt | null = null;
 
@@ -159,6 +173,7 @@ export class PdfViewer {
     this.renderToken++;
     this.task?.cancel();
     this.cancelAim();
+    this.cancelSelect();
     this.page = page;
     this.lastRender = null;
     this.lastError = null;
@@ -195,6 +210,18 @@ export class PdfViewer {
   setHighlight(shape: Shape | null): void {
     this.overlay.setHighlight(shape);
   }
+  /** Evidenzia la forma (nel foglio) dell'oggetto selezionato. */
+  setSelection(shape: Shape | null): void {
+    this.overlay.setSelection(shape);
+  }
+  /** Copertura in costruzione (nel foglio): riempimento sotto gli oggetti e contorno sottile sopra. */
+  setCoverDraft(cover: SheetCover | null): void {
+    this.overlay.setCoverDraft(cover);
+  }
+  /** Sposta a schermo (pt del foglio) l'oggetto `id` mentre lo si trascina; `null` rimette tutto a posto. */
+  setDragOffset(id: number | null, dx: number, dy: number): void {
+    this.overlay.setDragOffset(id, dx, dy);
+  }
   /** Testo o quota in corso di scrittura. */
   setDraft(layout: Layout | null): void {
     this.overlay.setDraft(layout);
@@ -220,6 +247,9 @@ export class PdfViewer {
     this.overlay.setObjects([]);
     this.overlay.setDraft(null);
     this.overlay.setHighlight(null);
+    this.overlay.setSelection(null);
+    this.overlay.setCoverDraft(null);
+    this.overlay.setDragOffset(null, 0, 0);
     this.overlay.setPreview(null);
     this.overlay.setGuide(null);
     this.overlay.setMarkers([]);
@@ -231,6 +261,7 @@ export class PdfViewer {
     this.mode = mode;
     this.cancelAim();
     this.clearTap();
+    this.cancelSelect();
     this.el.dataset.mode = mode;
   }
 
@@ -380,6 +411,12 @@ export class PdfViewer {
     } else {
       this.clearTap();
     }
+    if (this.mode === 'select' && primary) {
+      const grab = this.hooks.canGrab?.(this.toSheet(pos), this.hitTol(touch)) ?? false;
+      this.sel = { id: e.pointerId, start: pos, moved: false, grab, touch };
+    } else {
+      this.cancelSelect(); // un secondo dito annulla un eventuale trascinamento: si passa al pinch
+    }
     this.resetBaseline();
     this.queueStats();
   };
@@ -401,6 +438,19 @@ export class PdfViewer {
       this.aim.pos = cur;
       this.updateAim();
       return;
+    }
+    const sel = this.sel;
+    if (sel && sel.id === e.pointerId) {
+      if (!sel.moved) {
+        if (Math.hypot(cur.x - sel.start.x, cur.y - sel.start.y) < TAP_SLOP_PX) return;
+        sel.moved = true;
+      }
+      if (sel.grab) {
+        // l'oggetto segue il dito: spostamento totale dall'inizio, in pt del foglio
+        this.hooks.onDragMove?.((cur.x - sel.start.x) / this.zoom, (cur.y - sel.start.y) / this.zoom);
+        return;
+      }
+      // partito altrove: sposta la vista (codice sotto)
     }
     const tap = this.tap;
     if (tap && tap.id === e.pointerId && !tap.moved) {
@@ -445,6 +495,15 @@ export class PdfViewer {
       this.clearTap();
       if (e.type === 'pointerup' && !tap.moved) this.erase(this.local(e), tap.touch);
     }
+    const sel = this.sel;
+    if (sel && sel.id === e.pointerId) {
+      this.sel = null;
+      const pos = this.local(e);
+      if (e.type !== 'pointerup') {
+        if (sel.moved && sel.grab) this.hooks.onDragCancel?.();
+      } else if (!sel.moved) this.hooks.onSelect?.(this.toSheet(pos), this.hitTol(sel.touch));
+      else if (sel.grab) this.hooks.onDragEnd?.((pos.x - sel.start.x) / this.zoom, (pos.y - sel.start.y) / this.zoom);
+    }
     this.resetBaseline();
     this.scheduleRender();
     this.queueStats();
@@ -462,16 +521,23 @@ export class PdfViewer {
     this.hooks.onPlace?.(geom.sheetToUser(eff), eff);
   }
 
-  // ---- Cancella: tocco fermo ----
-  private eraseTol(touch: boolean): number {
-    return (touch ? ERASE_TOL_PX.touch : ERASE_TOL_PX.mouse) / this.zoom;
+  // ---- Cancella e Seleziona: tocco fermo ----
+  /** Tolleranza in pt del foglio, uguale per Cancella e Seleziona. */
+  private hitTol(touch: boolean): number {
+    return (touch ? HIT_TOL_PX.touch : HIT_TOL_PX.mouse) / this.zoom;
   }
   private previewErase(pos: Pt, touch: boolean): void {
-    this.hooks.onErasePreview?.(this.toSheet(pos), this.eraseTol(touch));
+    this.hooks.onErasePreview?.(this.toSheet(pos), this.hitTol(touch));
   }
   private erase(pos: Pt, touch: boolean): void {
     const s = this.toSheet(pos);
-    if (this.inPage(s)) this.hooks.onErase?.(s, this.eraseTol(touch));
+    if (this.inPage(s)) this.hooks.onErase?.(s, this.hitTol(touch));
+  }
+  /** Interrompe un tocco in modo 'select'; se stava trascinando l'oggetto, lo rimette dov'era. */
+  private cancelSelect(): void {
+    const sel = this.sel;
+    this.sel = null;
+    if (sel?.moved && sel.grab) this.hooks.onDragCancel?.();
   }
   private clearTap(): void {
     if (!this.tap) return;

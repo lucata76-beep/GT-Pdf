@@ -37,10 +37,16 @@ export interface LayoutText {
   sizePt: number;
   color: string;
 }
-/** Forma per scegliere l'oggetto con un tocco: spezzate e rettangoli nel foglio. */
+/** Cerchio pieno nel foglio (pt fisici). */
+export interface SheetCircle {
+  c: SheetPoint;
+  r: number;
+}
+/** Forma per scegliere l'oggetto con un tocco: spezzate, rettangoli e cerchi pieni nel foglio. */
 export interface Shape {
   lines: SheetPoint[][];
   rects: SheetRect[];
+  circles: SheetCircle[];
 }
 export interface Layout {
   lines: LayoutLine[];
@@ -90,7 +96,7 @@ export function layoutText(t: TextSpec, geom: PageGeometry): Layout {
     arrows: [],
     boxes: [],
     texts: t.text === '' ? [] : [{ text: t.text, x: o.x, y: o.y, sizePt: t.textPt, color: t.color }],
-    hit: { lines: [], rects: [rect] },
+    hit: { lines: [], rects: [rect], circles: [] },
   };
 }
 
@@ -170,7 +176,7 @@ export function layoutDimension(d: DimSpec, geom: PageGeometry, label: string): 
     arrows,
     boxes: [{ rect, borderPt: LABEL_BORDER_PT, color: d.color }],
     texts: [{ text: label, x: rect.x + pad, y: rect.y + pad + ASCENT_EM * size, sizePt: size, color: d.color }],
-    hit: { lines: hitLines, rects: [rect] },
+    hit: { lines: hitLines, rects: [rect], circles: [] },
   };
 }
 

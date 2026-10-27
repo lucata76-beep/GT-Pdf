@@ -2,6 +2,7 @@
 // Tutto in coordinate del foglio (pt fisici, origine in alto a sinistra): gli oggetti stanno in un gruppo SVG con
 // transform translate+scale(zoom), quindi spessori, pattern di tratteggio e corpo dei testi sono in pt come nell'esportazione.
 // Segni, mira e badge hanno dimensione fissa sullo schermo e vengono riposizionati a ogni cambio di vista.
+import { type SheetCover, coverShapeOf } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
@@ -12,8 +13,14 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Spessore minimo visibile sullo schermo (pixel CSS): una linea di 0.25 pt a zoom ridotto non deve sparire. */
 export const MIN_SCREEN_STROKE_PX = 1;
 
-/** Rette e linee (spezzata con tipo di linea) oppure testi e quote (primitive gia' calcolate dal layout). */
-export type DrawItem = { kind: 'line'; id: number; points: readonly SheetPoint[]; stroke: Stroke } | { kind: 'layout'; id: number; layout: Layout };
+/**
+ * Rette e linee (spezzata con tipo di linea), testi e quote (primitive gia' calcolate dal layout) oppure coperture.
+ * Le coperture vanno in uno strato SOTTO a tutto il resto: l'ordine della lista conta solo dentro lo stesso strato.
+ */
+export type DrawItem =
+  | { kind: 'line'; id: number; points: readonly SheetPoint[]; stroke: Stroke }
+  | { kind: 'layout'; id: number; layout: Layout }
+  | { kind: 'cover'; id: number; cover: SheetCover };
 export interface Marker {
   p: SheetPoint;
   label?: string;
@@ -39,11 +46,35 @@ interface StrokeEl {
 /** Carattere dei testi sul foglio: Helvetica come nell'esportazione (decisione 6); Arial e Liberation Sans hanno le stesse larghezze. */
 export const DRAWING_FONT = "Helvetica, Arial, 'Liberation Sans', sans-serif";
 
+/** Riempimento delle coperture: bianco pieno, senza bordo. */
+const COVER_FILL = '#ffffff';
+
+function coverEl(c: SheetCover): SVGElement {
+  return c.kind === 'rect'
+    ? svgEl('rect', { x: c.rect.x, y: c.rect.y, width: c.rect.w, height: c.rect.h, fill: COVER_FILL, stroke: 'none' })
+    : svgEl('circle', { cx: c.circle.c.x, cy: c.circle.c.y, r: c.circle.r, fill: COVER_FILL, stroke: 'none' });
+}
+
+/** Elementi SVG di una forma: spezzate come tracciati, rettangoli e cerchi pieni. Lo stile lo decide il gruppo che li contiene (CSS). */
+function shapeEls(shape: Shape): SVGElement[] {
+  const els: SVGElement[] = shape.lines.map((pts) => svgEl('path', { d: pathData(pts), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  for (const r of shape.rects) els.push(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, 'stroke-linejoin': 'round' }));
+  for (const c of shape.circles) els.push(svgEl('circle', { cx: c.c.x, cy: c.c.y, r: c.r }));
+  return els;
+}
+
 export class SceneOverlay {
   readonly el: HTMLDivElement;
   private readonly sheetG = svgEl('g');
+  /** Coperture: sotto linee, quote e testi, qualunque sia l'ordine di creazione. */
+  private readonly coversG = svgEl('g', { class: 'sc-covers' });
+  /** Copertura in costruzione: stesso strato delle altre coperture, appena sopra. */
+  private readonly coverDraftG = svgEl('g', { class: 'sc-cover-draft' });
   private readonly objectsG = svgEl('g', { class: 'sc-objects' });
   private readonly draftG = svgEl('g', { class: 'sc-draft' });
+  /** Oggetto selezionato e contorno sottile della copertura in costruzione (non fanno parte del disegno esportato). */
+  private readonly selG = svgEl('g', { class: 'sc-sel' });
+  private readonly outlineG = svgEl('g', { class: 'sc-outline' });
   private readonly hlG = svgEl('g', { class: 'sc-hl' });
   private readonly previewG = svgEl('g', { class: 'sc-preview' });
   private readonly guide = svgEl('path', { class: 'sc-guide', fill: 'none' });
@@ -63,7 +94,7 @@ export class SceneOverlay {
   constructor() {
     this.aimG.innerHTML = '<line x1="-10" x2="10" y1="0" y2="0"/><line x1="0" x2="0" y1="-10" y2="10"/>';
     this.guide.setAttribute('display', 'none');
-    this.sheetG.append(this.objectsG, this.draftG, this.hlG, this.previewG, this.guide);
+    this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.outlineG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
     svg.append(this.sheetG, this.markersG, this.aimG);
     this.el = h('div', { class: 'viewer-layer' }, svg, this.badgeEl);
@@ -104,8 +135,13 @@ export class SceneOverlay {
   setObjects(items: readonly DrawItem[]): void {
     this.strokes = this.previewStroke ? [this.previewStroke] : [];
     const els: SVGElement[] = [];
+    const covers: SVGElement[] = [];
     for (const it of items) {
-      if (it.kind === 'line') {
+      if (it.kind === 'cover') {
+        const el = coverEl(it.cover);
+        el.dataset.id = String(it.id);
+        covers.push(el);
+      } else if (it.kind === 'line') {
         const s = this.makeStroke(it.points, it.stroke);
         s.el.dataset.id = String(it.id);
         this.strokes.push(s);
@@ -116,7 +152,35 @@ export class SceneOverlay {
         els.push(g);
       }
     }
+    this.coversG.replaceChildren(...covers);
     this.objectsG.replaceChildren(...els);
+  }
+
+  /** Copertura in costruzione: riempimento bianco nello strato delle coperture (sotto gli oggetti) e contorno sottile sopra. */
+  setCoverDraft(c: SheetCover | null): void {
+    this.coverDraftG.replaceChildren(...(c ? [coverEl(c)] : []));
+    this.outlineG.replaceChildren(...(c ? shapeEls(coverShapeOf(c)) : []));
+  }
+
+  /** Oggetto selezionato: alone sulle linee, cornice sottile su rettangoli e cerchi. */
+  setSelection(shape: Shape | null): void {
+    this.selG.removeAttribute('transform');
+    this.selG.replaceChildren(...(shape ? shapeEls(shape) : []));
+  }
+
+  /** Durante il trascinamento: sposta (dx, dy pt del foglio) l'oggetto `id` e la sua evidenziazione, senza ridisegnare. Null = rimette a posto. */
+  setDragOffset(id: number | null, dx: number, dy: number): void {
+    const tr = id === null ? null : `translate(${dx} ${dy})`;
+    const apply = (el: Element | null): void => {
+      if (!el) return;
+      if (tr) el.setAttribute('transform', tr);
+      else el.removeAttribute('transform');
+    };
+    apply(this.selG);
+    for (const g of [this.coversG, this.objectsG]) {
+      for (const el of g.querySelectorAll('[transform]')) el.removeAttribute('transform');
+      if (id !== null) apply(g.querySelector(`[data-id="${id}"]`));
+    }
   }
 
   /** Testo o quota in corso di scrittura (bozza): stesso disegno degli oggetti, non ancora nel documento. */
@@ -155,13 +219,7 @@ export class SceneOverlay {
 
   /** Evidenzia un oggetto (es. quello che si sta per cancellare). */
   setHighlight(shape: Shape | null): void {
-    if (!shape) {
-      this.hlG.replaceChildren();
-      return;
-    }
-    const els: SVGElement[] = shape.lines.map((pts) => svgEl('path', { d: pathData(pts), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-    for (const r of shape.rects) els.push(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: 'none', 'stroke-linejoin': 'round' }));
-    this.hlG.replaceChildren(...els);
+    this.hlG.replaceChildren(...(shape ? shapeEls(shape) : []));
   }
 
   /** Linea in costruzione, con le proprieta' che avra' una volta finita. */

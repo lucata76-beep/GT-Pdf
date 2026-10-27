@@ -83,6 +83,13 @@ export class PageGeometry {
     return { x: (m[3] * x - m[2] * y) / det, y: (-m[1] * x + m[0] * y) / det };
   }
 
+  /** Spostamento (dx, dy) sul foglio mostrato, in pt fisici, riportato nello spazio utente (unita' utente). */
+  sheetDeltaToUser(dx: number, dy: number): UserPoint {
+    const o = this.sheetToUser({ x: 0, y: 0 });
+    const p = this.sheetToUser({ x: dx, y: dy });
+    return { x: p.x - o.x, y: p.y - o.y };
+  }
+
   /**
    * Angolo della linea di base (gradi, antiorario come in PDF, in [0, 360)) con cui un testo scritto nello spazio utente
    * appare orizzontale e leggibile sul foglio mostrato: 0, 90, 180 o 270 a seconda di /Rotate. Per l'esportazione (CP5):

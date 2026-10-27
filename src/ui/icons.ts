@@ -13,6 +13,7 @@ import hand from '../assets/icons/hand.svg?raw';
 import maximize from '../assets/icons/maximize.svg?raw';
 import menu from '../assets/icons/menu.svg?raw';
 import minus from '../assets/icons/minus.svg?raw';
+import mousePointer from '../assets/icons/mouse-pointer-2.svg?raw';
 import panelRight from '../assets/icons/panel-right.svg?raw';
 import play from '../assets/icons/play.svg?raw';
 import plus from '../assets/icons/plus.svg?raw';
@@ -46,6 +47,7 @@ const ICONS = {
   maximize,
   menu,
   minus,
+  'mouse-pointer': mousePointer,
   'panel-right': panelRight,
   play,
   plus,

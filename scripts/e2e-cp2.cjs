@@ -275,17 +275,9 @@ async function mouseSuite(browser) {
   last = objs[objs.length - 1];
   check('Tratto-punto 0.5 pt: 6 1.5 0.5 1.5', last.dash === '6 1.5 0.5 1.5', last.dash);
   check('Colore personalizzato #12AB34', last.stroke === '#12AB34', last.stroke);
-  // Applica all'ultima linea: cambia l'ultima, non le altre
+  // ("Applica all'ultima linea" e' stato tolto in CP4: le proprieta' di un oggetto qualunque si cambiano con Seleziona, provato in e2e-cp4.cjs)
   await insp.getByRole('button', { name: 'Continua' }).click();
   await insp.locator('button[aria-label^="Rosso"]').click();
-  const before = await objects(page);
-  await insp.getByRole('button', { name: "Applica all'ultimo oggetto" }).click();
-  const after = await objects(page);
-  check("Applica all'ultimo oggetto: solo l'ultima cambia (continua, rosso)", after[after.length - 1].dash === null && after[after.length - 1].stroke === '#D32F2F' && after[after.length - 2].dash === before[before.length - 2].dash);
-  await undo.click();
-  const undone = await objects(page);
-  check("Annulla l'applicazione: l'ultima linea torna tratto-punto verde-custom", undone[undone.length - 1].dash === '6 1.5 0.5 1.5' && undone[undone.length - 1].stroke === '#12AB34');
-  await redo.click();
 
   // --- Cancella ---
   const countBefore = (await objects(page)).length;

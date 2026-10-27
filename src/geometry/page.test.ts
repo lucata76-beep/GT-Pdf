@@ -2,7 +2,7 @@ import { PDFDocument, PDFName, PDFNumber, degrees } from '@cantoo/pdf-lib';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
-import { distToPolyline, distToRect, distToSegment, distToShape, pickNearest } from './hit';
+import { distToCircle, distToPolyline, distToRect, distToSegment, distToShape, pickTop } from './hit';
 import type { Shape } from './layout';
 import { orthoSheet, orthoUser } from './ortho';
 import { PageGeometry, type PageSpec, type Pt } from './page';
@@ -188,25 +188,57 @@ describe('hit-test (cancella con un tocco)', () => {
     const pl = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
     expect(distToPolyline({ x: 12, y: 5 }, pl)).toBe(2);
   });
-  it('pickNearest: entro la tolleranza, il piu\' vicino; a parita\' l\'ultimo; fuori tolleranza niente', () => {
+  it('pickTop: tra gli elementi entro la tolleranza vince quello in primo piano (l\'ultimo), non il piu\' vicino', () => {
     const items = [
       { id: 1, pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }] },
       { id: 2, pts: [{ x: 0, y: 4 }, { x: 100, y: 4 }] },
-      { id: 3, pts: [{ x: 0, y: 4 }, { x: 100, y: 4 }] },
     ];
-    const shape = (i: (typeof items)[number]): Shape => ({ lines: [i.pts], rects: [] });
-    expect(pickNearest(items, shape, { x: 50, y: 1 }, 5)?.id).toBe(1);
-    expect(pickNearest(items, shape, { x: 50, y: 3 }, 5)?.id).toBe(3); // 2 e 3 a pari distanza: l'ultimo
-    expect(pickNearest(items, shape, { x: 50, y: 30 }, 5)).toBeNull();
+    const shape = (i: (typeof items)[number]): Shape => ({ lines: [i.pts], rects: [], circles: [] });
+    expect(pickTop(items, shape, { x: 50, y: 1 }, 5)?.id).toBe(2); // il 2 e' piu' lontano ma sta sopra
+    expect(pickTop(items, shape, { x: 50, y: -3 }, 5)?.id).toBe(1); // il 2 e' fuori portata (7 > 5)
+    expect(pickTop(items, shape, { x: 50, y: 30 }, 5)).toBeNull();
+    expect(pickTop([], shape, { x: 0, y: 0 }, 5)).toBeNull();
+  });
+  it('cerchio pieno: distanza 0 dentro, dal bordo fuori', () => {
+    const c = { c: { x: 50, y: 50 }, r: 10 };
+    expect(distToCircle({ x: 55, y: 50 }, c)).toBe(0);
+    expect(distToCircle({ x: 50, y: 50 }, c)).toBe(0);
+    expect(distToCircle({ x: 73, y: 50 }, c)).toBeCloseTo(13, 12);
+    expect(distToShape({ x: 62, y: 50 }, { lines: [], rects: [], circles: [c] })).toBeCloseTo(2, 12);
   });
   it('rettangoli (testi e badge): distanza 0 dentro, minima dai lati fuori', () => {
     const r = { x: 10, y: 10, w: 20, h: 8 };
     expect(distToRect({ x: 15, y: 12 }, r)).toBe(0);
     expect(distToRect({ x: 35, y: 14 }, r)).toBe(5);
     expect(distToRect({ x: 33, y: 22 }, r)).toBe(5); // angolo: (3, 4)
-    const shape: Shape = { lines: [[{ x: 0, y: 0 }, { x: 0, y: 100 }]], rects: [r] };
+    const shape: Shape = { lines: [[{ x: 0, y: 0 }, { x: 0, y: 100 }]], rects: [r], circles: [] };
     expect(distToShape({ x: 15, y: 12 }, shape)).toBe(0);
     expect(distToShape({ x: -2, y: 50 }, shape)).toBe(2);
-    expect(pickNearest([1, 2], (i) => (i === 1 ? { lines: [], rects: [r] } : { lines: [[{ x: 100, y: 100 }, { x: 101, y: 100 }]], rects: [] }), { x: 12, y: 12 }, 3)).toBe(1);
+    expect(pickTop([2, 1], (i) => (i === 1 ? { lines: [], rects: [r], circles: [] } : { lines: [[{ x: 100, y: 100 }, { x: 101, y: 100 }]], rects: [], circles: [] }), { x: 12, y: 12 }, 3)).toBe(1);
+  });
+});
+
+describe('sheetDeltaToUser: spostamento sul foglio riportato nello spazio utente', () => {
+  for (const rotate of [0, 90, 180, 270]) {
+    for (const userUnit of [1, 2.5]) {
+      it(`/Rotate ${rotate}, UserUnit ${userUnit}: e' la differenza tra due punti, per ogni posizione di partenza`, () => {
+        const g = new PageGeometry({ view: [50, 40, 450, 600], rotate, userUnit });
+        const d = g.sheetDeltaToUser(10, 0);
+        // 10 pt fisici verso destra sul foglio = 10 / UserUnit unita' utente, nella direzione utente giusta
+        expect(Math.hypot(d.x, d.y)).toBeCloseTo(10 / userUnit, 9);
+        const s0 = { x: 37, y: 91 };
+        const u0 = g.sheetToUser(s0);
+        const u1 = g.sheetToUser({ x: s0.x + 10, y: s0.y });
+        near({ x: u1.x - u0.x, y: u1.y - u0.y }, d);
+        const e = g.sheetDeltaToUser(0, 10);
+        expect(d.x * e.x + d.y * e.y).toBeCloseTo(0, 9); // assi ortogonali
+      });
+    }
+  }
+  it('con /Rotate 90 spostare a destra sul foglio e\' spostare lungo Y nello spazio utente', () => {
+    const g = new PageGeometry({ view: [0, 0, 400, 600], rotate: 90, userUnit: 1 });
+    const d = g.sheetDeltaToUser(10, 0);
+    expect(d.x).toBeCloseTo(0, 12);
+    expect(Math.abs(d.y)).toBeCloseTo(10, 12);
   });
 });

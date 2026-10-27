@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CoverDef } from '../geometry/cover';
 import type { DimensionDef } from '../geometry/dimension';
 import { PageGeometry, type UserPoint } from '../geometry/page';
 import { COINCIDENT_PX, Construction, type ConstructionEvents } from './construction';
@@ -10,6 +11,7 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {
   const log: string[] = [];
   const lines: { kind: string; points: UserPoint[] }[] = [];
   const dims: DimensionDef[] = [];
+  const covers: CoverDef[] = [];
   const texts: UserPoint[] = [];
   const state = { ortho: opts.ortho ?? false };
   const ev: ConstructionEvents = {
@@ -27,10 +29,14 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {
       log.push(`dim:${def.dim}`);
       dims.push(def);
     },
+    cover: (def) => {
+      log.push(`cover:${def.shape}`);
+      covers.push(def);
+    },
     reject: () => log.push('reject'),
   };
   const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho }, ev);
-  return { c, log, lines, dims, texts, state };
+  return { c, log, lines, dims, covers, texts, state };
 }
 const P = (x: number, y: number): UserPoint => ({ x, y });
 
@@ -386,5 +392,122 @@ describe('Quota', () => {
     expect(c.prompt).toBe('Quota raggio R: indica un punto sul bordo');
     c.place(P(160, 700));
     expect(c.prompt).toBe('Quota raggio R: digita il valore con il tastierino');
+  });
+});
+
+describe('Copertura (rettangolo, quadrato, cerchio)', () => {
+  it('rettangolo: due angoli opposti, completa al secondo punto e riparte da capo', () => {
+    const { c, log, covers } = setup();
+    c.setTool('cover');
+    expect(c.needed).toBe(2);
+    c.place(P(100, 100));
+    expect(c.pending).toBe(true);
+    c.place(P(300, 200));
+    expect(log).toEqual(['cover:rect']);
+    expect(covers[0]).toEqual({ shape: 'rect', p1: P(100, 100), p2: P(300, 200) });
+    expect(c.pending).toBe(false);
+    c.place(P(10, 10));
+    c.place(P(60, 50));
+    expect(log).toEqual(['cover:rect', 'cover:rect']);
+  });
+
+  it('rettangolo senza larghezza o altezza (su schermo): rifiutato, il primo punto resta', () => {
+    const { c, log } = setup();
+    c.setTool('cover');
+    c.place(P(100, 100));
+    c.place(P(300, 102)); // 2 px di altezza a zoom 1: meno di COINCIDENT_PX
+    c.place(P(103, 300)); // 3 px di larghezza
+    expect(log).toEqual(['reject', 'reject']);
+    expect(c.points).toHaveLength(1);
+    c.place(P(100 + COINCIDENT_PX, 100 + COINCIDENT_PX));
+    expect(log.at(-1)).toBe('cover:rect');
+  });
+
+  it('il limite si misura in pixel di schermo: con lo zoom un rettangolo piccolo e\' valido', () => {
+    const { c, log } = setup({ zoom: 8 });
+    c.setTool('cover');
+    c.place(P(100, 100));
+    c.place(P(101, 101)); // 1 pt x 8 = 8 px
+    expect(log).toEqual(['cover:rect']);
+  });
+
+  it('quadrato: il secondo punto diventa l\'angolo squadrato (lato = il maggiore dei due spostamenti, verso il punto indicato)', () => {
+    const { c, covers } = setup();
+    c.setTool('cover');
+    c.setCoverKind('square');
+    c.place(P(100, 400)); // pagina senza rotazione: utente Y verso l'alto, foglio Y verso il basso
+    c.place(P(180, 380)); // dx = +80, sul foglio dy = +20 (verso il basso): lato 80
+    const cv = covers[0];
+    expect(cv?.shape).toBe('square');
+    expect(cv?.p1).toEqual(P(100, 400));
+    expect(cv?.p2.x).toBeCloseTo(180, 9);
+    expect(cv?.p2.y).toBeCloseTo(320, 9); // 80 verso il basso del foglio = Y utente 400 - 80
+  });
+
+  it('quadrato: la mira (constrain) mostra gia\' l\'angolo squadrato, e piazzarlo non lo cambia', () => {
+    const { c, covers } = setup();
+    c.setTool('cover');
+    c.setCoverKind('square');
+    expect(c.constrain({ x: 123, y: 456 })).toEqual({ x: 123, y: 456 }); // senza primo punto: nessun vincolo
+    c.place(P(100, 400));
+    const sheetA = flat.userToSheet(P(100, 400));
+    const raw = { x: sheetA.x + 70, y: sheetA.y - 30 };
+    const eff = c.constrain(raw);
+    expect(eff.x - sheetA.x).toBeCloseTo(70, 9);
+    expect(sheetA.y - eff.y).toBeCloseTo(70, 9); // quadrato: stesso lato, verso l'alto come il punto
+    c.place(flat.sheetToUser(eff));
+    const cv = covers[0];
+    expect(cv).toBeDefined();
+    const s2 = flat.userToSheet((cv as CoverDef).p2);
+    expect(s2.x).toBeCloseTo(eff.x, 9);
+    expect(s2.y).toBeCloseTo(eff.y, 9);
+  });
+
+  it('quadrato su pagina /Rotate 90 + CropBox: e\' un quadrato sul foglio mostrato', () => {
+    const { c, covers } = setup({ geom: rot });
+    c.setTool('cover');
+    c.setCoverKind('square');
+    c.place(P(100, 100));
+    c.place(P(260, 130));
+    const cv = covers[0] as CoverDef;
+    const a = rot.userToSheet(cv.p1);
+    const b = rot.userToSheet(cv.p2);
+    expect(Math.abs(b.x - a.x)).toBeCloseTo(Math.abs(b.y - a.y), 9);
+    expect(Math.abs(b.x - a.x)).toBeGreaterThan(20);
+  });
+
+  it('cerchio: centro e punto sul bordo; raggio minimo come per gli altri strumenti', () => {
+    const { c, log, covers } = setup();
+    c.setTool('cover');
+    c.setCoverKind('circle');
+    c.place(P(200, 300));
+    c.place(P(201, 300)); // 1 px
+    expect(log).toEqual(['reject']);
+    c.place(P(260, 300));
+    expect(covers[0]).toEqual({ shape: 'circle', p1: P(200, 300), p2: P(260, 300) });
+  });
+
+  it('cambiare forma scarta il punto gia\' indicato; l\'ortogonale non si applica alle coperture', () => {
+    const { c, state } = setup({ ortho: true });
+    c.setTool('cover');
+    c.place(P(100, 100));
+    expect(c.anchor).toBeNull();
+    const raw = { x: 250.7, y: 399.3 };
+    expect(c.constrain(raw)).toEqual(raw); // rettangolo: nessun vincolo, nemmeno con ORTO attivo
+    state.ortho = false;
+    c.setCoverKind('circle');
+    expect(c.points).toHaveLength(0);
+  });
+
+  it('i testi guida seguono la forma e il passo', () => {
+    const { c } = setup();
+    c.setTool('cover');
+    expect(c.prompt).toBe('Copertura rettangolare: indica il primo angolo');
+    c.place(P(100, 100));
+    expect(c.prompt).toBe('Copertura rettangolare: indica l\'angolo opposto');
+    c.setCoverKind('circle');
+    expect(c.prompt).toBe('Copertura circolare: indica il centro');
+    c.place(P(100, 100));
+    expect(c.prompt).toBe('Copertura circolare: indica un punto sul bordo');
   });
 });

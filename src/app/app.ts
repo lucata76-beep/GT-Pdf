@@ -1,9 +1,10 @@
-// Guscio dell'app (CP3): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
-// Strumenti: Sposta, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Cancella. Oggetti e scala sono in memoria
+// Guscio dell'app (CP4): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
+// Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella. Oggetti e scala sono in memoria
 // nella sessione (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo, dimensionLabel } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
-import { pickNearest } from '../geometry/hit';
+import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf } from '../geometry/cover';
+import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
 import { fmt, fmtTrim } from '../geometry/numbers';
@@ -13,18 +14,23 @@ import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { type Command, History } from '../model/history';
 import {
   AddObject,
+  type CoverObject,
   type DimensionObject,
   DocumentModel,
   type LineObject,
+  MoveObject,
+  type ObjectProps,
   type PageObject,
   RemoveObject,
   SetProps,
   SetScale,
   type TextObject,
+  drawOrder,
   isLine,
+  objectLabel,
   objectNoun,
+  patchedProps,
   propsEqual,
-  propsFor,
   propsOf,
 } from '../model/model';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
@@ -46,7 +52,7 @@ import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 const assetUrl = (path: string): string => new URL(path, document.baseURI).href;
 const CSS_PX_PER_PT = 96 / 72; // 100 % = 96 px CSS per pollice; non e' la dimensione fisica sullo schermo
 
-type ToolId = 'pan' | ConstructionTool | 'erase';
+type ToolId = 'pan' | 'select' | ConstructionTool | 'erase';
 interface Tool {
   id: string;
   label: string;
@@ -58,6 +64,7 @@ interface Tool {
 }
 const TOOLS: Tool[] = [
   { id: 'pan', label: 'Sposta vista', icon: 'hand', mode: 'pan' },
+  { id: 'select', label: 'Seleziona', icon: 'mouse-pointer', mode: 'select', needsDoc: true },
   { id: 'segment', label: 'Retta', icon: 'slash', mode: 'pick', needsDoc: true },
   { id: 'polyline', label: 'Linea', icon: 'polyline', mode: 'pick', needsDoc: true },
   { id: 'calibrate', label: 'Scala', icon: 'scaling', mode: 'pick', needsDoc: true },
@@ -65,9 +72,11 @@ const TOOLS: Tool[] = [
   { id: 'erase', label: 'Cancella', icon: 'eraser', mode: 'erase', needsDoc: true },
   { id: 'dim', label: 'Quota', icon: 'ruler', mode: 'pick', needsDoc: true },
   { id: 'text', label: 'Testo', icon: 'type', mode: 'pick', needsDoc: true },
-  { id: 'cover', label: 'Copertura', icon: 'square', cp: 'CP4' },
+  { id: 'cover', label: 'Copertura', icon: 'square', mode: 'pick', needsDoc: true },
 ];
-const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase';
+const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase' && id !== 'select';
+/** Desinenza del participio per i messaggi: "Testo cancellato", "Quota cancellata". */
+const fem = (o: PageObject): 'o' | 'a' => (o.kind === 'text' ? 'o' : 'a');
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
 type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
 
@@ -90,6 +99,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let textPt = DEFAULT_TEXT_PT;
   /** Tipo della quota che si sta per disegnare. */
   let dimType: DimType = 'aligned';
+  /** Forma della copertura che si sta per disegnare. */
+  let coverKind: CoverKind = 'rect';
+  /** Oggetto selezionato (id) nella pagina corrente, solo con lo strumento Seleziona. */
+  let selected: number | null = null;
   /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
   let currentAim: UserPoint | null = null;
   /** Testo o valore di quota in corso di scrittura con il tastierino (non e' ancora nel documento). */
@@ -123,6 +136,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       },
       text: (at) => startTextEntry(at),
       dimension: (def) => startDimEntry(def),
+      cover: (def) => {
+        const obj: CoverObject = { id: model.newId(), kind: 'cover', shape: def.shape, p1: { ...def.p1 }, p2: { ...def.p2 } };
+        history.exec(new AddObject(pageNo, obj));
+        say(`${coverInfo(def.shape).label} aggiunta: bianca, sotto linee, quote e testi. Annulla per toglierla.`);
+      },
       reject: say,
     },
   );
@@ -211,7 +229,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     { label: 'Annulla', hint: construction.pending ? 'ultimo punto' : (history.nextUndo ?? undefined), disabled: !canUndo(), onSelect: () => undoAction() },
     { label: 'Ripeti', hint: history.nextRedo ?? undefined, disabled: !history.canRedo, onSelect: () => redoAction() },
     'separator',
-    { label: 'Seleziona / sposta', hint: 'CP4', disabled: true },
+    { label: 'Seleziona / sposta', disabled: !pdf, onSelect: () => selectTool('select') },
     { label: 'Copia', hint: 'V2', disabled: true },
     { label: 'Duplica', hint: 'V2', disabled: true },
     { label: 'Cancella', disabled: !pdf, onSelect: () => selectTool('erase') },
@@ -222,7 +240,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     'separator',
     { label: 'Testo', disabled: !pdf, onSelect: () => selectTool('text') },
     ...DIM_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) })),
-    { label: 'Copertura bianca', hint: 'CP4', disabled: true },
+    ...COVER_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCoverKind(t.id) })),
     { label: 'Cerchio, arco, raccordo', hint: 'V2', disabled: true },
   ];
   const zoomMenu = (): MenuEntry[] => [
@@ -275,47 +293,77 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     palette.append(b);
   }
 
-  // ---------- Proprieta' delle linee ----------
+  // ---------- Proprieta' ----------
+  /** L'oggetto selezionato, se c'e' (solo con lo strumento Seleziona). */
+  function selObj(): PageObject | undefined {
+    return selected === null ? undefined : model.get(pageNo, selected);
+  }
+  /** Quali controlli servono a un oggetto: quelli delle sue proprieta' (la copertura non ne ha). */
+  const kindOfObject = (o: PageObject): StyleKind => (isLine(o) ? 'line' : o.kind === 'text' ? 'text' : o.kind === 'dim' ? 'dim' : 'none');
+  /** Proprieta' dell'oggetto come tipo di linea e corpo; quelle che l'oggetto non ha restano quelle di sessione (i controlli corrispondenti sono nascosti). */
+  function propsView(o: PageObject): { stroke: Stroke; textPt: number } {
+    const p = propsOf(o);
+    return { stroke: { style: p.style ?? stroke.style, color: p.color ?? stroke.color, widthPt: p.widthPt ?? stroke.widthPt }, textPt: p.textPt ?? textPt };
+  }
+  /** Modifica le proprieta' dell'oggetto selezionato: un comando annullabile per ogni modifica. */
+  function editSelected(o: PageObject, patch: ObjectProps): void {
+    const before = propsOf(o);
+    const after = patchedProps(o, patch);
+    if (propsEqual(before, after)) return;
+    history.exec(new SetProps(pageNo, o.id, before, after));
+    say(`Proprietà modificate: ${objectNoun(o)}. Annulla le ripristina.`);
+  }
+  // Con un oggetto selezionato i controlli lavorano su di lui; altrimenti sulle proprieta' dei NUOVI oggetti.
   const styleBinding: StyleBinding = {
-    get: () => stroke,
+    get: () => {
+      const o = selObj();
+      return o ? propsView(o).stroke : stroke;
+    },
     set: (patch) => {
-      Object.assign(stroke, patch);
-      onStyleChanged();
+      const o = selObj();
+      if (o) editSelected(o, patch);
+      else {
+        Object.assign(stroke, patch);
+        onStyleChanged();
+      }
     },
-    getTextPt: () => textPt,
+    getTextPt: () => {
+      const o = selObj();
+      return o ? propsView(o).textPt : textPt;
+    },
     setTextPt: (pt) => {
-      textPt = pt;
-      onStyleChanged();
-    },
-    applyToLast: () => {
-      const o = model.last(pageNo);
-      if (!o) return;
-      const before = propsOf(o);
-      history.exec(new SetProps(pageNo, o.id, before, { ...before, ...propsFor(o.kind, stroke, textPt) }));
-      say(`Proprietà applicate: ${objectNoun(o)}`);
-    },
-    canApplyToLast: () => {
-      const o = model.last(pageNo);
-      return o !== undefined && !propsEqual(propsOf(o), propsFor(o.kind, stroke, textPt));
+      const o = selObj();
+      if (o) editSelected(o, { textPt: pt });
+      else {
+        textPt = pt;
+        onStyleChanged();
+      }
     },
   };
   const inspectorStyle = createStyleControls(styleBinding);
   const popoverStyle = createStyleControls(styleBinding);
   const styleChip = h('button', { class: 'btn ctx-style', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': 'Proprietà del nuovo oggetto', onclick: () => toggleProps() });
-  /** Quali proprieta' contano per lo strumento attivo. */
-  const styleKind = (): StyleKind => (tool === 'text' ? 'text' : tool === 'dim' ? 'dim' : 'line');
+  /** Quali proprieta' contano: quelle dell'oggetto selezionato, altrimenti quelle dello strumento attivo. */
+  const styleKind = (): StyleKind => {
+    const o = selObj();
+    return o ? kindOfObject(o) : tool === 'text' ? 'text' : tool === 'dim' ? 'dim' : 'line';
+  };
   const refreshStyleChip = (): void => {
     const kind = styleKind();
+    const o = selObj();
+    const s = styleBinding.get();
     const aa = (): HTMLElement => {
       const el = h('span', { class: 'ctx-aa' }, 'Aa');
-      el.style.color = stroke.color;
+      el.style.color = s.color;
       return el;
     };
     styleChip.replaceChildren(
-      ...(kind === 'text' ? [] : [styleGlyph(stroke), h('span', { class: 'num' }, `${fmtTrim(stroke.widthPt, 3)} pt`)]),
-      ...(kind === 'line' ? [] : [aa(), h('span', { class: 'num' }, `${fmtTrim(textPt, 3)} pt`)]),
+      ...(kind === 'text' || kind === 'none' ? [] : [styleGlyph(s), h('span', { class: 'num' }, `${fmtTrim(s.widthPt, 3)} pt`)]),
+      ...(kind === 'line' || kind === 'none' ? [] : [aa(), h('span', { class: 'num' }, `${fmtTrim(styleBinding.getTextPt(), 3)} pt`)]),
     );
+    styleChip.setAttribute('aria-label', o ? "Proprietà dell'oggetto selezionato" : 'Proprietà del nuovo oggetto');
     popoverStyle.setKind(kind);
+    inspectorStyle.setKind(o ? kind : 'all');
   };
   function onStyleChanged(): void {
     inspectorStyle.refresh();
@@ -336,8 +384,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     dimTypeBtns.set(t.id, b);
     dimTypes.append(b);
   }
-  const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà del nuovo oggetto', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  const coverTypeBtns = new Map<CoverKind, HTMLButtonElement>();
+  const coverTypes = h('div', { class: 'ctx-covers seg', role: 'group', 'aria-label': 'Forma della copertura', hidden: true });
+  for (const t of COVER_TYPES) {
+    const b = h('button', { class: 'btn seg-btn', type: 'button', 'aria-pressed': String(t.id === coverKind), title: t.label, onclick: () => selectCoverKind(t.id) }, t.short);
+    coverTypeBtns.set(t.id, b);
+    coverTypes.append(b);
+  }
+  const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà', hidden: true }, popoverStyle.el);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -385,7 +440,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     } else {
       secs.push(section('Documento', h('p', { class: 'hint' }, 'Nessun documento aperto.')));
     }
-    secs.push(section('Proprietà (nuovi oggetti)', inspectorStyle.el));
+    const so = selObj();
+    secs.push(
+      section(
+        so ? 'Proprietà (oggetto selezionato)' : 'Proprietà (nuovi oggetti)',
+        ...(so ? [kv('Selezionato', objectLabel(so))] : []),
+        ...(so && kindOfObject(so) === 'none' ? [h('p', { class: 'hint' }, 'Le coperture sono bianche e senza bordo: non hanno proprietà da cambiare.')] : []),
+        inspectorStyle.el,
+      ),
+    );
     secs.push(section('App', kv('Versione', __BUILD_ID__)));
     inspector.replaceChildren(...secs);
   };
@@ -472,9 +535,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (def.needsDoc && !pdf) return;
     cancelEntry();
     tool = id;
+    selected = null; // la selezione vale solo con lo strumento Seleziona
+    viewer.setSelection(null);
     toggleProps(false);
     construction.setTool(isConstructionTool(id) ? id : null);
     if (id === 'dim') construction.setDimType(dimType);
+    if (id === 'cover') construction.setCoverKind(coverKind);
     currentAim = null;
     viewer.setMode(def.mode ?? 'pan');
     viewer.setHighlight(null);
@@ -482,6 +548,32 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     floatDist.setAttribute('aria-pressed', String(id === 'distance'));
     say('');
     refreshStyleChip();
+    renderInspector();
+    renderConstruction();
+  }
+
+  /** Sceglie la forma della copertura (e passa allo strumento Copertura). */
+  function selectCoverKind(k: CoverKind): void {
+    coverKind = k;
+    if (tool !== 'cover') selectTool('cover');
+    else {
+      construction.setCoverKind(k);
+      currentAim = null;
+      renderConstruction();
+    }
+  }
+
+  // ---------- Selezione ----------
+  function renderSelection(): void {
+    const o = selObj();
+    viewer.setSelection(o ? shapeOf(o) : null);
+  }
+  function setSelected(id: number | null): void {
+    selected = id;
+    viewer.setDragOffset(null, 0, 0);
+    renderSelection();
+    refreshStyleChip();
+    renderInspector();
     renderConstruction();
   }
 
@@ -504,6 +596,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const pts = construction.points;
     const aim = construction.done || construction.locked ? null : currentAim;
     viewer.setDraft(null);
+    viewer.setCoverDraft(null);
     if (!geom || !pdf) {
       viewer.setMarkers([]);
       viewer.setPreview(null);
@@ -532,6 +625,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           if (def) viewer.setDraft(dimLayout(def, null, geom, dimDraftLabel(def, null, geom)));
         }
       }
+    } else if (t === 'cover') {
+      viewer.setMarkers(pts.map((p) => ({ p })));
+      viewer.setPreview(null);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+      const first = pts[0];
+      if (first && aim) viewer.setCoverDraft(coverOnSheet({ shape: coverKind, p1: first, p2: aim }, geom)); // fondo bianco sotto gli oggetti + contorno sottile (solo a schermo)
     } else if (t === 'segment' || t === 'polyline') {
       const line = aim && pts.length > 0 ? [...pts, aim] : pts;
       viewer.setMarkers(pts.map((p) => ({ p })));
@@ -560,10 +660,24 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ctxBar.hidden = !active;
     ctxBar.dataset.tool = tool;
     const constructing = isConstructionTool(tool);
-    ctxHint.textContent = constructing ? construction.prompt : tool === 'erase' ? 'Cancella: tocca un oggetto per cancellarlo (Annulla lo ripristina)' : '';
+    const so = selObj();
+    ctxHint.textContent = constructing
+      ? construction.prompt
+      : tool === 'erase'
+        ? 'Cancella: tocca un oggetto per cancellarlo (Annulla lo ripristina)'
+        : tool === 'select'
+          ? so
+            ? `Selezionat${fem(so)}: ${objectLabel(so)}` // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
+            : 'Seleziona: tocca un oggetto, poi trascinalo'
+          : '';
     dimTypes.hidden = tool !== 'dim';
     for (const [id, b] of dimTypeBtns) b.setAttribute('aria-pressed', String(id === dimType));
-    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'text' || tool === 'dim');
+    coverTypes.hidden = tool !== 'cover';
+    for (const [id, b] of coverTypeBtns) b.setAttribute('aria-pressed', String(id === coverKind));
+    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'text' || tool === 'dim' || tool === 'select');
+    // Con Seleziona il riquadro occupa sempre il suo posto (invisibile se non c'e' nulla da cambiare): se comparisse
+    // solo con un oggetto selezionato, selezionare farebbe cambiare altezza alla barra e il foglio si ridimensionerebbe sotto il dito.
+    styleChip.classList.toggle('ghost', tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'));
     cancelBtn.hidden = !constructing;
     cancelBtn.disabled = !(construction.pending || construction.done || construction.locked);
     finishBtn.hidden = tool !== 'polyline';
@@ -614,13 +728,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const sheetLine = (o: LineObject, g: PageGeometry): SheetPoint[] => o.points.map((p) => g.userToSheet(p));
   const shapeOf = (o: PageObject): Shape => {
     const g = viewer.geometry;
-    if (!g) return { lines: [], rects: [] };
-    return isLine(o) ? { lines: [sheetLine(o, g)], rects: [] } : objectLayout(o, g).hit;
+    if (!g) return { lines: [], rects: [], circles: [] };
+    if (o.kind === 'cover') return coverShapeOf(coverOnSheet(o, g));
+    return isLine(o) ? { lines: [sheetLine(o, g)], rects: [], circles: [] } : objectLayout(o, g).hit;
   };
+  /** Gli oggetti dal fondo al primo piano: le coperture stanno sotto tutto, anche se disegnate dopo. */
   function sceneItems(): DrawItem[] {
     const g = viewer.geometry;
     if (!g) return [];
-    return model.objects(pageNo).map((o): DrawItem => (isLine(o) ? { kind: 'line', id: o.id, points: sheetLine(o, g), stroke: o.stroke } : { kind: 'layout', id: o.id, layout: objectLayout(o, g) }));
+    return drawOrder(model.objects(pageNo)).map((o): DrawItem => {
+      if (o.kind === 'cover') return { kind: 'cover', id: o.id, cover: coverOnSheet(o, g) };
+      return isLine(o) ? { kind: 'line', id: o.id, points: sheetLine(o, g), stroke: o.stroke } : { kind: 'layout', id: o.id, layout: objectLayout(o, g) };
+    });
   }
 
   // ---------- Testo e valore delle quote con il tastierino ----------
@@ -735,8 +854,9 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     );
   }
 
-  // ---------- Cancella ----------
-  const nearestObject = (sheet: { x: number; y: number }, tol: number): PageObject | null => pickNearest(model.objects(pageNo), shapeOf, sheet, tol);
+  // ---------- Scelta dell'oggetto con un tocco (Cancella e Seleziona) ----------
+  /** Tra gli oggetti entro la tolleranza, quello in primo piano (le coperture, sotto tutto, vincono solo se non c'e' altro a portata). */
+  const objectAt = (sheet: { x: number; y: number }, tol: number): PageObject | null => pickTop(drawOrder(model.objects(pageNo)), shapeOf, sheet, tol);
 
   // ---------- Annulla / ripeti ----------
   const canUndo = (): boolean => !entry && (construction.pending || history.canUndo);
@@ -796,22 +916,47 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     renderConstruction();
   };
   viewer.hooks.onErasePreview = (sheet, tol) => {
-    const o = sheet ? nearestObject(sheet, tol) : null;
+    const o = sheet ? objectAt(sheet, tol) : null;
     viewer.setHighlight(o ? shapeOf(o) : null);
   };
   viewer.hooks.onErase = (sheet, tol) => {
-    const o = nearestObject(sheet, tol);
+    const o = objectAt(sheet, tol);
     if (!o) {
       say('Nessun oggetto in questo punto: tocca sopra un oggetto');
       return;
     }
     history.exec(new RemoveObject(pageNo, o));
-    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${o.kind === 'text' ? 'o' : 'a'}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
+    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
+  };
+  // Seleziona: un tocco sceglie l'oggetto in primo piano; trascinare l'oggetto selezionato lo sposta (un solo comando).
+  viewer.hooks.onSelect = (sheet, tol) => {
+    const o = objectAt(sheet, tol);
+    setSelected(o ? o.id : null);
+    say(''); // lo dice gia' la barra contestuale: "Selezionata: Retta"
+  };
+  viewer.hooks.canGrab = (sheet, tol) => {
+    const o = selObj();
+    return o !== undefined && distToShape(sheet, shapeOf(o)) <= tol;
+  };
+  viewer.hooks.onDragMove = (dx, dy) => viewer.setDragOffset(selected, dx, dy);
+  viewer.hooks.onDragCancel = () => viewer.setDragOffset(null, 0, 0);
+  viewer.hooks.onDragEnd = (dx, dy) => {
+    viewer.setDragOffset(null, 0, 0);
+    const o = selObj();
+    const g = viewer.geometry;
+    if (!o || !g) return;
+    const d = g.sheetDeltaToUser(dx, dy); // lo spostamento sul foglio, riportato nello spazio utente PDF
+    if (d.x === 0 && d.y === 0) return;
+    history.exec(new MoveObject(pageNo, o, d.x, d.y));
+    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} spostat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} rimette a posto.`);
   };
 
   // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
   model.onChange(() => {
     refreshScene();
+    if (selected !== null && !model.get(pageNo, selected)) selected = null; // l'oggetto selezionato non c'e' piu'
+    renderSelection();
+    refreshStyleChip();
     updateScaleLabel();
     renderInspector();
     inspectorStyle.refresh();
@@ -841,6 +986,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       redoAction();
     } else if (e.key === 'Escape') {
       if (propsOpen) toggleProps(false);
+      else if (selected !== null) setSelected(null);
       else if (construction.pending || construction.done) cancelConstruction();
     } else if (e.key === 'Enter' && tool === 'polyline' && onCanvas) {
       e.preventDefault();
@@ -877,6 +1023,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   async function goTo(n: number): Promise<void> {
     if (!pdf) return;
     cancelEntry();
+    selected = null;
     pageNo = Math.min(Math.max(1, n), pdf.pages.length);
     construction.reset();
     currentAim = null;
@@ -884,6 +1031,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     try {
       const rendering = viewer.setPage(await pdf.doc.getPage(pageNo));
       refreshScene(); // la geometria della nuova pagina e' gia' impostata: gli oggetti compaiono subito
+      refreshStyleChip();
       renderConstruction();
       inspectorStyle.refresh();
       popoverStyle.refresh();
