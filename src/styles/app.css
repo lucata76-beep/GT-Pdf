@@ -96,6 +96,30 @@ body.app-mode {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
+.brand-logo {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r); /* 4 px, DESIGN.md */
+}
+.brand {
+  display: flex;
+  align-items: center;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.empty-logo {
+  display: block;
+  width: 160px;
+  height: 160px;
+  border-radius: var(--r);
+}
 .menus {
   display: flex;
   gap: 0.125rem;
@@ -387,7 +411,7 @@ body.app-mode {
   padding: var(--margin);
   text-align: center;
 }
-.empty-panel > :not(.btn) {
+.empty-panel > :not(.btn):not(.empty-logo) {
   width: min(100%, 24rem);
 }
 .empty-title {

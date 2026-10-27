@@ -10,6 +10,8 @@ import { type MenuEntry, menuButton } from '../ui/menu';
 import { PdfViewer, type UserPoint, type ViewerMode } from '../ui/viewer';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 
+// Percorsi relativi alla pagina: l'app sta sotto /GT-Pdf/ su GitHub Pages.
+const assetUrl = (path: string): string => new URL(path, document.baseURI).href;
 const nf = (n: number, d = 2): string => n.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d });
 const CSS_PX_PER_PT = 96 / 72; // 100 % = 96 px CSS per pollice; non e' la dimensione fisica sullo schermo
 
@@ -144,7 +146,19 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const bar = h(
     'header',
     { class: 'bar' },
-    h('h1', { class: 'brand' }, 'GT-Pdf'),
+    h(
+      'h1',
+      { class: 'brand' },
+      h('img', {
+        class: 'brand-logo',
+        src: assetUrl('brand/logo-bar-36.png'),
+        srcset: `${assetUrl('brand/logo-bar-36.png')} 1x, ${assetUrl('brand/logo-bar-72.png')} 2x, ${assetUrl('brand/logo-bar-108.png')} 3x`,
+        width: 36,
+        height: 36,
+        alt: '',
+      }),
+      h('span', { class: 'sr-only' }, 'GT-Pdf'),
+    ),
     h('nav', { class: 'menus', 'aria-label': 'Menu' }, menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Zoom', zoomMenu)),
     docName,
     h('div', { class: 'bar-right' }, h('div', { class: 'size-ctl' }, sizeDown, sizeUp), h('div', { class: 'zoom-ctl' }, zoomOutBtn, zoomLabel, zoomInBtn), inspectorBtn),
@@ -244,6 +258,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const emptyPanel = h(
     'div',
     { class: 'empty-panel' },
+    h('img', { class: 'empty-logo', src: assetUrl('brand/logo-empty-384.png'), width: 160, height: 160, alt: 'GT-Pdf' }),
     h('p', { class: 'empty-title' }, 'Nessun documento aperto'),
     emptyOpenBtn,
     h('p', { class: 'hint' }, 'Il file resta su questo dispositivo: nulla viene inviato.'),

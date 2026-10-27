@@ -13,3 +13,6 @@ public/pdfjs/
 # Sistema
 .DS_Store
 *.log
+
+# Originali non pubblicabili (repository pubblico): mai nel tracciamento
+local-assets/
