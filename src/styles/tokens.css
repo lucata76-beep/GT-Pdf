@@ -17,7 +17,8 @@
   --cad-measure: #0277bd;
   --cad-snap-topology: #00796b;
 
-  /* colors.* (Material, solo errori) */
+  /* colors.* (Material: errori e selezione del tastierino) */
+  --secondary-container: #69e8fe;
   --error: #ba1a1a;
   --error-container: #ffdad6;
   --on-error-container: #93000a;

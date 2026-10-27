@@ -4,6 +4,7 @@ import chevronLeft from '../assets/icons/chevron-left.svg?raw';
 import chevronRight from '../assets/icons/chevron-right.svg?raw';
 import copy from '../assets/icons/copy.svg?raw';
 import crosshair from '../assets/icons/crosshair.svg?raw';
+import deleteIcon from '../assets/icons/delete.svg?raw';
 import download from '../assets/icons/download.svg?raw';
 import eraser from '../assets/icons/eraser.svg?raw';
 import fileUp from '../assets/icons/file-up.svg?raw';
@@ -36,6 +37,7 @@ const ICONS = {
   'chevron-right': chevronRight,
   copy,
   crosshair,
+  delete: deleteIcon,
   download,
   eraser,
   'file-up': fileUp,

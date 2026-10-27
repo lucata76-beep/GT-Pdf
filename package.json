@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "test-pdfs": "node scripts/make-test-pdfs.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "helvetica-widths": "node scripts/make-helvetica-widths.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "2.11.1",

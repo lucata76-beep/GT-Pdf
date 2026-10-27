@@ -1,22 +1,43 @@
-// Guscio dell'app (CP2): barra con menu, palette, vista del documento, inspector, barra contestuale, barra di stato.
-// Strumenti: Sposta, Retta, Linea, Scala (calibrazione), Distanza, Cancella. Oggetti e scala sono in memoria nella sessione
-// (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
-import { fmt, fmtTrim } from '../geometry/numbers';
-import { measure, measureLines, measureMessage } from '../geometry/measure';
+// Guscio dell'app (CP3): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
+// Strumenti: Sposta, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Cancella. Oggetti e scala sono in memoria
+// nella sessione (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
+import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo, dimensionLabel } from '../geometry/dimension';
+import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { pickNearest } from '../geometry/hit';
-import type { UserPoint } from '../geometry/page';
+import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
+import { measure, measureLines, measureMessage } from '../geometry/measure';
+import { fmt, fmtTrim } from '../geometry/numbers';
+import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { type Command, History } from '../model/history';
-import { AddObject, DocumentModel, type LineObject, RemoveObject, SetScale, SetStroke } from '../model/model';
-import { DEFAULT_STROKE, type Stroke, strokeEquals } from '../model/stroke';
+import {
+  AddObject,
+  type DimensionObject,
+  DocumentModel,
+  type LineObject,
+  type PageObject,
+  RemoveObject,
+  SetProps,
+  SetScale,
+  type TextObject,
+  isLine,
+  objectNoun,
+  propsEqual,
+  propsFor,
+  propsOf,
+} from '../model/model';
+import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
+import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
+import { Keypad } from '../ui/keypad';
 import { type MenuEntry, menuButton } from '../ui/menu';
-import { type StyleBinding, createStyleControls, styleGlyph } from '../ui/styleControls';
+import type { DrawItem } from '../ui/overlay';
+import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
 import { Construction, type ConstructionTool } from './construction';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
@@ -42,11 +63,13 @@ const TOOLS: Tool[] = [
   { id: 'calibrate', label: 'Scala', icon: 'scaling', mode: 'pick', needsDoc: true },
   { id: 'distance', label: 'Distanza', icon: 'ruler-dimension', mode: 'pick', needsDoc: true },
   { id: 'erase', label: 'Cancella', icon: 'eraser', mode: 'erase', needsDoc: true },
-  { id: 'dim', label: 'Quota', icon: 'ruler', cp: 'CP3' },
-  { id: 'text', label: 'Testo', icon: 'type', cp: 'CP3' },
+  { id: 'dim', label: 'Quota', icon: 'ruler', mode: 'pick', needsDoc: true },
+  { id: 'text', label: 'Testo', icon: 'type', mode: 'pick', needsDoc: true },
   { id: 'cover', label: 'Copertura', icon: 'square', cp: 'CP4' },
 ];
-const isConstructionTool = (id: ToolId): id is ConstructionTool => id === 'segment' || id === 'polyline' || id === 'calibrate' || id === 'distance';
+const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase';
+/** Pagina e posizione (coordinate utente) dell'oggetto in corso di scrittura con il tastierino. */
+type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
 
 export interface AppOptions {
   openDiagnostics: () => void;
@@ -62,10 +85,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let uiSize = loadUiSize();
   let opening = false;
   let ortho = false;
-  /** Proprieta' delle NUOVE linee. */
+  /** Proprieta' dei NUOVI oggetti: tipo di linea, colore e spessore (anche delle quote), corpo del testo (testi e quote). */
   const stroke: Stroke = { ...DEFAULT_STROKE };
+  let textPt = DEFAULT_TEXT_PT;
+  /** Tipo della quota che si sta per disegnare. */
+  let dimType: DimType = 'aligned';
   /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
   let currentAim: UserPoint | null = null;
+  /** Testo o valore di quota in corso di scrittura con il tastierino (non e' ancora nel documento). */
+  let entry: Entry | null = null;
 
   // ---------- Vista ----------
   const statusMsg = h('span', { class: 'st-msg', role: 'status', 'aria-live': 'polite' });
@@ -93,6 +121,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const g = viewer.geometry;
         if (g) say(measureMessage(measure(g, a, b, model.scale(pageNo))));
       },
+      text: (at) => startTextEntry(at),
+      dimension: (def) => startDimEntry(def),
       reject: say,
     },
   );
@@ -170,7 +200,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const inspectorBtn = h('button', { class: 'btn bar-btn insp-toggle', type: 'button', 'aria-label': 'Mostra o nascondi le proprietà', 'aria-expanded': 'false', onclick: () => toggleInspector() }, icon('panel-right'));
 
   const fileMenu = (): MenuEntry[] => [
-    { label: 'Nuovo', onSelect: () => void newSession() },
     { label: 'Apri…', onSelect: () => void openFlow() },
     { label: 'Salva con nome…', hint: 'CP5', disabled: true },
     { label: 'Esporta PDF…', hint: 'CP5', disabled: true },
@@ -191,8 +220,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     { label: 'Retta', disabled: !pdf, onSelect: () => selectTool('segment') },
     { label: 'Linea', disabled: !pdf, onSelect: () => selectTool('polyline') },
     'separator',
-    { label: 'Testo', hint: 'CP3', disabled: true },
-    { label: 'Quota', hint: 'CP3', disabled: true },
+    { label: 'Testo', disabled: !pdf, onSelect: () => selectTool('text') },
+    ...DIM_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) })),
     { label: 'Copertura bianca', hint: 'CP4', disabled: true },
     { label: 'Cerchio, arco, raccordo', hint: 'V2', disabled: true },
   ];
@@ -253,22 +282,40 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       Object.assign(stroke, patch);
       onStyleChanged();
     },
+    getTextPt: () => textPt,
+    setTextPt: (pt) => {
+      textPt = pt;
+      onStyleChanged();
+    },
     applyToLast: () => {
       const o = model.last(pageNo);
       if (!o) return;
-      history.exec(new SetStroke(pageNo, o.id, { ...o.stroke }, { ...stroke }));
-      say("Proprietà applicate all'ultima linea");
+      const before = propsOf(o);
+      history.exec(new SetProps(pageNo, o.id, before, { ...before, ...propsFor(o.kind, stroke, textPt) }));
+      say(`Proprietà applicate: ${objectNoun(o)}`);
     },
     canApplyToLast: () => {
       const o = model.last(pageNo);
-      return o !== undefined && !strokeEquals(o.stroke, stroke);
+      return o !== undefined && !propsEqual(propsOf(o), propsFor(o.kind, stroke, textPt));
     },
   };
   const inspectorStyle = createStyleControls(styleBinding);
   const popoverStyle = createStyleControls(styleBinding);
-  const styleChip = h('button', { class: 'btn ctx-style', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': 'Proprietà della linea', onclick: () => toggleProps() });
+  const styleChip = h('button', { class: 'btn ctx-style', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': 'Proprietà del nuovo oggetto', onclick: () => toggleProps() });
+  /** Quali proprieta' contano per lo strumento attivo. */
+  const styleKind = (): StyleKind => (tool === 'text' ? 'text' : tool === 'dim' ? 'dim' : 'line');
   const refreshStyleChip = (): void => {
-    styleChip.replaceChildren(styleGlyph(stroke), h('span', { class: 'num' }, `${fmtTrim(stroke.widthPt, 3)} pt`));
+    const kind = styleKind();
+    const aa = (): HTMLElement => {
+      const el = h('span', { class: 'ctx-aa' }, 'Aa');
+      el.style.color = stroke.color;
+      return el;
+    };
+    styleChip.replaceChildren(
+      ...(kind === 'text' ? [] : [styleGlyph(stroke), h('span', { class: 'num' }, `${fmtTrim(stroke.widthPt, 3)} pt`)]),
+      ...(kind === 'line' ? [] : [aa(), h('span', { class: 'num' }, `${fmtTrim(textPt, 3)} pt`)]),
+    );
+    popoverStyle.setKind(kind);
   };
   function onStyleChanged(): void {
     inspectorStyle.refresh();
@@ -282,8 +329,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const ctxHint = h('p', { class: 'ctx-hint', 'aria-live': 'polite' });
   const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => cancelConstruction() }, 'Annulla');
   const finishBtn = h('button', { class: 'btn primary ctx-act', type: 'button', onclick: () => finishLine() }, icon('check'), 'Fine');
-  const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà della linea', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  const dimTypeBtns = new Map<DimType, HTMLButtonElement>();
+  const dimTypes = h('div', { class: 'ctx-types seg', role: 'group', 'aria-label': 'Tipo di quota', hidden: true });
+  for (const t of DIM_TYPES) {
+    const b = h('button', { class: 'btn seg-btn', type: 'button', 'aria-pressed': String(t.id === dimType), title: t.label, onclick: () => selectDimType(t.id) }, t.short);
+    dimTypeBtns.set(t.id, b);
+    dimTypes.append(b);
+  }
+  const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà del nuovo oggetto', hidden: true }, popoverStyle.el);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -324,14 +378,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         section(
           'Scala e oggetti',
           kv('Scala', s ? scaleLabel(s) : 'non calibrata'),
-          kv('Linee su questa pagina', String(n)),
+          kv('Oggetti su questa pagina', String(n)),
           h('button', { class: 'btn', type: 'button', onclick: () => selectTool('calibrate') }, icon('scaling'), s ? 'Ricalibra la scala' : 'Calibra la scala'),
         ),
       );
     } else {
       secs.push(section('Documento', h('p', { class: 'hint' }, 'Nessun documento aperto.')));
     }
-    secs.push(section('Proprietà linea (nuove linee)', inspectorStyle.el));
+    secs.push(section('Proprietà (nuovi oggetti)', inspectorStyle.el));
     secs.push(section('App', kv('Versione', __BUILD_ID__)));
     inspector.replaceChildren(...secs);
   };
@@ -407,7 +461,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   );
   const work = h('main', { class: 'work' }, viewer.el, emptyPanel, floatZoom);
 
-  const app = h('div', { class: 'app' }, bar, palette, work, inspector, ctxBar, statusbar, fileInput);
+  const keypad = new Keypad();
+  const app = h('div', { class: 'app' }, bar, palette, work, inspector, ctxBar, keypad.el, statusbar, fileInput);
   root.replaceChildren(app);
 
   // ---------- Strumenti ----------
@@ -415,16 +470,31 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const def = TOOLS.find((t) => t.id === id);
     if (!def || def.cp) return;
     if (def.needsDoc && !pdf) return;
+    cancelEntry();
     tool = id;
     toggleProps(false);
     construction.setTool(isConstructionTool(id) ? id : null);
+    if (id === 'dim') construction.setDimType(dimType);
     currentAim = null;
     viewer.setMode(def.mode ?? 'pan');
     viewer.setHighlight(null);
     for (const [tid, b] of toolBtns) b.setAttribute('aria-pressed', String(tid === id));
     floatDist.setAttribute('aria-pressed', String(id === 'distance'));
     say('');
+    refreshStyleChip();
     renderConstruction();
+  }
+
+  /** Sceglie il tipo di quota (e passa allo strumento Quota). */
+  function selectDimType(t: DimType): void {
+    dimType = t;
+    if (tool !== 'dim') selectTool('dim');
+    else {
+      cancelEntry();
+      construction.setDimType(t);
+      currentAim = null;
+      renderConstruction();
+    }
   }
 
   /** Redisegna punti, anteprima, misura e barra contestuale secondo lo stato della costruzione. */
@@ -433,11 +503,35 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const t = construction.tool;
     const pts = construction.points;
     const aim = construction.done || construction.locked ? null : currentAim;
+    viewer.setDraft(null);
     if (!geom || !pdf) {
       viewer.setMarkers([]);
       viewer.setPreview(null);
       viewer.setGuide(null);
       viewer.setBadge(null);
+    } else if (t === 'text') {
+      viewer.setMarkers(pts.map((p) => ({ p })));
+      viewer.setPreview(null);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+      if (entry) viewer.setDraft(entryLayout(geom));
+    } else if (t === 'dim') {
+      viewer.setMarkers(pts.map((p, i) => ({ p, label: String(i + 1) })));
+      viewer.setPreview(null);
+      viewer.setBadge(null);
+      if (entry) {
+        viewer.setGuide(null);
+        viewer.setDraft(entryLayout(geom));
+      } else {
+        // dopo il primo punto la guida segue il dito; per le quote a tre punti, dopo il secondo si vede la quota intera
+        const need = dimInfo(dimType).points;
+        const line = aim && pts.length === 1 ? [...pts, aim] : pts;
+        viewer.setGuide(pts.length < 2 || need === 2 ? (line.length >= 2 ? line : null) : null);
+        if (need === 3 && pts.length === 2 && aim) {
+          const def = buildDimension(dimType, [...pts, aim], geom);
+          if (def) viewer.setDraft(dimLayout(def, null, geom, dimDraftLabel(def, null, geom)));
+        }
+      }
     } else if (t === 'segment' || t === 'polyline') {
       const line = aim && pts.length > 0 ? [...pts, aim] : pts;
       viewer.setMarkers(pts.map((p) => ({ p })));
@@ -466,8 +560,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ctxBar.hidden = !active;
     ctxBar.dataset.tool = tool;
     const constructing = isConstructionTool(tool);
-    ctxHint.textContent = constructing ? construction.prompt : tool === 'erase' ? 'Cancella: tocca una linea per cancellarla (Annulla la ripristina)' : '';
-    styleChip.hidden = !(tool === 'segment' || tool === 'polyline');
+    ctxHint.textContent = constructing ? construction.prompt : tool === 'erase' ? 'Cancella: tocca un oggetto per cancellarlo (Annulla lo ripristina)' : '';
+    dimTypes.hidden = tool !== 'dim';
+    for (const [id, b] of dimTypeBtns) b.setAttribute('aria-pressed', String(id === dimType));
+    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'text' || tool === 'dim');
     cancelBtn.hidden = !constructing;
     cancelBtn.disabled = !(construction.pending || construction.done || construction.locked);
     finishBtn.hidden = tool !== 'polyline';
@@ -506,18 +602,147 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     renderConstruction();
   }
 
-  // ---------- Cancella ----------
-  const sheetPoints = (o: LineObject): { x: number; y: number }[] => {
+  // ---------- Scena: oggetti della pagina come li disegna il livello sul foglio ----------
+  /** Layout di un testo o di una quota (sempre dritti sul foglio). Una quota automatica senza scala non dovrebbe esistere: "?" per non nascondere l'errore. */
+  function objectLayout(o: TextObject | DimensionObject, g: PageGeometry): Layout {
+    if (o.kind === 'text') return layoutText(o, g);
+    return dimLayout(o, o, g, dimensionLabel(o, g, model.scale(pageNo)) ?? '?');
+  }
+  function dimLayout(def: DimensionDef, style: { color: string; widthPt: number; textPt: number } | null, g: PageGeometry, label: string): Layout {
+    return layoutDimension({ ...def, color: style?.color ?? stroke.color, widthPt: style?.widthPt ?? stroke.widthPt, textPt: style?.textPt ?? textPt }, g, label);
+  }
+  const sheetLine = (o: LineObject, g: PageGeometry): SheetPoint[] => o.points.map((p) => g.userToSheet(p));
+  const shapeOf = (o: PageObject): Shape => {
     const g = viewer.geometry;
-    return g ? o.points.map((p) => g.userToSheet(p)) : [];
+    if (!g) return { lines: [], rects: [] };
+    return isLine(o) ? { lines: [sheetLine(o, g)], rects: [] } : objectLayout(o, g).hit;
   };
-  const nearestObject = (sheet: { x: number; y: number }, tol: number): LineObject | null => pickNearest(model.objects(pageNo), sheetPoints, sheet, tol);
+  function sceneItems(): DrawItem[] {
+    const g = viewer.geometry;
+    if (!g) return [];
+    return model.objects(pageNo).map((o): DrawItem => (isLine(o) ? { kind: 'line', id: o.id, points: sheetLine(o, g), stroke: o.stroke } : { kind: 'layout', id: o.id, layout: objectLayout(o, g) }));
+  }
+
+  // ---------- Testo e valore delle quote con il tastierino ----------
+  /** Etichetta della quota in costruzione: quella scritta, altrimenti l'automatica, altrimenti "?" (pagina non calibrata). */
+  function dimDraftLabel(def: DimensionDef, typed: string | null, g: PageGeometry): string {
+    return typed ? typed : (autoLabel(def, g, model.scale(pageNo)) ?? '?');
+  }
+  function entryLayout(g: PageGeometry): Layout | null {
+    if (!entry) return null;
+    if (entry.kind === 'text') return layoutText({ at: entry.at, text: entry.text, textPt, color: stroke.color }, g);
+    return dimLayout(entry.def, null, g, dimDraftLabel(entry.def, entry.text, g));
+  }
+  /** Punti del foglio che devono restare in vista mentre si scrive. */
+  function entryExtent(g: PageGeometry): SheetPoint[] {
+    const l = entryLayout(g);
+    if (!l) return [];
+    const pts: SheetPoint[] = l.hit.lines.flat();
+    for (const r of l.hit.rects) pts.push({ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h });
+    if (entry?.kind === 'text') pts.push(g.userToSheet(entry.at), { x: g.userToSheet(entry.at).x + 4 * textPt, y: g.userToSheet(entry.at).y - textPt }); // il testo e' ancora vuoto: spazio per le prime lettere
+    return pts;
+  }
+
+  function openEntry(e: Entry, session: { title: string; info: string; layout: 'num' | 'abc'; selectFrom?: number; maxLength: number; decimal: boolean; validate: (t: string) => string | null; onConfirm: (t: string) => void }): void {
+    const g = viewer.geometry;
+    if (!g) return;
+    toggleProps(false);
+    entry = e;
+    viewer.setMode('pan'); // un dito sposta la vista, due dita fanno pinch: il punto di lavoro si puo' controllare
+    app.classList.add('kbd-open');
+    keypad.open({
+      title: session.title,
+      info: session.info,
+      initial: e.text,
+      selectFrom: session.selectFrom,
+      layout: session.layout,
+      rules: { maxLength: session.maxLength, commaAfterDigitIsDecimal: session.decimal },
+      validate: session.validate,
+      onInput: (text) => {
+        e.text = text;
+        renderConstruction();
+      },
+      onConfirm: (text) => {
+        endEntry();
+        session.onConfirm(text);
+      },
+      onCancel: () => {
+        endEntry();
+        say('Annullato');
+      },
+    });
+    renderConstruction();
+    viewer.ensureVisible(entryExtent(g)); // l'area di lavoro si e' ridotta: il punto di lavoro non deve restare nascosto
+  }
+
+  /** Chiude il tastierino e torna allo strumento (il tastierino e' gia' chiuso se e' stato lui a chiamare). */
+  function endEntry(): void {
+    entry = null;
+    keypad.close();
+    app.classList.remove('kbd-open');
+    construction.reset();
+    currentAim = null;
+    viewer.setMode(TOOLS.find((t) => t.id === tool)?.mode ?? 'pan');
+    renderConstruction();
+  }
+  /** Scarta il testo o la quota in corso (cambio di strumento, di pagina, chiusura del documento). */
+  function cancelEntry(): void {
+    if (entry) endEntry();
+  }
+
+  function startTextEntry(at: UserPoint): void {
+    openEntry(
+      { kind: 'text', at, text: '' },
+      {
+        title: 'Testo',
+        info: 'Una riga · Helvetica',
+        layout: 'abc',
+        maxLength: TEXT_MAX_LENGTH,
+        decimal: false,
+        validate: validateFreeText,
+        onConfirm: (text) => {
+          const obj: TextObject = { id: model.newId(), kind: 'text', at: { ...at }, text: text.trimEnd(), textPt, color: stroke.color };
+          history.exec(new AddObject(pageNo, obj));
+          say(`Testo aggiunto: "${obj.text}". Annulla per toglierlo.`);
+        },
+      },
+    );
+  }
+
+  function startDimEntry(def: DimensionDef): void {
+    const g = viewer.geometry;
+    if (!g) return;
+    const scale = model.scale(pageNo);
+    const auto = autoLabel(def, g, scale);
+    const name = dimInfo(def.dim).label;
+    openEntry(
+      { kind: 'dim', def, text: auto ?? dimInfo(def.dim).prefix, auto },
+      {
+        title: name,
+        info: auto && scale ? `Automatico ${auto} mm · scala ${scaleLabel(scale)}` : 'Pagina non calibrata: digita il valore in mm',
+        layout: 'num',
+        selectFrom: auto ? dimInfo(def.dim).prefix.length : undefined, // il valore automatico e' proposto: il primo tasto lo sostituisce (il prefisso Ø/R resta)
+        maxLength: DIM_TEXT_MAX_LENGTH,
+        decimal: true,
+        validate: validateDimText,
+        onConfirm: (raw) => {
+          const text = normalizeDimText(raw);
+          const obj: DimensionObject = { id: model.newId(), kind: 'dim', ...def, valueText: text === auto ? null : text, color: stroke.color, widthPt: stroke.widthPt, textPt };
+          history.exec(new AddObject(pageNo, obj));
+          say(`${name}: ${text}${obj.valueText === null ? ' (automatico)' : ' (digitato)'}. Annulla per toglierla.`);
+        },
+      },
+    );
+  }
+
+  // ---------- Cancella ----------
+  const nearestObject = (sheet: { x: number; y: number }, tol: number): PageObject | null => pickNearest(model.objects(pageNo), shapeOf, sheet, tol);
 
   // ---------- Annulla / ripeti ----------
-  const canUndo = (): boolean => construction.pending || history.canUndo;
+  const canUndo = (): boolean => !entry && (construction.pending || history.canUndo);
   function refreshUndoRedo(): void {
     undoBtn.disabled = !canUndo();
-    redoBtn.disabled = !history.canRedo;
+    redoBtn.disabled = entry !== null || !history.canRedo;
     undoBtn.title = construction.pending ? 'Annulla: toglie l\'ultimo punto' : history.nextUndo ? `Annulla ${history.nextUndo}` : 'Annulla';
     redoBtn.title = history.nextRedo ? `Ripeti ${history.nextRedo}` : 'Ripeti';
   }
@@ -527,6 +752,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     say(`${verb}: ${cmd.label}`);
   }
   function undoAction(): void {
+    if (entry) return; // con il tastierino aperto si conferma o si annulla da li'
     if (construction.undoLast()) {
       currentAim = null;
       renderConstruction();
@@ -539,6 +765,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     afterHistory(history.undo(), 'Annullato');
   }
   function redoAction(): void {
+    if (entry) return;
     if (!history.canRedo) {
       say('Niente da ripetere');
       return;
@@ -564,16 +791,16 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   };
   viewer.hooks.onErasePreview = (sheet, tol) => {
     const o = sheet ? nearestObject(sheet, tol) : null;
-    viewer.setHighlight(o ? o.points : null);
+    viewer.setHighlight(o ? shapeOf(o) : null);
   };
   viewer.hooks.onErase = (sheet, tol) => {
     const o = nearestObject(sheet, tol);
     if (!o) {
-      say('Nessuna linea in questo punto: tocca sopra una linea');
+      say('Nessun oggetto in questo punto: tocca sopra un oggetto');
       return;
     }
     history.exec(new RemoveObject(pageNo, o));
-    say(`${o.kind === 'segment' ? 'Retta' : 'Linea'} cancellata. Annulla la ripristina.`);
+    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${o.kind === 'text' ? 'o' : 'a'}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
   };
 
   // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
@@ -587,7 +814,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   });
   history.onChange(refreshUndoRedo);
   function refreshScene(): void {
-    viewer.setObjects(model.objects(pageNo));
+    viewer.setObjects(sceneItems());
   }
 
   // ---------- Tastiera (desktop) ----------
@@ -643,6 +870,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   async function goTo(n: number): Promise<void> {
     if (!pdf) return;
+    cancelEntry();
     pageNo = Math.min(Math.max(1, n), pdf.pages.length);
     construction.reset();
     currentAim = null;
@@ -661,6 +889,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   /** Azzera la sessione. Parte sincrona: la chiusura del documento prosegue in coda. */
   function resetSession(): void {
+    cancelEntry();
     const old = pdf;
     pdf = null;
     pageNo = 1;
@@ -678,7 +907,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const parts: string[] = [];
     const n = model.objectCount();
     const s = model.scaleCount();
-    if (n > 0) parts.push(n === 1 ? '1 linea disegnata' : `${n} linee disegnate`);
+    if (n > 0) parts.push(n === 1 ? '1 oggetto disegnato' : `${n} oggetti disegnati`);
     if (s > 0) parts.push(s === 1 ? '1 scala calibrata' : `${s} scale calibrate`);
     return parts.join(' e ');
   };
@@ -701,13 +930,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   function openFlow(): void {
     confirmDiscard('Aprire un altro PDF le scarta.', pickFile);
   }
-  /** Nuovo: azzera la sessione e apre il selettore file (nessun foglio vuoto). */
-  function newSession(): void {
-    confirmDiscard('Nuovo le scarta.', () => {
-      resetSession();
-      pickFile();
-    });
-  }
   function closeFlow(): void {
     confirmDiscard('Chiudere il documento le scarta.', resetSession);
   }
@@ -727,6 +949,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     try {
       const next = await openPdf(name, bytes);
       const prev = pdf;
+      cancelEntry();
       pdf = next;
       pageNo = 1;
       history.clear();

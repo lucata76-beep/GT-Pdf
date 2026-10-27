@@ -1,6 +1,7 @@
-// Controlli delle proprieta' della linea: tipo, colore, spessore (pt del foglio). Servono sia nell'inspector (desktop)
-// sia nel pannello aperto dalla barra contestuale (iPhone). Valgono per le NUOVE linee; "Applica all'ultima linea"
-// le copia sull'ultima linea disegnata nella pagina (modificare oggetti qualunque richiede la selezione, CP4).
+// Controlli delle proprieta': tipo di linea, colore, spessore e altezza del testo (pt del foglio). Servono sia
+// nell'inspector (desktop, tutte le sezioni) sia nel pannello aperto dalla barra contestuale (iPhone, solo quelle dello
+// strumento attivo). Valgono per i NUOVI oggetti; "Applica all'ultimo oggetto" le copia sull'ultimo oggetto disegnato
+// nella pagina (modificare oggetti qualunque richiede la selezione, CP4).
 import { fmtTrim, parsePositive } from '../geometry/numbers';
 import {
   COLOR_PALETTE,
@@ -13,21 +14,29 @@ import {
   dashPattern,
   parseHexColor,
 } from '../model/stroke';
+import { TEXT_MAX_PT, TEXT_MIN_PT, TEXT_PRESETS_PT } from '../model/textStyle';
 import { h } from './dom';
 
 export interface StyleBinding {
   get(): Stroke;
   set(patch: Partial<Stroke>): void;
-  /** Copia le proprieta' correnti sull'ultima linea della pagina. */
+  /** Corpo del testo per i nuovi testi e le nuove quote, in pt. */
+  getTextPt(): number;
+  setTextPt(pt: number): void;
+  /** Copia le proprieta' correnti sull'ultimo oggetto della pagina (quelle che l'oggetto ha). */
   applyToLast(): void;
-  /** C'e' un'ultima linea e ha proprieta' diverse da quelle correnti. */
+  /** C'e' un ultimo oggetto e ha proprieta' diverse da quelle correnti. */
   canApplyToLast(): boolean;
 }
+
+/** Quali sezioni mostrare: tutte (inspector) o quelle dello strumento (linea: tipo, colore, spessore; testo: colore, altezza; quota: colore, spessore, altezza). */
+export type StyleKind = 'all' | 'line' | 'text' | 'dim';
 
 export interface StyleControls {
   el: HTMLElement;
   /** Rilegge lo stato (dopo un cambio da altrove). */
   refresh(): void;
+  setKind(kind: StyleKind): void;
 }
 
 /** Disegno in miniatura di una linea con le sue proprieta' (tipo, colore, spessore). */
@@ -122,28 +131,57 @@ export function createStyleControls(b: StyleBinding): StyleControls {
     if (e.key === 'Enter') applyWidth();
   });
 
-  const last = h('button', { class: 'btn', type: 'button', onclick: () => b.applyToLast() }, "Applica all'ultima linea");
+  // ---- Altezza del testo ----
+  const textBtns = new Map<number, HTMLButtonElement>();
+  const textPresets = h('div', { class: 'presets', role: 'group', 'aria-label': 'Altezza del testo predefinita in pt' });
+  for (const t of TEXT_PRESETS_PT) {
+    const btn = h('button', { class: 'btn preset num', type: 'button', 'aria-pressed': 'false', onclick: () => b.setTextPt(t) }, fmtTrim(t));
+    textBtns.set(t, btn);
+    textPresets.append(btn);
+  }
+  const textPt = h('input', { class: 'field num', type: 'text', inputmode: 'decimal', autocomplete: 'off', 'aria-label': 'Altezza del testo in pt', placeholder: 'es. 10' });
+  const applyTextPt = (): void => {
+    const r = parsePositive(textPt.value, { what: 'Altezza testo', min: TEXT_MIN_PT, max: TEXT_MAX_PT });
+    if (!r.ok) {
+      showError(r.reason, textPt);
+      return;
+    }
+    clearError(textPt);
+    b.setTextPt(r.value);
+    textPt.value = r.text.replace(/^\./, '0.'); // "," normalizzata a "."
+  };
+  textPt.addEventListener('change', applyTextPt);
+  textPt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') applyTextPt();
+  });
 
-  const el = h(
-    'div',
-    { class: 'style-ctl' },
-    h('section', { class: 'ctl-sec' }, heading('Tipo di linea'), styleRow),
-    h('section', { class: 'ctl-sec' }, heading('Colore'), swatches, h('div', { class: 'field-row' }, colorPicker, hex)),
-    h('section', { class: 'ctl-sec' }, heading('Spessore'), presets, h('div', { class: 'field-row' }, h('span', { class: 'lbl num' }, 'S:'), width, h('span', { class: 'unit num' }, 'pt'))),
-    msg,
-    last,
-  );
+  const last = h('button', { class: 'btn', type: 'button', onclick: () => b.applyToLast() }, "Applica all'ultimo oggetto");
+
+  const typeSec = h('section', { class: 'ctl-sec' }, heading('Tipo di linea'), styleRow);
+  const colorSec = h('section', { class: 'ctl-sec' }, heading('Colore'), swatches, h('div', { class: 'field-row' }, colorPicker, hex));
+  const widthSec = h('section', { class: 'ctl-sec' }, heading('Spessore'), presets, h('div', { class: 'field-row' }, h('span', { class: 'lbl num' }, 'S:'), width, h('span', { class: 'unit num' }, 'pt')));
+  const textSec = h('section', { class: 'ctl-sec' }, heading('Altezza testo'), textPresets, h('div', { class: 'field-row' }, h('span', { class: 'lbl num' }, 'H:'), textPt, h('span', { class: 'unit num' }, 'pt')));
+  const el = h('div', { class: 'style-ctl' }, typeSec, colorSec, widthSec, textSec, msg, last);
+
+  const setKind = (kind: StyleKind): void => {
+    typeSec.hidden = !(kind === 'all' || kind === 'line');
+    widthSec.hidden = !(kind === 'all' || kind === 'line' || kind === 'dim');
+    textSec.hidden = !(kind === 'all' || kind === 'text' || kind === 'dim');
+  };
+  setKind('all');
 
   const refresh = (): void => {
     const s = b.get();
     for (const [id, btn] of styleBtns) btn.setAttribute('aria-pressed', String(id === s.style));
     for (const [c, btn] of swatchBtns) btn.setAttribute('aria-pressed', String(c === s.color));
     for (const [w, btn] of presetBtns) btn.setAttribute('aria-pressed', String(w === s.widthPt));
+    for (const [t, btn] of textBtns) btn.setAttribute('aria-pressed', String(t === b.getTextPt()));
+    if (document.activeElement !== textPt) textPt.value = fmtTrim(b.getTextPt(), 3);
     colorPicker.value = s.color.toLowerCase();
     if (document.activeElement !== hex) hex.value = s.color;
     if (document.activeElement !== width) width.value = fmtTrim(s.widthPt, 3);
     last.disabled = !b.canApplyToLast();
   };
   refresh();
-  return { el, refresh };
+  return { el, refresh, setKind };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DimensionDef } from '../geometry/dimension';
 import { PageGeometry, type UserPoint } from '../geometry/page';
 import { COINCIDENT_PX, Construction, type ConstructionEvents } from './construction';
 
@@ -8,6 +9,8 @@ const rot = new PageGeometry({ view: [50, 50, 450, 600], rotate: 90, userUnit: 1
 function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {}) {
   const log: string[] = [];
   const lines: { kind: string; points: UserPoint[] }[] = [];
+  const dims: DimensionDef[] = [];
+  const texts: UserPoint[] = [];
   const state = { ortho: opts.ortho ?? false };
   const ev: ConstructionEvents = {
     line: (kind, points) => {
@@ -16,10 +19,18 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {
     },
     calibrate: () => log.push('calibrate'),
     measure: () => log.push('measure'),
+    text: (at) => {
+      log.push('text');
+      texts.push(at);
+    },
+    dimension: (def) => {
+      log.push(`dim:${def.dim}`);
+      dims.push(def);
+    },
     reject: () => log.push('reject'),
   };
   const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho }, ev);
-  return { c, log, lines, state };
+  return { c, log, lines, dims, texts, state };
 }
 const P = (x: number, y: number): UserPoint => ({ x, y });
 
@@ -227,5 +238,153 @@ describe('testo guida', () => {
     c.place(P(1, 1));
     c.place(P(50, 1));
     expect(c.prompt).toContain('Fine');
+  });
+});
+
+describe('Testo', () => {
+  it('un solo punto, poi i tocchi sono ignorati finche\' l\'app non fa reset', () => {
+    const { c, log, texts } = setup();
+    c.setTool('text');
+    expect(c.prompt).toContain('indica dove inizia');
+    c.place(P(100, 100));
+    expect(log).toEqual(['text']);
+    expect(texts).toEqual([P(100, 100)]);
+    expect(c.locked).toBe(true);
+    expect(c.prompt).toContain('tastierino');
+    c.place(P(300, 300));
+    expect(log).toEqual(['text']);
+    expect(c.undoLast()).toBe(false); // l'annulla di una voce in corso non tocca il punto
+    c.reset();
+    c.place(P(300, 300));
+    expect(log).toEqual(['text', 'text']);
+  });
+
+  it('l\'ortogonale non si applica: il punto non cambia', () => {
+    const { c } = setup({ ortho: true });
+    c.setTool('text');
+    const raw = flat.userToSheet(P(300, 130));
+    expect(c.constrain(raw)).toEqual(raw);
+  });
+});
+
+describe('Quota', () => {
+  const pts3 = [P(100, 700), P(300, 650), P(200, 600)];
+
+  it('lineare: tre punti (due misurati + posizione della linea di quota), poi attende il tastierino', () => {
+    for (const dim of ['aligned', 'horizontal', 'vertical'] as const) {
+      const { c, log, dims } = setup();
+      c.setTool('dim');
+      c.setDimType(dim);
+      expect(c.needed).toBe(3);
+      c.place(pts3[0] as UserPoint);
+      c.place(pts3[1] as UserPoint);
+      expect(log).toEqual([]);
+      expect(c.pending).toBe(true);
+      c.place(pts3[2] as UserPoint);
+      expect(log).toEqual([`dim:${dim}`]);
+      expect(dims[0]?.p1).toEqual(pts3[0]);
+      expect(dims[0]?.p2).toEqual(pts3[1]);
+      expect(c.locked).toBe(true);
+      c.place(P(10, 10));
+      expect(log).toHaveLength(1);
+    }
+  });
+
+  it('Ø e R: due punti', () => {
+    for (const dim of ['diameter', 'radius'] as const) {
+      const { c, log, dims } = setup();
+      c.setTool('dim');
+      c.setDimType(dim);
+      expect(c.needed).toBe(2);
+      c.place(P(100, 700));
+      expect(log).toEqual([]);
+      c.place(P(160, 700));
+      expect(log).toEqual([`dim:${dim}`]);
+      expect(dims[0]?.a).toEqual(P(100, 700));
+      expect(dims[0]?.b).toEqual(P(160, 700));
+    }
+  });
+
+  it('il secondo punto uguale al primo e\' rifiutato; il terzo (posizione della linea) puo\' coincidere', () => {
+    const { c, log } = setup();
+    c.setTool('dim');
+    c.setDimType('aligned');
+    c.place(P(100, 700));
+    c.place(P(100.5, 700));
+    expect(log).toEqual(['reject']);
+    c.place(P(300, 700));
+    c.place(P(300, 700)); // linea di quota sul punto: offset zero, valido
+    expect(log).toEqual(['reject', 'dim:aligned']);
+  });
+
+  it('orizzontale con due punti alla stessa X (sul foglio): rifiutato; verticale con la stessa Y: idem', () => {
+    const h = setup();
+    h.c.setTool('dim');
+    h.c.setDimType('horizontal');
+    h.c.place(P(100, 700));
+    h.c.place(P(100, 500));
+    expect(h.log).toEqual(['reject']);
+    expect(h.c.points).toHaveLength(1);
+    const v = setup();
+    v.c.setTool('dim');
+    v.c.setDimType('vertical');
+    v.c.place(P(100, 700));
+    v.c.place(P(300, 700));
+    expect(v.log).toEqual(['reject']);
+  });
+
+  it('con pagina /Rotate 90 "orizzontale" e\' quella che si vede: punti alla stessa X sul foglio = stessa Y utente', () => {
+    const { c, log } = setup({ geom: rot });
+    c.setTool('dim');
+    c.setDimType('horizontal');
+    c.place(rot.sheetToUser({ x: 50, y: 50 }));
+    c.place(rot.sheetToUser({ x: 50, y: 200 })); // stessa X sul foglio
+    expect(log).toEqual(['reject']);
+    c.place(rot.sheetToUser({ x: 250, y: 200 }));
+    c.place(rot.sheetToUser({ x: 150, y: 20 }));
+    expect(log).toEqual(['reject', 'dim:horizontal']);
+  });
+
+  it('cambiare tipo scarta i punti; annulla ultimo punto funziona fino al tastierino', () => {
+    const { c } = setup();
+    c.setTool('dim');
+    c.setDimType('aligned');
+    c.place(P(100, 700));
+    c.place(P(300, 700));
+    expect(c.undoLast()).toBe(true);
+    expect(c.points).toHaveLength(1);
+    c.setDimType('diameter');
+    expect(c.points).toHaveLength(0);
+    expect(c.pending).toBe(false);
+  });
+
+  it('l\'ortogonale non si applica alle quote', () => {
+    const { c } = setup({ ortho: true });
+    c.setTool('dim');
+    c.setDimType('aligned');
+    c.place(P(100, 700));
+    const raw = flat.userToSheet(P(300, 730));
+    expect(c.constrain(raw)).toEqual(raw);
+  });
+
+  it('testo guida per ogni tipo e passo', () => {
+    const { c } = setup();
+    c.setTool('dim');
+    c.setDimType('aligned');
+    expect(c.prompt).toBe('Quota allineata: indica il primo punto');
+    c.place(P(100, 700));
+    expect(c.prompt).toBe('Quota allineata: indica il secondo punto');
+    c.place(P(300, 700));
+    expect(c.prompt).toBe('Quota allineata: indica dove mettere la linea di quota');
+    c.setDimType('diameter');
+    expect(c.prompt).toBe('Quota diametro Ø: indica un punto sul bordo');
+    c.place(P(100, 700));
+    expect(c.prompt).toBe('Quota diametro Ø: indica il punto opposto, sul diametro');
+    c.setDimType('radius');
+    expect(c.prompt).toBe('Quota raggio R: indica il centro');
+    c.place(P(100, 700));
+    expect(c.prompt).toBe('Quota raggio R: indica un punto sul bordo');
+    c.place(P(160, 700));
+    expect(c.prompt).toBe('Quota raggio R: digita il valore con il tastierino');
   });
 });

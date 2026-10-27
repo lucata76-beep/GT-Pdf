@@ -1,10 +1,12 @@
-// Costruzione per punti successivi degli strumenti Retta, Linea, Scala e Distanza.
+// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo e Quota.
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
+// Testo e Quota non usano l'ortogonale: la posizione della linea di quota e' gia' vincolata dal tipo di quota.
+import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
 import { orthoSheet } from '../geometry/ortho';
 import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { LineKind } from '../model/model';
 
-export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance';
+export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim';
 
 export interface ConstructionEnv {
   geometry(): PageGeometry | null;
@@ -20,6 +22,10 @@ export interface ConstructionEvents {
   calibrate(a: UserPoint, b: UserPoint): void;
   /** Due punti misurati: il risultato resta mostrato fino al punto successivo. */
   measure(a: UserPoint, b: UserPoint): void;
+  /** Testo: il punto e' stato indicato; l'app apre il tastierino e poi chiama `reset()`. */
+  text(at: UserPoint): void;
+  /** Quota: punti indicati e geometria calcolata; l'app apre il tastierino e poi chiama `reset()`. */
+  dimension(def: DimensionDef): void;
   reject(reason: string): void;
 }
 
@@ -31,6 +37,8 @@ export const TOOL_NAME: Record<ConstructionTool, string> = {
   polyline: 'Linea',
   calibrate: 'Scala',
   distance: 'Distanza',
+  text: 'Testo',
+  dim: 'Quota',
 };
 
 export class Construction {
@@ -38,8 +46,10 @@ export class Construction {
   points: UserPoint[] = [];
   /** Distanza: i due punti sono stati misurati e restano visibili; il prossimo tocco inizia una nuova misura. */
   done = false;
-  /** Scala: i due punti sono in attesa del dialogo; i tocchi sono ignorati. */
+  /** Scala, Testo, Quota: i punti sono in attesa del dialogo o del tastierino; i tocchi sono ignorati. */
   locked = false;
+  /** Tipo della Quota in costruzione. */
+  dimType: DimType = 'aligned';
 
   constructor(
     private readonly env: ConstructionEnv,
@@ -49,6 +59,28 @@ export class Construction {
   setTool(tool: ConstructionTool | null): void {
     this.tool = tool;
     this.reset();
+  }
+
+  /** Cambia il tipo di quota: i punti gia' indicati si scartano (cambia il numero di punti necessari). */
+  setDimType(type: DimType): void {
+    this.dimType = type;
+    this.reset();
+  }
+
+  /** Punti che servono per completare lo strumento corrente. */
+  get needed(): number {
+    switch (this.tool) {
+      case 'segment':
+      case 'calibrate':
+      case 'distance':
+        return 2;
+      case 'text':
+        return 1;
+      case 'dim':
+        return dimInfo(this.dimType).points;
+      default:
+        return Infinity; // Linea: finisce con Fine
+    }
   }
 
   reset(): void {
@@ -64,7 +96,7 @@ export class Construction {
 
   /** L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto. */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'dim' || this.done || this.locked) return null;
     return this.points.at(-1) ?? null;
   }
 
@@ -82,7 +114,8 @@ export class Construction {
     if (!geom || !this.tool || this.locked) return;
     if (this.done) this.reset(); // nuova misura
     const last = this.points.at(-1);
-    if (last) {
+    // Il terzo punto di una quota e' la posizione della linea di quota: puo' coincidere con l'ultimo.
+    if (last && !(this.tool === 'dim' && this.points.length >= 2)) {
       const sa = geom.userToSheet(last);
       const sb = geom.userToSheet(p);
       const tooClose = Math.hypot(sb.x - sa.x, sb.y - sa.y) * this.env.zoom() < COINCIDENT_PX;
@@ -90,6 +123,14 @@ export class Construction {
         if (this.tool === 'polyline' && this.points.length >= 2) this.finish();
         else this.ev.reject('I due punti coincidono: scegli un secondo punto diverso.');
         return;
+      }
+      if (this.tool === 'dim' && this.points.length === 1 && (this.dimType === 'horizontal' || this.dimType === 'vertical')) {
+        // Orizzontale/verticale: i punti devono differire nella direzione misurata (sul foglio come si vede).
+        const d = this.dimType === 'horizontal' ? sb.x - sa.x : sb.y - sa.y;
+        if (Math.abs(d) * this.env.zoom() < COINCIDENT_PX) {
+          this.ev.reject(this.dimType === 'horizontal' ? 'I due punti sono alla stessa X: una quota orizzontale non si può misurare.' : 'I due punti sono alla stessa Y: una quota verticale non si può misurare.');
+          return;
+        }
       }
     }
     this.points.push(p);
@@ -111,6 +152,22 @@ export class Construction {
         if (this.points.length === 2) {
           this.done = true;
           this.ev.measure(this.points[0] as UserPoint, this.points[1] as UserPoint);
+        }
+        break;
+      case 'text':
+        this.locked = true;
+        this.ev.text(p);
+        break;
+      case 'dim':
+        if (this.points.length === this.needed) {
+          const def = buildDimension(this.dimType, this.points, geom);
+          if (!def) {
+            this.points.pop();
+            this.ev.reject('Quota non valida: scegli un altro punto.');
+          } else {
+            this.locked = true;
+            this.ev.dimension(def);
+          }
         }
         break;
       default:
@@ -148,8 +205,25 @@ export class Construction {
         return this.locked ? 'Scala: inserisci la distanza reale' : n === 0 ? 'Scala: indica il primo punto di una distanza nota' : 'Scala: indica il secondo punto';
       case 'distance':
         return this.done ? 'Distanza: indica un punto per una nuova misura' : n === 0 ? 'Distanza: indica il primo punto' : 'Distanza: indica il secondo punto';
+      case 'text':
+        return this.locked ? 'Testo: scrivi con il tastierino' : 'Testo: indica dove inizia (angolo in basso a sinistra)';
+      case 'dim':
+        return this.dimPrompt(n);
       default:
         return '';
+    }
+  }
+
+  private dimPrompt(n: number): string {
+    const name = dimInfo(this.dimType).label;
+    if (this.locked) return `${name}: digita il valore con il tastierino`;
+    switch (this.dimType) {
+      case 'diameter':
+        return n === 0 ? `${name}: indica un punto sul bordo` : `${name}: indica il punto opposto, sul diametro`;
+      case 'radius':
+        return n === 0 ? `${name}: indica il centro` : `${name}: indica un punto sul bordo`;
+      default:
+        return n === 0 ? `${name}: indica il primo punto` : n === 1 ? `${name}: indica il secondo punto` : `${name}: indica dove mettere la linea di quota`;
     }
   }
 }

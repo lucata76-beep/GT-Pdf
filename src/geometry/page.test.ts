@@ -2,7 +2,8 @@ import { PDFDocument, PDFName, PDFNumber, degrees } from '@cantoo/pdf-lib';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
-import { distToPolyline, distToSegment, pickNearest } from './hit';
+import { distToPolyline, distToRect, distToSegment, distToShape, pickNearest } from './hit';
+import type { Shape } from './layout';
 import { orthoSheet, orthoUser } from './ortho';
 import { PageGeometry, type PageSpec, type Pt } from './page';
 import { mmToPt } from './pixels';
@@ -193,9 +194,19 @@ describe('hit-test (cancella con un tocco)', () => {
       { id: 2, pts: [{ x: 0, y: 4 }, { x: 100, y: 4 }] },
       { id: 3, pts: [{ x: 0, y: 4 }, { x: 100, y: 4 }] },
     ];
-    const pts = (i: (typeof items)[number]): Pt[] => i.pts;
-    expect(pickNearest(items, pts, { x: 50, y: 1 }, 5)?.id).toBe(1);
-    expect(pickNearest(items, pts, { x: 50, y: 3 }, 5)?.id).toBe(3); // 2 e 3 a pari distanza: l'ultimo
-    expect(pickNearest(items, pts, { x: 50, y: 30 }, 5)).toBeNull();
+    const shape = (i: (typeof items)[number]): Shape => ({ lines: [i.pts], rects: [] });
+    expect(pickNearest(items, shape, { x: 50, y: 1 }, 5)?.id).toBe(1);
+    expect(pickNearest(items, shape, { x: 50, y: 3 }, 5)?.id).toBe(3); // 2 e 3 a pari distanza: l'ultimo
+    expect(pickNearest(items, shape, { x: 50, y: 30 }, 5)).toBeNull();
+  });
+  it('rettangoli (testi e badge): distanza 0 dentro, minima dai lati fuori', () => {
+    const r = { x: 10, y: 10, w: 20, h: 8 };
+    expect(distToRect({ x: 15, y: 12 }, r)).toBe(0);
+    expect(distToRect({ x: 35, y: 14 }, r)).toBe(5);
+    expect(distToRect({ x: 33, y: 22 }, r)).toBe(5); // angolo: (3, 4)
+    const shape: Shape = { lines: [[{ x: 0, y: 0 }, { x: 0, y: 100 }]], rects: [r] };
+    expect(distToShape({ x: 15, y: 12 }, shape)).toBe(0);
+    expect(distToShape({ x: -2, y: 50 }, shape)).toBe(2);
+    expect(pickNearest([1, 2], (i) => (i === 1 ? { lines: [], rects: [r] } : { lines: [[{ x: 100, y: 100 }, { x: 101, y: 100 }]], rects: [] }), { x: 12, y: 12 }, 3)).toBe(1);
   });
 });

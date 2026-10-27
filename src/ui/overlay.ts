@@ -1,7 +1,8 @@
 // Livello di disegno sopra il foglio: oggetti, anteprima, segni dei punti, mira, badge di misura.
 // Tutto in coordinate del foglio (pt fisici, origine in alto a sinistra): gli oggetti stanno in un gruppo SVG con
-// transform translate+scale(zoom), quindi spessori e pattern di tratteggio sono in pt come nell'esportazione.
+// transform translate+scale(zoom), quindi spessori, pattern di tratteggio e corpo dei testi sono in pt come nell'esportazione.
 // Segni, mira e badge hanno dimensione fissa sullo schermo e vengono riposizionati a ogni cambio di vista.
+import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
 import { h } from './dom';
@@ -11,11 +12,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Spessore minimo visibile sullo schermo (pixel CSS): una linea di 0.25 pt a zoom ridotto non deve sparire. */
 export const MIN_SCREEN_STROKE_PX = 1;
 
-export interface DrawItem {
-  id: number;
-  points: readonly SheetPoint[];
-  stroke: Stroke;
-}
+/** Rette e linee (spezzata con tipo di linea) oppure testi e quote (primitive gia' calcolate dal layout). */
+export type DrawItem = { kind: 'line'; id: number; points: readonly SheetPoint[]; stroke: Stroke } | { kind: 'layout'; id: number; layout: Layout };
 export interface Marker {
   p: SheetPoint;
   label?: string;
@@ -34,14 +32,18 @@ const svgEl = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 const pathData = (pts: readonly SheetPoint[]): string => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ');
 
 interface StrokeEl {
-  el: SVGPathElement;
+  el: SVGElement;
   widthPt: number;
 }
+
+/** Carattere dei testi sul foglio: Helvetica come nell'esportazione (decisione 6); Arial e Liberation Sans hanno le stesse larghezze. */
+export const DRAWING_FONT = "Helvetica, Arial, 'Liberation Sans', sans-serif";
 
 export class SceneOverlay {
   readonly el: HTMLDivElement;
   private readonly sheetG = svgEl('g');
   private readonly objectsG = svgEl('g', { class: 'sc-objects' });
+  private readonly draftG = svgEl('g', { class: 'sc-draft' });
   private readonly hlG = svgEl('g', { class: 'sc-hl' });
   private readonly previewG = svgEl('g', { class: 'sc-preview' });
   private readonly guide = svgEl('path', { class: 'sc-guide', fill: 'none' });
@@ -49,6 +51,7 @@ export class SceneOverlay {
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
   private readonly badgeEl = h('div', { class: 'measure-badge', hidden: true });
   private strokes: StrokeEl[] = [];
+  private draftStrokes: StrokeEl[] = [];
   private previewStroke: StrokeEl | null = null;
   private markers: { g: SVGGElement; p: SheetPoint }[] = [];
   private aim: SheetPoint | null = null;
@@ -60,7 +63,7 @@ export class SceneOverlay {
   constructor() {
     this.aimG.innerHTML = '<line x1="-10" x2="10" y1="0" y2="0"/><line x1="0" x2="0" y1="-10" y2="10"/>';
     this.guide.setAttribute('display', 'none');
-    this.sheetG.append(this.objectsG, this.hlG, this.previewG, this.guide);
+    this.sheetG.append(this.objectsG, this.draftG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
     svg.append(this.sheetG, this.markersG, this.aimG);
     this.el = h('div', { class: 'viewer-layer' }, svg, this.badgeEl);
@@ -73,7 +76,7 @@ export class SceneOverlay {
     this.ty = ty;
     this.zoom = zoom;
     this.sheetG.setAttribute('transform', `translate(${tx} ${ty}) scale(${zoom})`);
-    if (zoomChanged) for (const s of this.strokes) this.applyWidth(s);
+    if (zoomChanged) for (const s of [...this.strokes, ...this.draftStrokes]) this.applyWidth(s);
     this.placeScreenItems();
   }
 
@@ -81,7 +84,7 @@ export class SceneOverlay {
     s.el.setAttribute('stroke-width', String(Math.max(s.widthPt, MIN_SCREEN_STROKE_PX / this.zoom)));
   }
 
-  private makeStroke(points: readonly SheetPoint[], stroke: Stroke): StrokeEl {
+  private makeStroke(points: readonly SheetPoint[], stroke: Stroke): StrokeEl & { el: SVGPathElement } {
     const el = svgEl('path', {
       d: pathData(points),
       fill: 'none',
@@ -100,23 +103,65 @@ export class SceneOverlay {
   // ---- Oggetti ----
   setObjects(items: readonly DrawItem[]): void {
     this.strokes = this.previewStroke ? [this.previewStroke] : [];
-    const els: SVGPathElement[] = [];
+    const els: SVGElement[] = [];
     for (const it of items) {
-      const s = this.makeStroke(it.points, it.stroke);
-      s.el.dataset.id = String(it.id);
-      this.strokes.push(s);
-      els.push(s.el);
+      if (it.kind === 'line') {
+        const s = this.makeStroke(it.points, it.stroke);
+        s.el.dataset.id = String(it.id);
+        this.strokes.push(s);
+        els.push(s.el);
+      } else {
+        const g = this.layoutGroup(it.layout, this.strokes);
+        g.dataset.id = String(it.id);
+        els.push(g);
+      }
     }
     this.objectsG.replaceChildren(...els);
   }
 
+  /** Testo o quota in corso di scrittura (bozza): stesso disegno degli oggetti, non ancora nel documento. */
+  setDraft(layout: Layout | null): void {
+    this.draftStrokes = [];
+    this.draftG.replaceChildren(...(layout ? [this.layoutGroup(layout, this.draftStrokes)] : []));
+  }
+
+  /** Primitive di un testo o di una quota: linee, frecce piene, badge (fondo bianco, bordo sottile) e testi. */
+  private layoutGroup(l: Layout, track: StrokeEl[]): SVGGElement {
+    const g = svgEl('g', { class: 'sc-ann' });
+    const widthed = (el: SVGElement, widthPt: number): void => {
+      const s: StrokeEl = { el, widthPt };
+      this.applyWidth(s);
+      track.push(s);
+    };
+    for (const ln of l.lines) {
+      const el = svgEl('path', { d: pathData(ln.pts), fill: 'none', stroke: ln.color, 'stroke-linecap': STROKE_CAP, 'stroke-linejoin': STROKE_JOIN });
+      widthed(el, ln.widthPt);
+      g.append(el);
+    }
+    for (const a of l.arrows) g.append(svgEl('polygon', { points: a.pts.map((p) => `${p.x},${p.y}`).join(' '), fill: a.color, stroke: 'none' }));
+    for (const b of l.boxes) {
+      const el = svgEl('rect', { x: b.rect.x, y: b.rect.y, width: b.rect.w, height: b.rect.h, fill: '#ffffff', stroke: b.color });
+      widthed(el, b.borderPt);
+      g.append(el);
+    }
+    for (const t of l.texts) {
+      const el = svgEl('text', { x: t.x, y: t.y, 'font-size': t.sizePt, fill: t.color, class: 'sc-text' });
+      el.style.fontFamily = DRAWING_FONT;
+      el.textContent = t.text;
+      g.append(el);
+    }
+    return g;
+  }
+
   /** Evidenzia un oggetto (es. quello che si sta per cancellare). */
-  setHighlight(points: readonly SheetPoint[] | null): void {
-    if (!points) {
+  setHighlight(shape: Shape | null): void {
+    if (!shape) {
       this.hlG.replaceChildren();
       return;
     }
-    this.hlG.replaceChildren(svgEl('path', { d: pathData(points), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    const els: SVGElement[] = shape.lines.map((pts) => svgEl('path', { d: pathData(pts), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    for (const r of shape.rects) els.push(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: 'none', 'stroke-linejoin': 'round' }));
+    this.hlG.replaceChildren(...els);
   }
 
   /** Linea in costruzione, con le proprieta' che avra' una volta finita. */

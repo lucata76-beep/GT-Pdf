@@ -83,6 +83,20 @@ export class PageGeometry {
     return { x: (m[3] * x - m[2] * y) / det, y: (-m[1] * x + m[0] * y) / det };
   }
 
+  /**
+   * Angolo della linea di base (gradi, antiorario come in PDF, in [0, 360)) con cui un testo scritto nello spazio utente
+   * appare orizzontale e leggibile sul foglio mostrato: 0, 90, 180 o 270 a seconda di /Rotate. Per l'esportazione (CP5):
+   * e' l'argomento `rotate` del testo.
+   */
+  get uprightAngleDeg(): number {
+    const m = this.m;
+    const det = m[0] * m[3] - m[1] * m[2];
+    // direzione "verso destra sul foglio" (1, 0) riportata nello spazio utente
+    const deg = (Math.atan2(-m[1] / det, m[3] / det) * 180) / Math.PI;
+    const rounded = Math.round(deg / 90) * 90; // sono multipli di 90 a meno dell'errore numerico
+    return ((rounded % 360) + 360) % 360;
+  }
+
   /** Il punto sta dentro il foglio (bordo compreso). */
   contains(s: SheetPoint): boolean {
     return s.x >= 0 && s.y >= 0 && s.x <= this.width && s.y <= this.height;

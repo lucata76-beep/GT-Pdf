@@ -4,13 +4,14 @@
 // Modo 'erase': un tocco fermo sceglie l'oggetto da cancellare; trascinando si sposta la vista.
 // Coordinate: gli oggetti sono nello spazio utente PDF; per lo schermo si passa da PageGeometry (src/geometry/page.ts),
 // che gestisce Rotate, CropBox e UserUnit come il viewport a scala 1 di PDF.js (confronto nei test).
+import type { Layout, Shape } from '../geometry/layout';
 import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
 import { SCREEN_PIXEL_BUDGET, fitRenderSize } from '../geometry/pixels';
 import type { Stroke } from '../model/stroke';
 import type { PDFPageProxy, RenderTask } from '../pdf/loader';
 import { h } from './dom';
 import { Lens } from './lens';
-import { type Badge, SceneOverlay } from './overlay';
+import { type Badge, type DrawItem, SceneOverlay } from './overlay';
 
 export type { SheetPoint, UserPoint };
 
@@ -186,11 +187,17 @@ export class PdfViewer {
     const g = this.geom;
     return g ? points.map((p) => g.userToSheet(p)) : [];
   }
-  setObjects(items: readonly { id: number; points: readonly UserPoint[]; stroke: Stroke }[]): void {
-    this.overlay.setObjects(items.map((o) => ({ id: o.id, points: this.sheetPts(o.points), stroke: o.stroke })));
+  /** Oggetti della pagina gia' nel foglio (rette e linee con le loro proprieta', testi e quote come primitive). */
+  setObjects(items: readonly DrawItem[]): void {
+    this.overlay.setObjects(items);
   }
-  setHighlight(points: readonly UserPoint[] | null): void {
-    this.overlay.setHighlight(points ? this.sheetPts(points) : null);
+  /** Evidenzia la forma (nel foglio) dell'oggetto che si sta per cancellare. */
+  setHighlight(shape: Shape | null): void {
+    this.overlay.setHighlight(shape);
+  }
+  /** Testo o quota in corso di scrittura. */
+  setDraft(layout: Layout | null): void {
+    this.overlay.setDraft(layout);
   }
   /** Linea in costruzione, disegnata con le proprieta' che avra'. */
   setPreview(points: readonly UserPoint[] | null, stroke?: Stroke): void {
@@ -211,6 +218,7 @@ export class PdfViewer {
   /** Svuota il livello di disegno (cambio pagina o documento). */
   clearScene(): void {
     this.overlay.setObjects([]);
+    this.overlay.setDraft(null);
     this.overlay.setHighlight(null);
     this.overlay.setPreview(null);
     this.overlay.setGuide(null);
@@ -237,6 +245,50 @@ export class PdfViewer {
     this.atFit = true;
     this.applyTransform();
     this.scheduleRender(0);
+  }
+
+  /**
+   * Porta nella parte visibile i punti del foglio (pt) senza cambiare lo zoom, a meno che non entrino nel riquadro:
+   * allora si riduce lo zoom quanto basta. Serve quando il tastierino restringe l'area di lavoro: il punto di lavoro
+   * (dove si scrive o si quota) non deve restare nascosto ne' coperto.
+   */
+  ensureVisible(points: readonly SheetPoint[], marginPx = 28): void {
+    if (!this.page || points.length === 0) return;
+    const r = this.el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const availW = Math.max(1, r.width - 2 * marginPx);
+    const availH = Math.max(1, r.height - 2 * marginPx);
+    let changed = false;
+    if ((x1 - x0) * this.zoom > availW || (y1 - y0) * this.zoom > availH) {
+      const z = Math.max(this.fitZoom * 0.2, Math.min(this.zoom, availW / Math.max(x1 - x0, 1e-6), availH / Math.max(y1 - y0, 1e-6)));
+      this.zoom = z;
+      this.tx = r.width / 2 - ((x0 + x1) / 2) * z; // centrato: l'insieme non entra comunque con margine
+      this.ty = r.height / 2 - ((y0 + y1) / 2) * z;
+      changed = true;
+    } else {
+      const left = this.tx + x0 * this.zoom;
+      const right = this.tx + x1 * this.zoom;
+      const top = this.ty + y0 * this.zoom;
+      const bottom = this.ty + y1 * this.zoom;
+      let dx = 0;
+      let dy = 0;
+      if (left < marginPx) dx = marginPx - left;
+      else if (right > r.width - marginPx) dx = r.width - marginPx - right;
+      if (top < marginPx) dy = marginPx - top;
+      else if (bottom > r.height - marginPx) dy = r.height - marginPx - bottom;
+      if (dx !== 0 || dy !== 0) {
+        this.tx += dx;
+        this.ty += dy;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.atFit = false;
+    this.applyTransform();
+    this.scheduleRender();
   }
 
   zoomBy(factor: number): void {
