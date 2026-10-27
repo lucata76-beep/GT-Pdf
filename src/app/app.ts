@@ -68,7 +68,7 @@ const TOOLS: Tool[] = [
   { id: 'cover', label: 'Copertura', icon: 'square', cp: 'CP4' },
 ];
 const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase';
-/** Pagina e posizione (coordinate utente) dell'oggetto in corso di scrittura con il tastierino. */
+/** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
 type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
 
 export interface AppOptions {
@@ -772,6 +772,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     afterHistory(history.redo(), 'Ripetuto');
   }
+
+  // Se la vista cambia mentre si scrive (rotazione dell'iPhone, A-/A+), il punto di lavoro deve restare in vista.
+  new ResizeObserver(() => {
+    const g = viewer.geometry;
+    if (entry && g) viewer.ensureVisible(entryExtent(g));
+  }).observe(viewer.el);
 
   // ---------- Collegamenti della vista ----------
   viewer.hooks.onCursor = setCursor;

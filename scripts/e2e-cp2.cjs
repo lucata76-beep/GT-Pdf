@@ -1,4 +1,4 @@
-// Prove di CP2 su Chromium: mouse (desktop 1280x800) e touch (emulazione iPhone 390x780, DPR 3, eventi touch reali via CDP).
+// Prove di CP2 su Chromium (rieseguite in CP3 come regressione): mouse (desktop 1280x800) e touch (emulazione iPhone 390x780, DPR 3, eventi touch reali via CDP).
 // NON e' una dipendenza del progetto: richiede Playwright con Chromium gia' installati (require('playwright')).
 // Uso: npm run build && node scripts/e2e-cp2.cjs [cartella-screenshot]
 // Avvia da solo `vite preview` su una porta libera. Esce con codice 1 se una prova fallisce.
@@ -279,9 +279,9 @@ async function mouseSuite(browser) {
   await insp.getByRole('button', { name: 'Continua' }).click();
   await insp.locator('button[aria-label^="Rosso"]').click();
   const before = await objects(page);
-  await insp.getByRole('button', { name: "Applica all'ultima linea" }).click();
+  await insp.getByRole('button', { name: "Applica all'ultimo oggetto" }).click();
   const after = await objects(page);
-  check("Applica all'ultima linea: solo l'ultima cambia (continua, rosso)", after[after.length - 1].dash === null && after[after.length - 1].stroke === '#D32F2F' && after[after.length - 2].dash === before[before.length - 2].dash);
+  check("Applica all'ultimo oggetto: solo l'ultima cambia (continua, rosso)", after[after.length - 1].dash === null && after[after.length - 1].stroke === '#D32F2F' && after[after.length - 2].dash === before[before.length - 2].dash);
   await undo.click();
   const undone = await objects(page);
   check("Annulla l'applicazione: l'ultima linea torna tratto-punto verde-custom", undone[undone.length - 1].dash === '6 1.5 0.5 1.5' && undone[undone.length - 1].stroke === '#12AB34');
@@ -301,7 +301,7 @@ async function mouseSuite(browser) {
   check('Cancella: Annulla la ripristina, allo stesso posto (la prima)', restored.length === countBefore && near(restored[0].pts[0].y, 200, 1.5), JSON.stringify(restored[0]?.pts));
   const empty = await toClient(page, sample, { x: 500, y: 500 });
   await clickAt(page, empty);
-  check('Cancella: tocco nel vuoto non cancella nulla e lo dice', (await objects(page)).length === countBefore && (await status(page)).includes('Nessuna linea'), await status(page));
+  check('Cancella: tocco nel vuoto non cancella nulla e lo dice', (await objects(page)).length === countBefore && (await status(page)).includes('Nessun oggetto'), await status(page));
   await page.screenshot({ path: join(SHOTS, 'mouse-04-disegno.png') });
 
   // --- Tastiera ---
@@ -316,14 +316,14 @@ async function mouseSuite(browser) {
   await page.keyboard.press('Control+Shift+z');
   check('Tastiera: Ctrl+Maiusc+Z ripete', (await objects(page)).length === countBefore + 1);
 
-  // --- Pagina, Nuovo/Chiudi: oggetti e scala per pagina, conferma ---
+  // --- Pagina, Chiudi: oggetti e scala per pagina, conferma ---
   await page.getByRole('button', { name: 'Modifica' }).click();
   check('Menu Modifica: Annulla e Ripeti presenti', (await page.locator('.menu-panel').innerText()).includes('Ripeti'));
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'File', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Chiudi' }).click();
   const dlg = await page.locator('.dialog').innerText();
-  check('Chiudi con oggetti: avvisa e conta linee e scala', /linee disegnate/.test(dlg) && /scala calibrata/.test(dlg), dlg);
+  check('Chiudi con oggetti: avvisa e conta linee e scala', /oggetti disegnati/.test(dlg) && /scala calibrata/.test(dlg), dlg);
   await page.getByRole('button', { name: 'Annulla' }).last().click();
 
   check('Nessun errore in console (mouse)', errors.length === 0, errors.join(' | '));

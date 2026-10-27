@@ -1090,9 +1090,10 @@ body.app-mode {
 }
 .kp-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0 0.5rem;
   font-size: 0.625rem;
   line-height: 0.75rem;
 }
@@ -1103,9 +1104,8 @@ body.app-mode {
 }
 .kp-info {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-left: auto;
+  text-align: right;
   color: var(--cad-text-secondary);
   font-size: 0.6875rem;
   font-weight: 400;
