@@ -254,6 +254,13 @@ Dialog Calibra scala
   - scala 1:N con `N = L_reale_mm / foglio_mm` (esempio: 100 mm reali su 283.46 pt = 100 mm di foglio = 1:1)
 - Mai pixel di schermo: dipenderebbero dallo zoom. La scala e' per pagina.
 
+Barra contestuale e proprieta' della linea (CP2)
+- Compare sopra la barra di stato solo quando e' attivo uno strumento diverso da "Sposta vista" (su iPhone la palette e la barra di stato restano ferme). Una riga di testo guida con il passo corrente ("Retta: indica il secondo punto") e, sotto, il riquadro delle proprieta' (linea in miniatura con tipo, colore e spessore: apre il pannello), `Annulla` (scarta i punti in costruzione) e, per la Linea, `Fine`. Sul desktop il riquadro non c'e': le stesse proprieta' stanno nell'inspector.
+- Pannello proprieta': tipo (Continua, Tratto-punto, Tratteggiata), colore (8 della tavolozza + selettore nativo + campo `#RRGGBB`), spessore in pt (predefiniti 0.25, 0.5, 0.75, 1, 1.5, 2, 3 + campo digitabile 0.1-20), `Applica all'ultima linea`. Stato attivo: bordo 1px `cad.accent-stroke`.
+- Barra di stato: `SCALA:` (tocco = calibra) e interruttore `ORTO` (attivo = fondo `cad.accent-fill`, testo bianco).
+- Misura (Distanza): linea e segni in `cad.measure`; badge bianco con `L`, `ΔX`, `ΔY` (livello 2). Cancella: la linea sotto il dito e' evidenziata in `cad.measure` prima di essere cancellata.
+- Pattern dei tipi di linea e valori predefiniti: vedere `docs/PIANO.md` (Scelte di CP2); sono in pt del foglio, in funzione dello spessore.
+
 Dialog Esporta PDF
 - Predefinito: **Copertura semplice** - "Il testo sotto le coperture resta nel file."
 - **Appiattito** - "Le pagine diventano immagini: il testo sotto sparisce." Mostrare la scelta DPI (150, 300, 600).

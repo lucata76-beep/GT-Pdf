@@ -9,7 +9,7 @@ I testi di licenza sono in `LICENSES/`. Nessun componente viene caricato da CDN.
 | @cantoo/pdf-lib | 2.11.1 | MIT | dipendenza npm; testo in `LICENSES/cantoo-pdf-lib-MIT.txt` |
 | Inter (latin, 400/500/600/700) | 5.3.0 (Fontsource) | SIL OFL 1.1 | `src/assets/fonts/`; testo in `LICENSES/OFL-Inter.txt` |
 | JetBrains Mono (latin, 400/500) | 5.3.0 (Fontsource) | SIL OFL 1.1 | `src/assets/fonts/`; testo in `LICENSES/OFL-JetBrainsMono.txt` |
-| Lucide (icone selezionate) | 1.61.0 | ISC (alcune icone MIT, da Feather) | `src/assets/icons/`; testo in `LICENSES/Lucide-ISC-MIT.txt` |
+| Lucide (icone selezionate) | 1.61.0 | ISC (alcune icone MIT, da Feather) | `src/assets/icons/`; testo in `LICENSES/Lucide-ISC-MIT.txt`. `polyline.svg` non e' di Lucide: e' un'icona propria del progetto nello stesso stile |
 
 ## Asset di PDF.js copiati nel sito (`pdfjs/` nel build)
 

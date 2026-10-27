@@ -2,24 +2,28 @@
 
 Editor PDF con quote (nome provvisorio): web app statica, senza backend. Apre PDF vettoriali e scansioni, li annota e li quota in unità reali **senza mai alterare l'originale**; l'esportazione produce un nuovo file. I file restano sul dispositivo (locale o iCloud, tramite il selettore di sistema). Funziona su iPhone (Safari) e su desktop.
 
-**Stato: CP1 (interfaccia).** Si apre un PDF, lo si guarda con zoom/pinch e si provano la lente e i punti di prova; non c'è ancora nessuna funzione di editing vera (scala, quote, testo, coperture, esportazione arrivano nei checkpoint successivi). La diagnostica di CP0 resta in File > Diagnostica. Piano, decisioni e assegnazione delle funzioni ai checkpoint: [`docs/PIANO.md`](docs/PIANO.md). Design: [`design/DESIGN.md`](design/DESIGN.md).
+**Stato: CP2 (scala e disegno).** Si apre un PDF, si calibra la scala di ogni pagina, si disegnano rette e linee (continue, tratto-punto, tratteggiate; colore e spessore a scelta; ortogonale), si misurano le distanze in unità reali, si annulla/ripete e si cancella. Gli oggetti vivono in memoria nella sessione: non c'è ancora salvataggio né esportazione (CP5), né testo, quote, coperture (CP3, CP4). La diagnostica di CP0 resta in File > Diagnostica. Piano, decisioni e assegnazione delle funzioni ai checkpoint: [`docs/PIANO.md`](docs/PIANO.md). Design: [`design/DESIGN.md`](design/DESIGN.md).
 
 ## Aprire l'app
 
 - Online (GitHub Pages): https://lucata76-beep.github.io/GT-Pdf/ — indirizzo atteso dal formato `<utente>.github.io/<repository>`, da confermare dopo il primo deploy.
 - In locale: `npm ci`, poi `npm run dev` (oppure `npm run build && npm run preview`). Richiede Node 22.12 o successivo.
 
-Comandi: `npm run typecheck`, `npm test`, `npm run build`. `npm run test-pdfs` rigenera i PDF di prova, `npm run icons` le icone.
+Comandi: `npm run typecheck`, `npm test`, `npm run build`. `npm run test-pdfs` rigenera i PDF di prova, `npm run icons` le icone. Prove su Chromium (mouse e touch iPhone emulato): `npm run build && node scripts/e2e-cp2.cjs` (richiede Playwright con Chromium installati; non è una dipendenza del progetto).
 
-## Provare CP1 su iPhone
+## Provare CP2 su iPhone
 
-Aprire l'indirizzo in Safari (poi, per l'ultima serie, dall'icona Home).
-1. **Apri PDF…** (iCloud e "Su questo iPhone"); i PDF di prova fittizi sono sotto "PDF di prova". Pagine multiple: frecce nella barra di stato.
-2. **Zoom e pinch**: due dita zoomano solo il foglio (la pagina dell'app non deve ingrandirsi); un dito sposta con "Sposta vista"; pulsanti +, −, Adatta in basso a destra.
-3. **A- / A+** in alto: cambiano la dimensione dell'interfaccia, non il documento.
-4. **Lente**: scegliere "Punto di prova", tenere premuto sul foglio: appare la lente sopra il dito con mirino; spostando il dito la mira si muove, al rilascio il punto è inserito (elenco con coordinate nel pannello Proprietà, pulsante in alto a destra). Annotare se la lente è leggibile, se il dito la copre, se il punto cade dove punta il mirino.
-5. **File > Nuovo** (con almeno un punto: conferma, poi si apre il selettore file), **Apri…**, **Chiudi**.
-6. Ripetere dall'icona Home e in orizzontale.
+Aprire l'indirizzo in Safari (poi, per l'ultima serie, dall'icona Home). Prima di tutto controllare la versione: icona del pannello in alto a destra, in fondo "App · Versione": deve coincidere con il commit pubblicato (se è diversa, Safari sta mostrando file vecchi: ricaricare).
+1. **Apri PDF…**, poi dai "PDF di prova" scegliere **A4 vettoriale**. In basso a sinistra del foglio c'è il segmento "RIFERIMENTO 100 mm" (misura esatta di 100 mm).
+2. **Retta**: in basso toccare *Retta*. Tenere premuto sul foglio: appare la lente col mirino; muovere il dito per mirare, rilasciare: il primo punto è inserito (segno azzurro). Mentre si mira il secondo punto la retta compare in anteprima. Rilasciare: la retta rossa è creata. Annotare: la lente si legge? il dito la copre? il punto cade dove punta il mirino?
+3. **Linea**: *Linea*, toccare tre o quattro punti, poi **Fine** (oppure toccare due volte l'ultimo punto).
+4. **Tipo, colore, spessore**: toccare il riquadro con la linea in miniatura ("1 pt") nella barra sopra la barra di stato. Scegliere *Tratteggiata* o *Tratto-punto*, un colore (anche il selettore o il campo `#RRGGBB`), uno spessore (anche digitato: prova `0,5` con la virgola e un valore non valido come `abc`: deve comparire un messaggio). Disegnare una nuova linea: ha le proprietà scelte. *Applica all'ultima linea* cambia solo l'ultima linea della pagina.
+5. **ORTO**: toccare *ORTO* in basso (diventa arancio). Disegnare una retta quasi orizzontale: lente e anteprima mostrano già il punto allineato. Ripetere con il PDF di prova **A4 con /Rotate 90**: "orizzontale" è quello che si vede sullo schermo.
+6. **Scala**: *Scala*; toccare le due estremità del segmento di 100 mm (conviene prima zoomare con due dita), nel dialogo digitare `100` (o `100,5`) e *Applica*. In basso compare `SCALA: 1:…` (circa 1:1). La scala vale per la pagina: con **3 pagine miste** ogni pagina ha la sua.
+7. **Distanza**: pulsante *Distanza* sul foglio (colonna in basso a destra). Due punti: il badge mostra `L`, `ΔX`, `ΔY` in mm reali. Su una pagina non calibrata mostra "Foglio … mm / non calibrata".
+8. **Annulla/Ripeti**: frecce in alto. *Ripeti* si spegne dopo una nuova azione. Con una linea a metà, *Annulla* toglie l'ultimo punto.
+9. **Cancella**: *Cancella* (ultima icona visibile nella barra degli strumenti). Appoggiare il dito su una linea: si evidenzia; rilasciare: è cancellata. *Annulla* la ripristina. Trascinare sposta la vista senza cancellare.
+10. **A- / A+**, rotazione in orizzontale, e tutto da icona Home.
 
 ## Provare CP0 (diagnostica) su iPhone — File > Diagnostica
 
@@ -41,11 +45,12 @@ docs/PIANO.md                  decisioni, checkpoint, punti NON VERIFICATI
 LICENSES/, THIRD_PARTY.md      licenze dei componenti inclusi
 public/test-pdfs/              PDF di prova FITTIZI (generati da scripts/make-test-pdfs.mjs)
 public/icons/, manifest        icone per la schermata Home
-scripts/                       generazione PDF di prova e icone, copia asset PDF.js
-src/geometry/                  calcoli sui pixel e sulle unità (con test)
+scripts/                       generazione PDF di prova e icone, copia asset PDF.js, prove Chromium (e2e-cp2.cjs)
+src/geometry/                  pixel, unità, scala, geometria di pagina (Rotate/CropBox), ortogonale, misura (con test)
+src/model/                     oggetti, tipi di linea, colore, spessore, annulla/ripeti (con test)
 src/pdf/                       apertura PDF con PDF.js (build legacy)
-src/app/                       guscio dell'app (menu, palette, inspector, barra di stato, sessione)
-src/ui/                        DOM, icone, vista del documento (pan, pinch, zoom, lente), menu, dialoghi
+src/app/                       guscio dell'app (menu, palette, inspector, barre, sessione) e costruzione per punti
+src/ui/                        DOM, icone, vista del documento (pan, pinch, zoom, lente), livello di disegno, menu, dialoghi
 src/diag/                      pagina diagnostica (CP0)
 src/assets/                    font Inter e JetBrains Mono, icone Lucide
 ```
