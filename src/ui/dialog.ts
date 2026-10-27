@@ -13,6 +13,12 @@ interface DialogOptions {
    * serve a chi deve aprire il selettore file, che iOS consente solo da un gesto diretto.
    */
   onConfirm?: () => void;
+  /** Contenuto aggiuntivo (es. un campo da compilare), mostrato sotto il messaggio. */
+  content?: Node;
+  /** Elemento che riceve il focus all'apertura (predefinito: il pulsante di conferma). */
+  initialFocus?: HTMLElement;
+  /** Se presente e restituisce false, "conferma" non chiude la finestra (il contenuto spiega perche'). */
+  canConfirm?: () => boolean;
 }
 
 /** Restituisce true se l'utente conferma. Esc e tocco fuori dalla finestra = annulla. */
@@ -30,6 +36,9 @@ export function showDialog(opts: DialogOptions): Promise<boolean> {
         e.preventDefault();
         e.stopPropagation();
         finish(false);
+      } else if (e.key === 'Enter' && e.target instanceof HTMLInputElement && opts.content?.contains(e.target)) {
+        e.preventDefault();
+        ok.click(); // Invio in un campo = conferma
       }
     };
     const ok = h(
@@ -38,6 +47,7 @@ export function showDialog(opts: DialogOptions): Promise<boolean> {
         class: 'btn primary',
         type: 'button',
         onclick: () => {
+          if (opts.canConfirm && !opts.canConfirm()) return;
           opts.onConfirm?.();
           finish(true);
         },
@@ -50,14 +60,16 @@ export function showDialog(opts: DialogOptions): Promise<boolean> {
       { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dlg-title' },
       h('h2', { id: 'dlg-title', class: 'dialog-title' }, opts.title),
       h('p', { class: 'dialog-msg' }, opts.message),
+      opts.content ?? null,
       h('div', { class: 'dialog-actions' }, cancel, ok),
     );
-    const backdrop = h('div', { class: 'dialog-backdrop' }, box);
+    // Con un campo da compilare la finestra sta in alto: la tastiera su schermo non deve coprirla (NON VERIFICATO su iPhone).
+    const backdrop = h('div', { class: opts.content ? 'dialog-backdrop has-field' : 'dialog-backdrop' }, box);
     backdrop.addEventListener('pointerdown', (e) => {
       if (e.target === backdrop && cancel) finish(false);
     });
     document.addEventListener('keydown', onKey, true);
     document.body.append(backdrop);
-    ok.focus();
+    (opts.initialFocus ?? ok).focus();
   });
 }

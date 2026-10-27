@@ -1,12 +1,18 @@
 // Vista del documento: pagina PDF.js su canvas, pan con un dito, pinch con due, rotella su desktop.
 // Pointer Events + touch-action: none. Il canvas non supera mai SCREEN_PIXEL_BUDGET: oltre, il rendering sfoca.
-// Modo 'point': un dito (o il mouse) punta con la lente, il punto si inserisce al rilascio; due dita = pinch/pan.
-// Coordinate: i punti sono nello spazio utente PDF; per lo schermo si passa dal viewport a scala 1
-// (convertToViewportPoint / convertToPdfPoint gestiscono Rotate, CropBox e UserUnit).
+// Modo 'pick': un dito (o il mouse) punta con la lente, il punto si inserisce al rilascio; due dita = pinch/pan.
+// Modo 'erase': un tocco fermo sceglie l'oggetto da cancellare; trascinando si sposta la vista.
+// Coordinate: gli oggetti sono nello spazio utente PDF; per lo schermo si passa da PageGeometry (src/geometry/page.ts),
+// che gestisce Rotate, CropBox e UserUnit come il viewport a scala 1 di PDF.js (confronto nei test).
+import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
 import { SCREEN_PIXEL_BUDGET, fitRenderSize } from '../geometry/pixels';
+import type { Stroke } from '../model/stroke';
 import type { PDFPageProxy, RenderTask } from '../pdf/loader';
 import { h } from './dom';
 import { Lens } from './lens';
+import { type Badge, SceneOverlay } from './overlay';
+
+export type { SheetPoint, UserPoint };
 
 export interface ViewerStats {
   /** Pixel CSS per pt PDF (zoom a schermo). */
@@ -21,35 +27,35 @@ export interface ViewerStats {
   error: string | null;
 }
 
-export type ViewerMode = 'pan' | 'point';
-
-/** Punto nello spazio utente PDF della pagina corrente. */
-export interface UserPoint {
-  x: number;
-  y: number;
-}
-
-/** Posizione sul foglio in pt reali (1/72 in), origine in alto a sinistra della pagina mostrata (Rotate applicato). */
-export interface SheetPoint {
-  x: number;
-  y: number;
-}
+export type ViewerMode = 'pan' | 'pick' | 'erase';
 
 export interface ViewerHooks {
-  /** Posizione del cursore sul foglio; null quando esce dal foglio. */
+  /** Posizione del cursore sul foglio (pt fisici, origine in alto a sinistra); null quando esce dal foglio. */
   onCursor?: (p: SheetPoint | null) => void;
-  /** Punto inserito (rilascio dopo la mira). */
+  /** Modo 'pick': porta il punto grezzo sul punto effettivo (es. vincolo ortogonale). Vale per mira, anteprima e inserimento. */
+  constrain?: (raw: SheetPoint) => SheetPoint;
+  /** Modo 'pick': il punto che verrebbe inserito adesso (gia' vincolato), durante la mira o il passaggio del mouse; null alla fine. */
+  onAim?: (effective: SheetPoint | null) => void;
+  /** Modo 'pick': punto inserito (rilascio dopo la mira), gia' vincolato. */
   onPlace?: (user: UserPoint, sheet: SheetPoint) => void;
+  /** Modo 'erase': tocco o clic fermo. `tolPt` = tolleranza in pt del foglio (pixel di schermo / zoom). */
+  onErase?: (sheet: SheetPoint, tolPt: number) => void;
+  /** Modo 'erase': posizione di dito o mouse per evidenziare l'oggetto che verrebbe cancellato; null quando finisce. */
+  onErasePreview?: (sheet: SheetPoint | null, tolPt: number) => void;
   /** Mira rilasciata fuori dalla pagina. */
   onReject?: (reason: string) => void;
   /** Zoom o fit cambiati (pixel CSS per pt). */
   onView?: (v: { zoom: number; fit: number }) => void;
 }
 
+/** Tolleranza di scelta dell'oggetto da cancellare, in pixel CSS: piu' larga col dito (bersaglio >= 44 pt). */
+const ERASE_TOL_PX = { touch: 22, mouse: 10 } as const;
+/** Movimento oltre il quale un tocco in modo 'erase' diventa trascinamento (sposta la vista). */
+const TAP_SLOP_PX = 8;
+
 type Pt = { x: number; y: number };
 
 const MAX_ZOOM = 24; // px CSS per pt
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const isCancel = (e: unknown): boolean => (e as { name?: string } | null)?.name === 'RenderingCancelledException';
 const release = (c: HTMLCanvasElement): void => {
@@ -57,24 +63,19 @@ const release = (c: HTMLCanvasElement): void => {
   c.height = 1;
 };
 
-type Viewport = ReturnType<PDFPageProxy['getViewport']>;
-
 export class PdfViewer {
   readonly el: HTMLDivElement;
   readonly hooks: ViewerHooks = {};
   private readonly stage: HTMLDivElement;
   private readonly empty: HTMLDivElement;
-  private readonly overlay: SVGSVGElement;
-  private readonly markers: SVGGElement;
-  private readonly aimMark: SVGGElement;
+  private readonly overlay = new SceneOverlay();
   private readonly lens = new Lens();
   private canvas: HTMLCanvasElement | null = null;
 
   private page: PDFPageProxy | null = null;
-  private vp1: Viewport | null = null;
+  private geom: PageGeometry | null = null;
   private pageW = 0;
   private pageH = 0;
-  private points: UserPoint[] = [];
   mode: ViewerMode = 'pan';
 
   private zoom = 1; // px CSS per pt
@@ -88,8 +89,12 @@ export class PdfViewer {
   private maxPointers = 0;
   private gestureEvents = 0;
   private pinch: { dist: number; zoom: number; midX: number; midY: number; tx: number; ty: number } | null = null;
-  /** Mira in corso (modo 'point', primo puntatore). */
+  /** Mira in corso (modo 'pick', primo puntatore). */
   private aim: { id: number; pos: Pt; touch: boolean } | null = null;
+  /** Tocco in corso in modo 'erase': diventa trascinamento se il dito si muove oltre TAP_SLOP_PX. */
+  private tap: { id: number; start: Pt; moved: boolean; touch: boolean } | null = null;
+  /** Ultima posizione del mouse senza tasti (per rifare l'anteprima). */
+  private lastHover: Pt | null = null;
 
   private renderTimer = 0;
   private renderToken = 0;
@@ -105,20 +110,11 @@ export class PdfViewer {
   ) {
     this.stage = h('div', { class: 'viewer-stage' });
     this.empty = h('div', { class: 'viewer-empty' }, 'Nessun documento aperto');
-    this.markers = document.createElementNS(SVG_NS, 'g');
-    this.aimMark = document.createElementNS(SVG_NS, 'g');
-    this.aimMark.setAttribute('class', 'aim-mark');
-    this.aimMark.setAttribute('display', 'none');
-    this.aimMark.innerHTML = '<line x1="-10" x2="10" y1="0" y2="0"/><line x1="0" x2="0" y1="-10" y2="10"/>';
-    this.overlay = document.createElementNS(SVG_NS, 'svg');
-    this.overlay.setAttribute('class', 'viewer-overlay');
-    this.overlay.setAttribute('aria-hidden', 'true');
-    this.overlay.append(this.markers, this.aimMark);
     this.el = h(
       'div',
       { class: 'viewer', tabindex: 0, role: 'img', 'aria-label': 'Anteprima del documento' },
       this.stage,
-      this.overlay,
+      this.overlay.el,
       this.lens.el,
       this.empty,
     );
@@ -128,7 +124,13 @@ export class PdfViewer {
     this.el.addEventListener('pointerup', this.onUp);
     this.el.addEventListener('pointercancel', this.onUp);
     this.el.addEventListener('pointerleave', (e) => {
-      if (e.pointerType === 'mouse') this.hooks.onCursor?.(null);
+      if (e.pointerType !== 'mouse') return;
+      this.hooks.onCursor?.(null);
+      if (this.pointers.size > 0) return; // tasto premuto: la cattura del puntatore continua a seguirlo
+      this.lastHover = null;
+      this.overlay.setAim(null);
+      this.hooks.onAim?.(null);
+      this.hooks.onErasePreview?.(null, 0);
     });
     this.el.addEventListener('contextmenu', (e) => e.preventDefault());
     this.el.addEventListener('wheel', this.onWheel, { passive: false });
@@ -160,36 +162,67 @@ export class PdfViewer {
     this.lastRender = null;
     this.lastError = null;
     this.logNext = page !== null;
+    this.clearScene();
     if (!page) {
-      this.vp1 = null;
+      this.geom = null;
       this.stage.replaceChildren();
       if (this.canvas) release(this.canvas);
       this.canvas = null;
       this.empty.hidden = false;
-      this.renderMarkers();
       this.queueStats();
       return;
     }
     this.empty.hidden = true;
-    this.vp1 = page.getViewport({ scale: 1 });
-    this.pageW = this.vp1.width;
-    this.pageH = this.vp1.height;
+    // view = CropBox ∩ MediaBox; /Rotate e UserUnit: la geometria e' quella del viewport a scala 1 di PDF.js.
+    this.geom = new PageGeometry({ view: page.view as [number, number, number, number], rotate: page.rotate, userUnit: page.userUnit });
+    this.pageW = this.geom.width;
+    this.pageH = this.geom.height;
     this.fit();
-    this.renderMarkers();
     await this.renderNow();
   }
 
-  /** Punti da mostrare (spazio utente PDF della pagina corrente). */
-  setPoints(points: UserPoint[]): void {
-    this.points = points;
-    this.renderMarkers();
-    this.updateMarkers();
+  // ---- Contenuto del livello di disegno (l'app passa punti nello spazio utente PDF della pagina corrente) ----
+  private sheetPts(points: readonly UserPoint[]): SheetPoint[] {
+    const g = this.geom;
+    return g ? points.map((p) => g.userToSheet(p)) : [];
+  }
+  setObjects(items: readonly { id: number; points: readonly UserPoint[]; stroke: Stroke }[]): void {
+    this.overlay.setObjects(items.map((o) => ({ id: o.id, points: this.sheetPts(o.points), stroke: o.stroke })));
+  }
+  setHighlight(points: readonly UserPoint[] | null): void {
+    this.overlay.setHighlight(points ? this.sheetPts(points) : null);
+  }
+  /** Linea in costruzione, disegnata con le proprieta' che avra'. */
+  setPreview(points: readonly UserPoint[] | null, stroke?: Stroke): void {
+    this.overlay.setPreview(points ? this.sheetPts(points) : null, stroke);
+  }
+  /** Linea di costruzione di misura o calibrazione (colore `measure`). */
+  setGuide(points: readonly UserPoint[] | null): void {
+    this.overlay.setGuide(points ? this.sheetPts(points) : null);
+  }
+  setMarkers(list: readonly { p: UserPoint; label?: string }[]): void {
+    this.overlay.setMarkers(list.map((m) => ({ p: this.sheetPts([m.p])[0] as SheetPoint, label: m.label })));
+  }
+  setBadge(b: { at: UserPoint; lines: readonly string[] } | null): void {
+    const g = this.geom;
+    const badge: Badge | null = b && g ? { at: g.userToSheet(b.at), lines: b.lines } : null;
+    this.overlay.setBadge(badge);
+  }
+  /** Svuota il livello di disegno (cambio pagina o documento). */
+  clearScene(): void {
+    this.overlay.setObjects([]);
+    this.overlay.setHighlight(null);
+    this.overlay.setPreview(null);
+    this.overlay.setGuide(null);
+    this.overlay.setMarkers([]);
+    this.overlay.setBadge(null);
   }
 
   setMode(mode: ViewerMode): void {
     if (this.mode === mode) return;
     this.mode = mode;
     this.cancelAim();
+    this.clearTap();
     this.el.dataset.mode = mode;
   }
 
@@ -241,20 +274,23 @@ export class PdfViewer {
   }
 
   private inPage(s: SheetPoint): boolean {
-    return s.x >= 0 && s.y >= 0 && s.x <= this.pageW && s.y <= this.pageH;
+    return this.geom?.contains(s) ?? false;
   }
 
-  private toUser(s: SheetPoint): UserPoint | null {
-    if (!this.vp1) return null;
-    const [x, y] = this.vp1.convertToPdfPoint(s.x, s.y);
-    return x === undefined || y === undefined ? null : { x, y };
+  /** Geometria della pagina mostrata (spazio utente <-> foglio); null senza documento. */
+  get geometry(): PageGeometry | null {
+    return this.geom;
   }
 
-  /** Da spazio utente PDF a pt reali sul foglio (origine in alto a sinistra). */
-  userToSheet(p: UserPoint): SheetPoint | null {
-    if (!this.vp1) return null;
-    const [x, y] = this.vp1.convertToViewportPoint(p.x, p.y);
-    return x === undefined || y === undefined ? null : { x, y };
+  /** Pixel CSS per pt del foglio (zoom a schermo). */
+  get zoomValue(): number {
+    return this.zoom;
+  }
+
+  /** Il punto effettivo per una posizione nel riquadro: grezzo + vincolo dell'app (es. ortogonale). */
+  private effective(pos: Pt): SheetPoint {
+    const raw = this.toSheet(pos);
+    return this.hooks.constrain ? this.hooks.constrain(raw) : raw;
   }
 
   get sheetSize(): { w: number; h: number } {
@@ -278,11 +314,19 @@ export class PdfViewer {
     const pos = this.local(e);
     this.pointers.set(e.pointerId, pos);
     this.maxPointers = Math.max(this.maxPointers, this.pointers.size);
-    if (this.mode === 'point' && !mousePan && this.pointers.size === 1) {
-      this.aim = { id: e.pointerId, pos, touch: e.pointerType !== 'mouse' };
+    const primary = !mousePan && this.pointers.size === 1;
+    const touch = e.pointerType !== 'mouse';
+    if (this.mode === 'pick' && primary) {
+      this.aim = { id: e.pointerId, pos, touch };
       this.updateAim();
     } else {
       this.cancelAim(); // un secondo dito annulla la mira: si passa al pinch
+    }
+    if (this.mode === 'erase' && primary) {
+      this.tap = { id: e.pointerId, start: pos, moved: false, touch };
+      this.previewErase(pos, touch);
+    } else {
+      this.clearTap();
     }
     this.resetBaseline();
     this.queueStats();
@@ -293,7 +337,10 @@ export class PdfViewer {
     if (!this.page) return;
     const cur = this.local(e);
     if (!prev) {
-      if (e.pointerType === 'mouse') this.reportCursor(cur); // passaggio del mouse, nessun tasto
+      if (e.pointerType === 'mouse') {
+        this.reportCursor(cur); // passaggio del mouse, nessun tasto
+        this.hover(cur);
+      }
       return;
     }
     this.pointers.set(e.pointerId, cur);
@@ -302,6 +349,15 @@ export class PdfViewer {
       this.aim.pos = cur;
       this.updateAim();
       return;
+    }
+    const tap = this.tap;
+    if (tap && tap.id === e.pointerId && !tap.moved) {
+      if (Math.hypot(cur.x - tap.start.x, cur.y - tap.start.y) < TAP_SLOP_PX) {
+        this.previewErase(cur, tap.touch);
+        return;
+      }
+      tap.moved = true; // trascinamento: sposta la vista
+      this.hooks.onErasePreview?.(null, 0);
     }
     if (this.pointers.size === 1) {
       this.tx += cur.x - prev.x;
@@ -332,19 +388,64 @@ export class PdfViewer {
       this.cancelAim();
       if (e.type === 'pointerup') this.place(pos);
     }
+    const tap = this.tap;
+    if (tap && tap.id === e.pointerId) {
+      this.clearTap();
+      if (e.type === 'pointerup' && !tap.moved) this.erase(this.local(e), tap.touch);
+    }
     this.resetBaseline();
     this.scheduleRender();
     this.queueStats();
   };
 
   private place(pos: Pt): void {
-    const sheet = this.toSheet(pos);
-    if (!this.inPage(sheet)) {
+    const geom = this.geom;
+    if (!geom) return;
+    const raw = this.toSheet(pos);
+    const eff = this.effective(pos);
+    if (!geom.contains(raw) || !geom.contains(eff)) {
       this.hooks.onReject?.('Punto fuori dalla pagina: non inserito');
       return;
     }
-    const user = this.toUser(sheet);
-    if (user) this.hooks.onPlace?.(user, sheet);
+    this.hooks.onPlace?.(geom.sheetToUser(eff), eff);
+  }
+
+  // ---- Cancella: tocco fermo ----
+  private eraseTol(touch: boolean): number {
+    return (touch ? ERASE_TOL_PX.touch : ERASE_TOL_PX.mouse) / this.zoom;
+  }
+  private previewErase(pos: Pt, touch: boolean): void {
+    this.hooks.onErasePreview?.(this.toSheet(pos), this.eraseTol(touch));
+  }
+  private erase(pos: Pt, touch: boolean): void {
+    const s = this.toSheet(pos);
+    if (this.inPage(s)) this.hooks.onErase?.(s, this.eraseTol(touch));
+  }
+  private clearTap(): void {
+    if (!this.tap) return;
+    this.tap = null;
+    this.hooks.onErasePreview?.(null, 0);
+  }
+
+  /** Rifa' mira e anteprima dopo un cambio di vincolo (es. ORTO attivato). */
+  refreshAim(): void {
+    if (this.aim) this.updateAim();
+    else if (this.lastHover) this.hover(this.lastHover);
+  }
+
+  /** Mouse senza tasti: anteprima del punto (rubber-band) o dell'oggetto da cancellare. */
+  private hover(pos: Pt): void {
+    this.lastHover = pos;
+    if (this.mode === 'pick') {
+      const raw = this.toSheet(pos);
+      const eff = this.effective(pos);
+      const ok = this.inPage(raw);
+      this.hooks.onAim?.(ok ? eff : null);
+      // il segno di mira serve solo se il vincolo ha spostato il punto (altrimenti c'e' gia' il cursore a croce)
+      this.overlay.setAim(ok && Math.hypot(eff.x - raw.x, eff.y - raw.y) * this.zoom > 1 ? eff : null);
+    } else if (this.mode === 'erase') {
+      this.previewErase(pos, false);
+    }
   }
 
   private resetBaseline(): void {
@@ -375,55 +476,35 @@ export class PdfViewer {
 
   // ---- Mira e lente ----
   private cancelAim(): void {
+    const had = this.aim !== null;
     this.aim = null;
-    this.aimMark.setAttribute('display', 'none');
+    this.overlay.setAim(null);
     this.lens.hide();
+    if (had) this.hooks.onAim?.(null);
   }
 
   private updateAim(): void {
     const aim = this.aim;
     if (!aim) return;
-    this.aimMark.setAttribute('transform', `translate(${aim.pos.x} ${aim.pos.y})`);
-    this.aimMark.setAttribute('display', 'inline');
+    const raw = this.toSheet(aim.pos);
+    const eff = this.effective(aim.pos);
+    this.overlay.setAim(eff);
+    this.hooks.onAim?.(this.inPage(raw) ? eff : null);
     if (!aim.touch || !this.canvas || !this.lastRender) return; // la lente serve al dito, non al mouse
-    const sheet = this.toSheet(aim.pos);
     const box = this.el.getBoundingClientRect();
+    // La lente sta vicino al dito ma mostra il punto EFFETTIVO (dopo il vincolo): e' li' che cadra' il punto.
     this.lens.show(aim.pos, { w: box.width, h: box.height }, this.canvas, {
-      cx: sheet.x * this.lastRender.scale,
-      cy: sheet.y * this.lastRender.scale,
+      cx: eff.x * this.lastRender.scale,
+      cy: eff.y * this.lastRender.scale,
       // pixel del canvas per pixel CSS dello schermo
       pxPerCss: this.lastRender.scale / this.zoom,
-    });
-  }
-
-  // ---- Segni dei punti ----
-  private renderMarkers(): void {
-    this.markers.replaceChildren();
-    if (!this.vp1) return;
-    this.points.forEach((_p, i) => {
-      const g = document.createElementNS(SVG_NS, 'g');
-      g.setAttribute('class', 'pt-mark');
-      g.innerHTML = `<line x1="-7" x2="7" y1="0" y2="0"/><line x1="0" x2="0" y1="-7" y2="7"/><circle r="3.5"/><text x="9" y="-6">${i + 1}</text>`;
-      this.markers.append(g);
-    });
-  }
-
-  private updateMarkers(): void {
-    if (!this.vp1) return;
-    const kids = this.markers.children;
-    this.points.forEach((p, i) => {
-      const g = kids[i];
-      if (!g || !this.vp1) return;
-      const [vx, vy] = this.vp1.convertToViewportPoint(p.x, p.y);
-      if (vx === undefined || vy === undefined) return;
-      g.setAttribute('transform', `translate(${this.tx + vx * this.zoom} ${this.ty + vy * this.zoom})`);
     });
   }
 
   // ---- Rendering ----
   private applyTransform(): void {
     this.stage.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.zoom / this.renderZoom})`;
-    this.updateMarkers();
+    this.overlay.setView(this.tx, this.ty, this.zoom);
     this.queueStats();
   }
 

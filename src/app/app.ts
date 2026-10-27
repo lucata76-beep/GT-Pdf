@@ -1,21 +1,31 @@
-// Guscio dell'app (CP1): barra con menu, palette, vista del documento, inspector, barra di stato.
-// In CP1 non c'e' ancora nessuna funzione di editing: l'unico oggetto e' il "punto di prova" (tocchi successivi con la lente),
-// non salvato ne' esportato. Serve a provare interfaccia, zoom, pinch e lente su iPhone.
+// Guscio dell'app (CP2): barra con menu, palette, vista del documento, inspector, barra contestuale, barra di stato.
+// Strumenti: Sposta, Retta, Linea, Scala (calibrazione), Distanza, Cancella. Oggetti e scala sono in memoria nella sessione
+// (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
+import { fmt, fmtTrim } from '../geometry/numbers';
+import { measure, measureLines, measureMessage } from '../geometry/measure';
+import { pickNearest } from '../geometry/hit';
+import type { UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
+import { calibrate, realMm, scaleLabel } from '../geometry/scale';
+import { type Command, History } from '../model/history';
+import { AddObject, DocumentModel, type LineObject, RemoveObject, SetScale, SetStroke } from '../model/model';
+import { DEFAULT_STROKE, type Stroke, strokeEquals } from '../model/stroke';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
+import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
 import { type MenuEntry, menuButton } from '../ui/menu';
-import { PdfViewer, type UserPoint, type ViewerMode } from '../ui/viewer';
+import { type StyleBinding, createStyleControls, styleGlyph } from '../ui/styleControls';
+import { PdfViewer, type ViewerMode } from '../ui/viewer';
+import { Construction, type ConstructionTool } from './construction';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 
 // Percorsi relativi alla pagina: l'app sta sotto /GT-Pdf/ su GitHub Pages.
 const assetUrl = (path: string): string => new URL(path, document.baseURI).href;
-const nf = (n: number, d = 2): string => n.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d });
 const CSS_PX_PER_PT = 96 / 72; // 100 % = 96 px CSS per pollice; non e' la dimensione fisica sullo schermo
 
-type ToolId = 'pan' | 'point';
+type ToolId = 'pan' | ConstructionTool | 'erase';
 interface Tool {
   id: string;
   label: string;
@@ -23,15 +33,20 @@ interface Tool {
   /** Checkpoint in cui la funzione arriva (strumenti non ancora attivi). */
   cp?: string;
   mode?: ViewerMode;
+  needsDoc?: boolean;
 }
 const TOOLS: Tool[] = [
   { id: 'pan', label: 'Sposta vista', icon: 'hand', mode: 'pan' },
-  { id: 'point', label: 'Punto di prova', icon: 'crosshair', mode: 'point' },
-  { id: 'line', label: 'Linea', icon: 'slash', cp: 'CP2' },
+  { id: 'segment', label: 'Retta', icon: 'slash', mode: 'pick', needsDoc: true },
+  { id: 'polyline', label: 'Linea', icon: 'polyline', mode: 'pick', needsDoc: true },
+  { id: 'calibrate', label: 'Scala', icon: 'scaling', mode: 'pick', needsDoc: true },
+  { id: 'distance', label: 'Distanza', icon: 'ruler-dimension', mode: 'pick', needsDoc: true },
+  { id: 'erase', label: 'Cancella', icon: 'eraser', mode: 'erase', needsDoc: true },
   { id: 'dim', label: 'Quota', icon: 'ruler', cp: 'CP3' },
   { id: 'text', label: 'Testo', icon: 'type', cp: 'CP3' },
   { id: 'cover', label: 'Copertura', icon: 'square', cp: 'CP4' },
 ];
+const isConstructionTool = (id: ToolId): id is ConstructionTool => id === 'segment' || id === 'polyline' || id === 'calibrate' || id === 'distance';
 
 export interface AppOptions {
   openDiagnostics: () => void;
@@ -41,14 +56,16 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   // ---------- Stato della sessione ----------
   let pdf: OpenedPdf | null = null;
   let pageNo = 1;
-  const points = new Map<number, UserPoint[]>(); // per pagina, spazio utente PDF
+  const model = new DocumentModel();
+  const history = new History<DocumentModel>(model);
   let tool: ToolId = 'pan';
   let uiSize = loadUiSize();
   let opening = false;
-
-  const pagePoints = (): UserPoint[] => points.get(pageNo) ?? [];
-  const pointCount = (): number => [...points.values()].reduce((n, l) => n + l.length, 0);
-  const dirty = (): boolean => pointCount() > 0;
+  let ortho = false;
+  /** Proprieta' delle NUOVE linee. */
+  const stroke: Stroke = { ...DEFAULT_STROKE };
+  /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
+  let currentAim: UserPoint | null = null;
 
   // ---------- Vista ----------
   const statusMsg = h('span', { class: 'st-msg', role: 'status', 'aria-live': 'polite' });
@@ -62,6 +79,34 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     },
   );
 
+  // ---------- Costruzione per punti ----------
+  const construction = new Construction(
+    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho },
+    {
+      line: (kind, points) => {
+        const obj: LineObject = { id: model.newId(), kind, points: points.map((p) => ({ ...p })), stroke: { ...stroke } };
+        history.exec(new AddObject(pageNo, obj));
+        say(`${kind === 'segment' ? 'Retta' : 'Linea'} aggiunta: ${lengthText(points)}. Annulla per toglierla.`);
+      },
+      calibrate: (a, b) => void calibrateFlow(a, b),
+      measure: (a, b) => {
+        const g = viewer.geometry;
+        if (g) say(measureMessage(measure(g, a, b, model.scale(pageNo))));
+      },
+      reject: say,
+    },
+  );
+
+  /** Lunghezza totale di una spezzata, in mm reali se la pagina e' calibrata, altrimenti in mm del foglio. */
+  function lengthText(points: readonly UserPoint[]): string {
+    const g = viewer.geometry;
+    if (!g) return '';
+    let dPt = 0;
+    for (let i = 1; i < points.length; i++) dPt += g.distancePt(points[i - 1] as UserPoint, points[i] as UserPoint);
+    const s = model.scale(pageNo);
+    return s ? `${fmt(realMm(dPt, s))} mm` : `${fmt(ptToMm(dPt))} mm sul foglio (pagina non calibrata)`;
+  }
+
   // ---------- Barra di stato ----------
   const stX = h('span', { class: 'num' }, '—');
   const stY = h('span', { class: 'num' }, '—');
@@ -69,11 +114,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const prevBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina precedente', disabled: true, onclick: () => void goTo(pageNo - 1) }, icon('chevron-left'));
   const nextBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina successiva', disabled: true, onclick: () => void goTo(pageNo + 1) }, icon('chevron-right'));
   const pager = h('div', { class: 'st-pager' }, prevBtn, stPage, nextBtn);
+  const scaleBtn = h('button', { class: 'st-scale-btn num', type: 'button', title: 'Calibra la scala di questa pagina', onclick: () => selectTool('calibrate') }, 'non calibrata');
+  const orthoBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', title: 'Ortogonale: il secondo punto va in orizzontale o in verticale', onclick: () => setOrtho(!ortho) }, 'ORTO');
   const statusbar = h(
     'footer',
     { class: 'statusbar' },
     h('span', { class: 'st-coord' }, h('span', { class: 'lbl' }, 'X:'), stX, h('span', { class: 'unit' }, 'mm'), h('span', { class: 'lbl' }, 'Y:'), stY, h('span', { class: 'unit' }, 'mm')),
-    h('span', { class: 'st-scale' }, h('span', { class: 'lbl' }, 'SCALA:'), 'non calibrata'),
+    h('span', { class: 'st-scale' }, h('span', { class: 'lbl' }, 'SCALA:'), scaleBtn),
+    orthoBtn,
     statusMsg,
     pager,
   );
@@ -83,17 +131,30 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       stY.textContent = '—';
       return;
     }
-    stX.textContent = nf(ptToMm(p.x));
-    stY.textContent = nf(ptToMm(viewer.sheetSize.h - p.y)); // Y verso l'alto dal bordo inferiore della pagina mostrata
+    stX.textContent = fmt(ptToMm(p.x));
+    stY.textContent = fmt(ptToMm(viewer.sheetSize.h - p.y)); // Y verso l'alto dal bordo inferiore della pagina mostrata
+  };
+  function setOrtho(on: boolean): void {
+    ortho = on;
+    orthoBtn.setAttribute('aria-pressed', String(on));
+    say(on ? 'Ortogonale attivo: il punto successivo va in orizzontale o in verticale' : 'Ortogonale disattivato');
+    viewer.refreshAim();
+  }
+  const updateScaleLabel = (): void => {
+    const s = pdf ? model.scale(pageNo) : null;
+    scaleBtn.textContent = s ? scaleLabel(s) : 'non calibrata';
+    scaleBtn.disabled = !pdf;
   };
 
   // ---------- Barra superiore ----------
   const docName = h('span', { class: 'doc-name', title: '' }, 'Nessun documento');
   const zoomLabel = h('button', { class: 'zoom-val num', type: 'button', 'aria-label': 'Adatta alla pagina', title: 'Adatta alla pagina', onclick: () => viewer.fit() }, '—');
-  const mkZoomBtn = (name: IconName, label: string, fn: () => void): HTMLButtonElement =>
+  const mkBarBtn = (name: IconName, label: string, fn: () => void): HTMLButtonElement =>
     h('button', { class: 'btn bar-btn', type: 'button', 'aria-label': label, title: label, onclick: fn }, icon(name));
-  const zoomOutBtn = mkZoomBtn('minus', 'Riduci zoom del documento', () => viewer.zoomBy(1 / 1.25));
-  const zoomInBtn = mkZoomBtn('plus', 'Aumenta zoom del documento', () => viewer.zoomBy(1.25));
+  const zoomOutBtn = mkBarBtn('minus', 'Riduci zoom del documento', () => viewer.zoomBy(1 / 1.25));
+  const zoomInBtn = mkBarBtn('plus', 'Aumenta zoom del documento', () => viewer.zoomBy(1.25));
+  const undoBtn = mkBarBtn('undo', 'Annulla', () => undoAction());
+  const redoBtn = mkBarBtn('redo', 'Ripeti', () => redoAction());
 
   const sizeDown = h('button', { class: 'btn bar-btn size-btn', type: 'button', 'aria-label': 'Interfaccia più piccola (A-)', title: 'Interfaccia più piccola', onclick: () => setUiSize(uiSize - 1) }, 'A-');
   const sizeUp = h('button', { class: 'btn bar-btn size-btn', type: 'button', 'aria-label': 'Interfaccia più grande (A+)', title: 'Interfaccia più grande', onclick: () => setUiSize(uiSize + 1) }, 'A+');
@@ -118,19 +179,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     { label: 'Diagnostica', onSelect: opts.openDiagnostics },
   ];
   const editMenu = (): MenuEntry[] => [
-    { label: 'Annulla', hint: 'CP2', disabled: true },
-    { label: 'Ripeti', hint: 'CP2', disabled: true },
+    { label: 'Annulla', hint: construction.pending ? 'ultimo punto' : (history.nextUndo ?? undefined), disabled: !canUndo(), onSelect: () => undoAction() },
+    { label: 'Ripeti', hint: history.nextRedo ?? undefined, disabled: !history.canRedo, onSelect: () => redoAction() },
     'separator',
     { label: 'Seleziona / sposta', hint: 'CP4', disabled: true },
     { label: 'Copia', hint: 'V2', disabled: true },
     { label: 'Duplica', hint: 'V2', disabled: true },
-    { label: 'Cancella punti di prova', disabled: pointCount() === 0, onSelect: () => void clearPoints() },
+    { label: 'Cancella', disabled: !pdf, onSelect: () => selectTool('erase') },
   ];
   const insertMenu = (): MenuEntry[] => [
-    { label: 'Punto di prova', disabled: !pdf, onSelect: () => selectTool('point') },
+    { label: 'Retta', disabled: !pdf, onSelect: () => selectTool('segment') },
+    { label: 'Linea', disabled: !pdf, onSelect: () => selectTool('polyline') },
     'separator',
-    { label: 'Linea', hint: 'CP2', disabled: true },
-    { label: 'Retta', hint: 'CP2', disabled: true },
     { label: 'Testo', hint: 'CP3', disabled: true },
     { label: 'Quota', hint: 'CP3', disabled: true },
     { label: 'Copertura bianca', hint: 'CP4', disabled: true },
@@ -161,7 +221,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ),
     h('nav', { class: 'menus', 'aria-label': 'Menu' }, menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Zoom', zoomMenu)),
     docName,
-    h('div', { class: 'bar-right' }, h('div', { class: 'size-ctl' }, sizeDown, sizeUp), h('div', { class: 'zoom-ctl' }, zoomOutBtn, zoomLabel, zoomInBtn), inspectorBtn),
+    h('div', { class: 'bar-right' }, h('div', { class: 'undo-ctl' }, undoBtn, redoBtn), h('div', { class: 'size-ctl' }, sizeDown, sizeUp), h('div', { class: 'zoom-ctl' }, zoomOutBtn, zoomLabel, zoomInBtn), inspectorBtn),
   );
 
   // ---------- Palette ----------
@@ -175,7 +235,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         class: 'tool',
         type: 'button',
         'aria-pressed': enabled && t.id === tool ? 'true' : 'false',
-        disabled: !enabled,
+        disabled: !enabled || t.needsDoc === true,
         title: enabled ? t.label : `${t.label} (${t.cp})`,
         onclick: () => selectTool(t.id as ToolId),
       },
@@ -185,12 +245,58 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     toolBtns.set(t.id, b);
     palette.append(b);
   }
-  function selectTool(id: ToolId): void {
-    if (!pdf && id === 'point') return;
-    tool = id;
-    for (const [tid, b] of toolBtns) b.setAttribute('aria-pressed', String(tid === id));
-    viewer.setMode(TOOLS.find((t) => t.id === id)?.mode ?? 'pan');
-    say(id === 'point' ? 'Punto di prova: tieni premuto per mirare con la lente, rilascia per inserire' : '');
+
+  // ---------- Proprieta' delle linee ----------
+  const styleBinding: StyleBinding = {
+    get: () => stroke,
+    set: (patch) => {
+      Object.assign(stroke, patch);
+      onStyleChanged();
+    },
+    applyToLast: () => {
+      const o = model.last(pageNo);
+      if (!o) return;
+      history.exec(new SetStroke(pageNo, o.id, { ...o.stroke }, { ...stroke }));
+      say("Proprietà applicate all'ultima linea");
+    },
+    canApplyToLast: () => {
+      const o = model.last(pageNo);
+      return o !== undefined && !strokeEquals(o.stroke, stroke);
+    },
+  };
+  const inspectorStyle = createStyleControls(styleBinding);
+  const popoverStyle = createStyleControls(styleBinding);
+  const styleChip = h('button', { class: 'btn ctx-style', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': 'Proprietà della linea', onclick: () => toggleProps() });
+  const refreshStyleChip = (): void => {
+    styleChip.replaceChildren(styleGlyph(stroke), h('span', { class: 'num' }, `${fmtTrim(stroke.widthPt, 3)} pt`));
+  };
+  function onStyleChanged(): void {
+    inspectorStyle.refresh();
+    popoverStyle.refresh();
+    refreshStyleChip();
+    renderConstruction();
+  }
+  refreshStyleChip();
+
+  // ---------- Barra contestuale ----------
+  const ctxHint = h('p', { class: 'ctx-hint', 'aria-live': 'polite' });
+  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => cancelConstruction() }, 'Annulla');
+  const finishBtn = h('button', { class: 'btn primary ctx-act', type: 'button', onclick: () => finishLine() }, icon('check'), 'Fine');
+  const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà della linea', hidden: true }, popoverStyle.el);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  let propsOpen = false;
+  function toggleProps(open = !propsOpen): void {
+    propsOpen = open;
+    popover.hidden = !open;
+    styleChip.setAttribute('aria-expanded', String(open));
+    if (open) {
+      popoverStyle.refresh();
+      document.addEventListener('pointerdown', onOutsideProps, true);
+    } else document.removeEventListener('pointerdown', onOutsideProps, true);
+  }
+  function onOutsideProps(e: Event): void {
+    const t = e.target as Node;
+    if (!popover.contains(t) && !styleChip.contains(t)) toggleProps(false);
   }
 
   // ---------- Inspector ----------
@@ -201,37 +307,32 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const secs: HTMLElement[] = [];
     if (pdf) {
       const info = pdf.pages[pageNo - 1];
-      secs.push(
-        section(
-          'Documento',
-          kv('File', pdf.name),
-          kv('Pagine', String(pdf.pages.length)),
-        ),
-      );
+      secs.push(section('Documento', kv('File', pdf.name), kv('Pagine', String(pdf.pages.length))));
       if (info) {
         secs.push(
           section(
             `Pagina ${pageNo}`,
-            kv('Dimensione', `${nf(ptToMm(info.widthPt), 1)} x ${nf(ptToMm(info.heightPt), 1)} mm`),
+            kv('Dimensione', `${fmt(ptToMm(info.widthPt), 1)} x ${fmt(ptToMm(info.heightPt), 1)} mm`),
             kv('Rotate', `${info.rotate}°`),
-            kv('Unità utente', info.userUnit === 1 ? '1/72 in' : `UserUnit ${nf(info.userUnit, 3)}`),
+            kv('Unità utente', info.userUnit === 1 ? '1/72 in' : `UserUnit ${fmt(info.userUnit, 3)}`),
           ),
         );
       }
-      const list = pagePoints();
-      const body: Child[] = [];
-      if (list.length === 0) body.push(h('p', { class: 'hint' }, 'Nessun punto su questa pagina. Scegli "Punto di prova" e tocca il foglio.'));
-      list.forEach((p, i) => {
-        const s = viewer.userToSheet(p);
-        const mm = s ? `${nf(ptToMm(s.x))} ; ${nf(ptToMm(viewer.sheetSize.h - s.y))}` : '—';
-        body.push(h('div', { class: 'pt-row' }, h('span', { class: 'pt-n num' }, String(i + 1)), h('span', { class: 'num' }, mm), h('span', { class: 'unit' }, 'mm')));
-      });
-      if (pointCount() > 0) body.push(h('button', { class: 'btn', type: 'button', onclick: () => void clearPoints() }, icon('trash'), 'Cancella i punti'));
-      secs.push(section('Punti di prova (CP1)', ...body));
+      const s = model.scale(pageNo);
+      const n = model.objects(pageNo).length;
+      secs.push(
+        section(
+          'Scala e oggetti',
+          kv('Scala', s ? scaleLabel(s) : 'non calibrata'),
+          kv('Linee su questa pagina', String(n)),
+          h('button', { class: 'btn', type: 'button', onclick: () => selectTool('calibrate') }, icon('scaling'), s ? 'Ricalibra la scala' : 'Calibra la scala'),
+        ),
+      );
     } else {
       secs.push(section('Documento', h('p', { class: 'hint' }, 'Nessun documento aperto.')));
     }
-    secs.push(section('Proprietà oggetto', h('p', { class: 'hint' }, 'Colore, spessore e tipo di linea arrivano con CP2.')));
+    secs.push(section('Proprietà linea (nuove linee)', inspectorStyle.el));
+    secs.push(section('App', kv('Versione', __BUILD_ID__)));
     inspector.replaceChildren(...secs);
   };
   function toggleInspector(): void {
@@ -295,32 +396,227 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     })
     .catch(() => samples.append(h('span', { class: 'hint' }, 'Elenco non disponibile.')));
 
+  const floatDist = h('button', { class: 'btn float-dist', type: 'button', 'aria-pressed': 'false', 'aria-label': 'Distanza', title: 'Distanza tra due punti', onclick: () => selectTool(tool === 'distance' ? 'pan' : 'distance') }, icon('ruler-dimension'), h('span', null, 'Distanza'));
   const floatZoom = h(
     'div',
     { class: 'float-zoom' },
-    mkZoomBtn('plus', 'Aumenta zoom', () => viewer.zoomBy(1.25)),
-    mkZoomBtn('minus', 'Riduci zoom', () => viewer.zoomBy(1 / 1.25)),
-    mkZoomBtn('maximize', 'Adatta alla pagina', () => viewer.fit()),
+    floatDist,
+    mkBarBtn('plus', 'Aumenta zoom', () => viewer.zoomBy(1.25)),
+    mkBarBtn('minus', 'Riduci zoom', () => viewer.zoomBy(1 / 1.25)),
+    mkBarBtn('maximize', 'Adatta alla pagina', () => viewer.fit()),
   );
   const work = h('main', { class: 'work' }, viewer.el, emptyPanel, floatZoom);
 
-  const app = h('div', { class: 'app' }, bar, palette, work, inspector, statusbar, fileInput);
+  const app = h('div', { class: 'app' }, bar, palette, work, inspector, ctxBar, statusbar, fileInput);
   root.replaceChildren(app);
+
+  // ---------- Strumenti ----------
+  function selectTool(id: ToolId): void {
+    const def = TOOLS.find((t) => t.id === id);
+    if (!def || def.cp) return;
+    if (def.needsDoc && !pdf) return;
+    tool = id;
+    toggleProps(false);
+    construction.setTool(isConstructionTool(id) ? id : null);
+    currentAim = null;
+    viewer.setMode(def.mode ?? 'pan');
+    viewer.setHighlight(null);
+    for (const [tid, b] of toolBtns) b.setAttribute('aria-pressed', String(tid === id));
+    floatDist.setAttribute('aria-pressed', String(id === 'distance'));
+    say('');
+    renderConstruction();
+  }
+
+  /** Redisegna punti, anteprima, misura e barra contestuale secondo lo stato della costruzione. */
+  function renderConstruction(): void {
+    const geom = viewer.geometry;
+    const t = construction.tool;
+    const pts = construction.points;
+    const aim = construction.done || construction.locked ? null : currentAim;
+    if (!geom || !pdf) {
+      viewer.setMarkers([]);
+      viewer.setPreview(null);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+    } else if (t === 'segment' || t === 'polyline') {
+      const line = aim && pts.length > 0 ? [...pts, aim] : pts;
+      viewer.setMarkers(pts.map((p) => ({ p })));
+      viewer.setPreview(line.length >= 2 ? line : null, stroke);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+    } else if (t === 'calibrate' || t === 'distance') {
+      const line = aim && pts.length === 1 ? [...pts, aim] : pts;
+      viewer.setMarkers(pts.map((p, i) => ({ p, label: String(i + 1) })));
+      viewer.setPreview(null);
+      viewer.setGuide(line.length >= 2 ? line : null);
+      const [a, b] = [pts[0], line[1]];
+      if (t === 'distance' && a && b && line.length >= 2) {
+        // misura in corso (durante la mira) o risultato (dopo il secondo punto)
+        const m = measure(geom, a, b, model.scale(pageNo));
+        viewer.setBadge({ at: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, lines: measureLines(m) });
+      } else viewer.setBadge(null);
+    } else {
+      viewer.setMarkers([]);
+      viewer.setPreview(null);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+    }
+    // barra contestuale
+    const active = tool !== 'pan';
+    ctxBar.hidden = !active;
+    ctxBar.dataset.tool = tool;
+    const constructing = isConstructionTool(tool);
+    ctxHint.textContent = constructing ? construction.prompt : tool === 'erase' ? 'Cancella: tocca una linea per cancellarla (Annulla la ripristina)' : '';
+    styleChip.hidden = !(tool === 'segment' || tool === 'polyline');
+    cancelBtn.hidden = !constructing;
+    cancelBtn.disabled = !(construction.pending || construction.done || construction.locked);
+    finishBtn.hidden = tool !== 'polyline';
+    finishBtn.disabled = pts.length < 2 || construction.done;
+    if (!active) toggleProps(false);
+    refreshUndoRedo();
+  }
+
+  function cancelConstruction(): void {
+    construction.reset();
+    currentAim = null;
+    say('');
+    renderConstruction();
+  }
+  function finishLine(): void {
+    construction.finish();
+    renderConstruction();
+  }
+
+  async function calibrateFlow(a: UserPoint, b: UserPoint): Promise<void> {
+    const geom = viewer.geometry;
+    const page = pageNo;
+    if (!geom) return;
+    renderConstruction(); // mostra i due punti mentre il dialogo e' aperto
+    const dPt = geom.distancePt(a, b);
+    const real = await askRealDistance(dPt, model.scale(page));
+    if (real !== null) {
+      const s = calibrate(dPt, real);
+      if (s) {
+        history.exec(new SetScale(page, model.scale(page), s));
+        say(`Scala della pagina ${page}: ${scaleLabel(s)}`);
+      }
+    }
+    construction.reset();
+    currentAim = null;
+    renderConstruction();
+  }
+
+  // ---------- Cancella ----------
+  const sheetPoints = (o: LineObject): { x: number; y: number }[] => {
+    const g = viewer.geometry;
+    return g ? o.points.map((p) => g.userToSheet(p)) : [];
+  };
+  const nearestObject = (sheet: { x: number; y: number }, tol: number): LineObject | null => pickNearest(model.objects(pageNo), sheetPoints, sheet, tol);
+
+  // ---------- Annulla / ripeti ----------
+  const canUndo = (): boolean => construction.pending || history.canUndo;
+  function refreshUndoRedo(): void {
+    undoBtn.disabled = !canUndo();
+    redoBtn.disabled = !history.canRedo;
+    undoBtn.title = construction.pending ? 'Annulla: toglie l\'ultimo punto' : history.nextUndo ? `Annulla ${history.nextUndo}` : 'Annulla';
+    redoBtn.title = history.nextRedo ? `Ripeti ${history.nextRedo}` : 'Ripeti';
+  }
+  function afterHistory(cmd: Command<DocumentModel> | null, verb: string): void {
+    if (!cmd) return;
+    if (cmd.page !== pageNo) void goTo(cmd.page); // mostra la pagina interessata
+    say(`${verb}: ${cmd.label}`);
+  }
+  function undoAction(): void {
+    if (construction.undoLast()) {
+      currentAim = null;
+      renderConstruction();
+      return;
+    }
+    if (!history.canUndo) {
+      say('Niente da annullare');
+      return;
+    }
+    afterHistory(history.undo(), 'Annullato');
+  }
+  function redoAction(): void {
+    if (!history.canRedo) {
+      say('Niente da ripetere');
+      return;
+    }
+    afterHistory(history.redo(), 'Ripetuto');
+  }
 
   // ---------- Collegamenti della vista ----------
   viewer.hooks.onCursor = setCursor;
   viewer.hooks.onView = ({ zoom }) => {
-    zoomLabel.textContent = `${nf((zoom / CSS_PX_PER_PT) * 100, 0)}%`;
+    zoomLabel.textContent = `${fmt((zoom / CSS_PX_PER_PT) * 100, 0)}%`;
   };
   viewer.hooks.onReject = say;
-  viewer.hooks.onPlace = (user) => {
-    const list = points.get(pageNo) ?? [];
-    list.push(user);
-    points.set(pageNo, list);
-    viewer.setPoints(list);
-    renderInspector();
-    say(`Punto ${list.length} inserito`);
+  viewer.hooks.constrain = (raw) => construction.constrain(raw);
+  viewer.hooks.onAim = (eff) => {
+    const g = viewer.geometry;
+    currentAim = eff && g ? g.sheetToUser(eff) : null;
+    renderConstruction();
   };
+  viewer.hooks.onPlace = (user) => {
+    construction.place(user);
+    renderConstruction();
+  };
+  viewer.hooks.onErasePreview = (sheet, tol) => {
+    const o = sheet ? nearestObject(sheet, tol) : null;
+    viewer.setHighlight(o ? o.points : null);
+  };
+  viewer.hooks.onErase = (sheet, tol) => {
+    const o = nearestObject(sheet, tol);
+    if (!o) {
+      say('Nessuna linea in questo punto: tocca sopra una linea');
+      return;
+    }
+    history.exec(new RemoveObject(pageNo, o));
+    say(`${o.kind === 'segment' ? 'Retta' : 'Linea'} cancellata. Annulla la ripristina.`);
+  };
+
+  // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
+  model.onChange(() => {
+    refreshScene();
+    updateScaleLabel();
+    renderInspector();
+    inspectorStyle.refresh();
+    popoverStyle.refresh();
+    renderConstruction();
+  });
+  history.onChange(refreshUndoRedo);
+  function refreshScene(): void {
+    viewer.setObjects(model.objects(pageNo));
+  }
+
+  // ---------- Tastiera (desktop) ----------
+  document.addEventListener('keydown', (e) => {
+    if (root.hidden || e.defaultPrevented || document.querySelector('.dialog-backdrop')) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.matches('input, textarea, select')) return;
+    // Invio, Backspace e Canc valgono solo se il focus non e' su un pulsante o un menu (resta l'uso da tastiera dei pulsanti).
+    const onCanvas = target === null || target === document.body || viewer.el.contains(target);
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redoAction();
+      else undoAction();
+    } else if (mod && key === 'y') {
+      e.preventDefault();
+      redoAction();
+    } else if (e.key === 'Escape') {
+      if (propsOpen) toggleProps(false);
+      else if (construction.pending || construction.done) cancelConstruction();
+    } else if (e.key === 'Enter' && tool === 'polyline' && onCanvas) {
+      e.preventDefault();
+      finishLine();
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && construction.pending && onCanvas) {
+      e.preventDefault();
+      undoAction();
+    }
+  });
 
   // ---------- Flussi ----------
   /** Il selettore file va aperto dentro un gesto dell'utente: chiamare questa funzione in modo sincrono dal tocco. */
@@ -339,19 +635,25 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     stPage.textContent = n > 0 ? `${pageNo} / ${n}` : '';
     prevBtn.disabled = pageNo <= 1;
     nextBtn.disabled = pageNo >= n;
-    toolBtns.get('point')?.toggleAttribute('disabled', !has);
+    for (const t of TOOLS) if (t.needsDoc) toolBtns.get(t.id)?.toggleAttribute('disabled', !has);
     if (!has) zoomLabel.textContent = '—';
+    updateScaleLabel();
     renderInspector();
   };
 
   async function goTo(n: number): Promise<void> {
     if (!pdf) return;
     pageNo = Math.min(Math.max(1, n), pdf.pages.length);
+    construction.reset();
+    currentAim = null;
     updateChrome();
     try {
-      await viewer.setPage(await pdf.doc.getPage(pageNo));
-      viewer.setPoints(pagePoints());
-      renderInspector();
+      const rendering = viewer.setPage(await pdf.doc.getPage(pageNo));
+      refreshScene(); // la geometria della nuova pagina e' gia' impostata: gli oggetti compaiono subito
+      renderConstruction();
+      inspectorStyle.refresh();
+      popoverStyle.refresh();
+      await rendering;
     } catch (e) {
       say(`Pagina ${pageNo}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -362,23 +664,33 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const old = pdf;
     pdf = null;
     pageNo = 1;
-    points.clear();
+    history.clear();
+    model.clear();
     selectTool('pan');
     void viewer.setPage(null);
-    viewer.setPoints([]);
     updateChrome();
     say('');
     if (old) void closePdf(old).catch(() => undefined);
   }
 
+  /** Riepilogo di cio' che andrebbe perso. */
+  const contentSummary = (): string => {
+    const parts: string[] = [];
+    const n = model.objectCount();
+    const s = model.scaleCount();
+    if (n > 0) parts.push(n === 1 ? '1 linea disegnata' : `${n} linee disegnate`);
+    if (s > 0) parts.push(s === 1 ? '1 scala calibrata' : `${s} scale calibrate`);
+    return parts.join(' e ');
+  };
+
   const confirmDiscard = (what: string, action: () => void): void => {
-    if (!dirty()) {
+    if (!model.hasContent) {
       action();
       return;
     }
     void showDialog({
       title: 'Modifiche non salvate',
-      message: `Ci sono ${pointCount()} punti di prova (CP1: il salvataggio non c'è ancora). ${what}`,
+      message: `Ci sono ${contentSummary()} (il salvataggio arriva in CP5). ${what}`,
       confirmLabel: 'Procedi',
       cancelLabel: 'Annulla',
       onConfirm: action,
@@ -399,15 +711,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   function closeFlow(): void {
     confirmDiscard('Chiudere il documento le scarta.', resetSession);
   }
-  async function clearPoints(): Promise<void> {
-    if (pointCount() === 0) return;
-    const ok = await showDialog({ title: 'Cancella i punti', message: `Cancellare ${pointCount()} punti di prova?`, confirmLabel: 'Cancella', cancelLabel: 'Annulla' });
-    if (!ok) return;
-    points.clear();
-    viewer.setPoints([]);
-    renderInspector();
-    say('Punti cancellati');
-  }
 
   async function loadFile(f: File): Promise<void> {
     try {
@@ -426,10 +729,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       const prev = pdf;
       pdf = next;
       pageNo = 1;
-      points.clear();
+      history.clear();
+      model.clear();
+      construction.reset();
       if (prev) void closePdf(prev).catch(() => undefined);
       await goTo(1);
-      say(`${name}: ${next.pages.length} ${next.pages.length === 1 ? 'pagina' : 'pagine'}, aperto in ${nf(next.openMs, 0)} ms`);
+      say(`${name}: ${next.pages.length} ${next.pages.length === 1 ? 'pagina' : 'pagine'}, aperto in ${fmt(next.openMs, 0)} ms`);
       window.setTimeout(() => viewer.fit(), 0); // dopo il layout definitivo (barre, tastiera, rotazione)
     } catch (e) {
       say('');
@@ -445,5 +750,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
 
   updateChrome();
+  renderConstruction();
   viewer.setMode('pan');
 }
