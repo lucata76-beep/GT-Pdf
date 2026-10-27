@@ -27,7 +27,7 @@ Aprire l'indirizzo in Safari, poi **ripetere tutto dall'icona Home** (Condividi 
 
 1. **Ambiente**: leggere i valori di `Map.getOrInsertComputed` e delle altre funzioni; annotare l'user agent.
 2. **PDF**: aprire ogni PDF di prova, poi un PDF vero con *Apri PDF…* (resta sul telefono, nulla viene inviato). Controllare nitidezza, pagina ruotata, CropBox, scansione, navigazione tra le 3 pagine.
-3. **Pinch**: due dita sul foglio devono zoomare solo il foglio. Nella riga di stato *zoom pagina* deve restare 1,00 e *max puntatori* deve arrivare a 2. Un dito sposta; un dito fuori dal foglio scorre la pagina.
+3. **Pinch**: due dita sul foglio devono zoomare solo il foglio. Nella riga di stato *zoom pagina* deve restare 1.00 e *max puntatori* deve arrivare a 2. Un dito sposta; un dito fuori dal foglio scorre la pagina.
 4. **Limiti del canvas**: eseguire le prove dalla più piccola in su, una alla volta. Per ognuna dire se riesce, quanto ci mette, se Safari ricarica la pagina (la prova interrotta viene segnalata al riavvio). Poi, se si vuole, la sequenza.
 5. **Condivisione**: provare tutti i pulsanti. Con *Condividi PDF* scegliere "Salva su File", poi aprire il file da File e verificare che sia un PDF valido. Provare anche *Condividi dopo attesa* (3 s e 6 s): serve a sapere se il gesto scade. Provare entrambi gli scarichi e *Apri in nuova scheda*.
 6. **Desktop**: Chrome e Safari, stesse prove (la rotella zooma sotto il puntatore).

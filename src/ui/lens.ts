@@ -22,7 +22,7 @@ export class Lens {
 
   constructor() {
     this.cv = h('canvas', { class: 'lens-canvas' });
-    this.label = h('span', { class: 'lens-mag num' }, `${LENS_MAG.toFixed(1).replace('.', ',')}x`);
+    this.label = h('span', { class: 'lens-mag num' }, `${LENS_MAG.toFixed(1)}x`);
     this.el = h(
       'div',
       { class: 'lens', hidden: true, 'aria-hidden': 'true' },

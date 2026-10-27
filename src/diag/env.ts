@@ -1,4 +1,5 @@
 // Ambiente e funzioni del browser rilevanti per l'app. Tutto misurato a runtime, nulla supposto.
+import { fmtTrim } from '../geometry/numbers';
 
 export interface Row {
   label: string;
@@ -12,7 +13,7 @@ const nav = navigator as Navigator & {
   canShare?: (data?: ShareData) => boolean;
 };
 
-const fmt = (n: number): string => n.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+const fmt = (n: number): string => fmtTrim(n, 2); // numeri sempre con "." (decisione DECIMALE)
 
 export function environmentRows(): Row[] {
   const vv = window.visualViewport;

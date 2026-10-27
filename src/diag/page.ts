@@ -1,4 +1,5 @@
 // Pagina diagnostica di CP0: serve a misurare sul dispositivo reale cio' che nel PASSO 0 era NON VERIFICATO.
+import { fmt } from '../geometry/numbers';
 import { PIXEL_BUDGET, SCREEN_PIXEL_BUDGET, ptToMm } from '../geometry/pixels';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { type Child, h } from '../ui/dom';
@@ -10,7 +11,7 @@ import { clearLog, errText, log, logText, onLog } from './log';
 import { PDF_NAME, copyText, downloadFile, openBlob, shareFile, sleep } from './share';
 import { makeDiagPdf } from './testPdf';
 
-const nf = (n: number, d = 2): string => n.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d });
+const nf = (n: number, d = 2): string => fmt(n, d); // numeri sempre con "." (decisione DECIMALE)
 const mpx = (area: number): string => `${nf(area / 1e6, 2)} M px`;
 const kb = (bytes: number): string => (bytes >= 1048576 ? `${nf(bytes / 1048576, 2)} MB` : `${nf(bytes / 1024, 1)} KB`);
 
@@ -58,7 +59,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
     if (s.render) {
       const r = s.render;
       lines.push(`render: ${r.w} x ${r.h} px = ${mpx(r.w * r.h)} (${nf(r.scale, 3)} px/pt) · ${nf(r.ms, 0)} ms`);
-      if (r.clamped) lines.push(`ATTENZIONE: tetto a schermo di ${SCREEN_PIXEL_BUDGET.toLocaleString('it-IT')} px raggiunto, l'immagine è sfocata a questo zoom.`);
+      if (r.clamped) lines.push(`ATTENZIONE: tetto a schermo di ${SCREEN_PIXEL_BUDGET} px raggiunto, l'immagine è sfocata a questo zoom.`);
     } else lines.push('render: in corso o nessuno');
     if (s.error) lines.push(`ERRORE render: ${s.error}`);
     lines.push(`puntatori: ${s.pointers} (max ${s.maxPointers}) · eventi gesto Safari: ${s.gestureEvents} · zoom pagina: ${s.pageZoom === null ? 'n/d' : nf(s.pageZoom, 2)}`);
@@ -271,7 +272,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
   const canvasCard = card(
     'Limiti del canvas',
     false,
-    h('div', { class: 'notice' }, `Tetti dell'app: ${PIXEL_BUDGET.toLocaleString('it-IT')} px per l'esportazione (decisione 4 = A, misurato su iPhone in CP0), ${SCREEN_PIXEL_BUDGET.toLocaleString('it-IT')} px per il canvas a schermo. Ogni prova alloca un canvas, disegna, rilegge un pixel e codifica in JPEG. Prove grandi possono far ricaricare la pagina: in quel caso il risultato viene segnalato al riavvio.`),
+    h('div', { class: 'notice' }, `Tetti dell'app: ${PIXEL_BUDGET} px per l'esportazione (decisione 4 = A, misurato su iPhone in CP0), ${SCREEN_PIXEL_BUDGET} px per il canvas a schermo. Ogni prova alloca un canvas, disegna, rilegge un pixel e codifica in JPEG. Prove grandi possono far ricaricare la pagina: in quel caso il risultato viene segnalato al riavvio.`),
     interruptedNote,
     tierList,
     h('div', { class: 'row' }, seqBtn),
