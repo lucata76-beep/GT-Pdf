@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PIXEL_BUDGET, exportPixels, fitRenderSize, fitsBudget, mmToPt, ptToMm } from './pixels';
+import { PIXEL_BUDGET, SCREEN_PIXEL_BUDGET, exportPixels, fitRenderSize, fitsBudget, mmToPt, ptToMm } from './pixels';
 
 // Dimensioni PDF reali di A4/A3 come le produce reportlab/pdf-lib (pt).
 const A4 = { w: 595.276, h: 841.89 };
@@ -18,13 +18,19 @@ describe('exportPixels: valori di DESIGN.md', () => {
   });
 });
 
-describe('tetto provvisorio', () => {
-  it('vale 16.777.216 (4096 x 4096)', () => {
-    expect(PIXEL_BUDGET).toBe(4096 * 4096);
+describe('tetto dei canvas (decisione 4 = A)', () => {
+  it('vale 67.108.864 (8192 x 8192): misurato su iPhone, 69,61 M px fallisce in silenzio', () => {
+    expect(PIXEL_BUDGET).toBe(8192 * 8192);
   });
-  it('A4 300 dpi sta nel tetto, A3 300 dpi no', () => {
+  it('il tetto a schermo e\' piu\' basso di quello di esportazione', () => {
+    expect(SCREEN_PIXEL_BUDGET).toBe(4096 * 4096);
+    expect(SCREEN_PIXEL_BUDGET).toBeLessThan(PIXEL_BUDGET);
+  });
+  it('A4 300 e 600 dpi e A3 300 dpi stanno nel tetto, A3 600 dpi (69.605.736) no', () => {
     expect(fitsBudget(exportPixels(A4.w, A4.h, 300).area)).toBe(true);
-    expect(fitsBudget(exportPixels(A3.w, A3.h, 300).area)).toBe(false);
+    expect(fitsBudget(exportPixels(A4.w, A4.h, 600).area)).toBe(true);
+    expect(fitsBudget(exportPixels(A3.w, A3.h, 300).area)).toBe(true);
+    expect(fitsBudget(exportPixels(A3.w, A3.h, 600).area)).toBe(false);
   });
 });
 

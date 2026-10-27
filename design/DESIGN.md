@@ -258,8 +258,8 @@ Dialog Esporta PDF
 - Predefinito: **Copertura semplice** - "Il testo sotto le coperture resta nel file."
 - **Appiattito** - "Le pagine diventano immagini: il testo sotto sparisce." Mostrare la scelta DPI (150, 300, 600).
 - Un DPI e' selezionabile solo se `(larghezza_px * altezza_px)` della pagina non supera il limite del canvas del dispositivo; altrimenti disabilitato con il motivo.
-  - Limite di partenza: 16.777.216 px per canvas (fonti del 2022, NON VERIFICATO sull'iOS attuale: da provare su iPhone reale; un'altra fonte indica 5.242.880 px).
-  - Pixel calcolati: A4 150 dpi = 2.174.960; A4 300 dpi = 8.699.840; A4 600 dpi = 34.806.376; A3 150 dpi = 4.349.920; A3 300 dpi = 17.403.188; A3 600 dpi = 69.605.736. Calcolare sempre sulla dimensione reale della pagina.
+  - Limite: 67.108.864 px per canvas (8192 x 8192), misurato su iPhone (iOS 27.2, Safari) il 27/10/2026: riesce a 67,11 M px, a 69,61 M px fallisce in silenzio. Prima di ogni export si controlla l'ultimo pixel (decisione 4 = A in docs/PIANO.md).
+  - Pixel calcolati: A4 150 dpi = 2.174.960; A4 300 dpi = 8.699.840; A4 600 dpi = 34.806.376; A3 150 dpi = 4.349.920; A3 300 dpi = 17.403.188; A3 600 dpi = 69.605.736 (sopra il limite: disabilitato). Calcolare sempre sulla dimensione reale della pagina.
 - Nessuna stima di peso del file inventata: mostrare un valore solo se calcolato.
 - Riepilogo: nome file, pagine, modalita', DPI. Pulsanti Annulla ed Esporta.
 

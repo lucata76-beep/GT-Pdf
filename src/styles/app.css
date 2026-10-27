@@ -1,0 +1,662 @@
+/* Interfaccia dell'app (CP1). Valori da design/DESIGN.md; token in tokens.css. Tutto in rem: A-/A+ cambiano la base di <html>. */
+:root {
+  --hit: 2.25rem; /* bersaglio con puntatore preciso (36 px a 16 px di base) */
+  --bar-h: 2.5rem; /* barra superiore 40 px */
+  --pal-w: 3rem; /* palette 48 px */
+  --insp-w: 17.5rem; /* inspector 280 px */
+}
+@media (pointer: coarse) {
+  :root {
+    --hit: var(--touch); /* >= 44 pt su touch (Apple HIG) */
+  }
+}
+
+body.app-mode {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.screen-app {
+  position: fixed;
+  inset: 0;
+}
+
+/* ---- Struttura ---- */
+.app {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--pal-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bar bar'
+    'pal work'
+    'stat stat';
+  background: var(--cad-canvas);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.bar {
+  grid-area: bar;
+}
+.palette {
+  grid-area: pal;
+}
+.work {
+  grid-area: work;
+}
+.inspector {
+  grid-area: work;
+}
+.statusbar {
+  grid-area: stat;
+}
+@media (min-width: 900px) {
+  .app {
+    grid-template-columns: var(--pal-w) minmax(0, 1fr) var(--insp-w);
+    grid-template-areas:
+      'bar bar bar'
+      'pal work insp'
+      'stat stat stat';
+  }
+  .inspector {
+    grid-area: insp;
+    display: block !important;
+  }
+  .insp-toggle {
+    display: none !important;
+  }
+}
+@media (max-width: 719.98px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'bar'
+      'work'
+      'stat'
+      'pal';
+  }
+}
+
+/* ---- Barra superiore ---- */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--gutter);
+  min-height: var(--bar-h);
+  padding: max(0.125rem, env(safe-area-inset-top)) var(--margin) 0.125rem;
+  background: var(--cad-chrome);
+  border-bottom: 1px solid var(--cad-border);
+}
+.bar .brand {
+  margin: 0 0.25rem 0 0;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.menus {
+  display: flex;
+  gap: 0.125rem;
+}
+.menu-btn {
+  min-height: var(--hit);
+  padding: 0 0.625rem;
+  background: transparent;
+  color: var(--cad-text);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font: 500 0.875rem/1.25rem var(--font-ui);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-btn:hover,
+.menu-btn[aria-expanded='true'] {
+  background: var(--cad-canvas);
+}
+.menu-btn:focus-visible {
+  outline: 2px solid var(--cad-measure);
+  outline-offset: 1px;
+}
+.doc-name {
+  flex: 1 1 6rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.5rem;
+  color: var(--cad-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--gutter);
+  margin-left: auto;
+}
+.bar .btn {
+  min-height: var(--hit);
+  min-width: var(--hit);
+  padding: 0 0.375rem;
+  background: transparent;
+  border-color: transparent;
+}
+.bar .btn:hover {
+  background: var(--cad-canvas);
+}
+.bar .btn:disabled {
+  background: transparent;
+}
+.size-ctl,
+.zoom-ctl {
+  display: flex;
+  align-items: center;
+}
+.size-btn {
+  font: 500 0.75rem/1rem var(--font-mono);
+}
+.zoom-val {
+  min-width: 3.5rem;
+  min-height: var(--hit);
+  padding: 0 0.25rem;
+  background: var(--cad-sheet);
+  color: var(--cad-text);
+  border: 1px solid var(--cad-border);
+  border-radius: var(--r-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.zoom-val:disabled {
+  color: var(--cad-text-disabled);
+  cursor: not-allowed;
+}
+@media (max-width: 719.98px) {
+  .menus {
+    order: 3;
+    flex: 1 0 100%;
+    gap: 0.25rem;
+    padding-bottom: 0.125rem;
+  }
+  .zoom-ctl {
+    display: none;
+  }
+  .doc-name {
+    order: 1;
+  }
+  .bar-right {
+    order: 2;
+  }
+}
+
+/* ---- Menu a tendina (livello 3) ---- */
+.menu-panel {
+  position: fixed;
+  z-index: 60;
+  min-width: 13rem;
+  max-width: calc(100vw - 8px);
+  padding: 0.25rem 0;
+  background: var(--cad-sheet);
+  border: 1px solid var(--cad-border-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-3);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  min-height: var(--hit);
+  padding: 0 0.75rem;
+  background: transparent;
+  color: var(--cad-text);
+  border: 0;
+  font: 400 0.875rem/1.25rem var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible {
+  background: var(--cad-chrome);
+  outline: none;
+}
+.menu-item:disabled {
+  color: var(--cad-text-disabled);
+  cursor: not-allowed;
+}
+.menu-hint {
+  font: 500 0.6875rem/1rem var(--font-mono);
+  color: var(--cad-text-secondary);
+}
+.menu-sep {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--cad-border);
+}
+
+/* ---- Palette strumenti ---- */
+.palette {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  overflow-y: auto;
+  background: var(--cad-chrome);
+  border-right: 1px solid var(--cad-border);
+}
+.tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  width: calc(var(--pal-w) - 0.5rem);
+  min-height: var(--hit);
+  padding: 0;
+  background: transparent;
+  color: var(--cad-text);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font: 600 0.625rem/0.75rem var(--font-ui);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.tool .icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: block;
+}
+.tool-label {
+  display: none;
+}
+.tool:hover:not(:disabled) {
+  background: var(--cad-canvas);
+}
+/* attivo su chrome: bordo e icona accent-stroke (DESIGN.md, 6. Componenti) */
+.tool[aria-pressed='true'] {
+  border-color: var(--cad-accent-stroke);
+  color: var(--cad-accent-stroke);
+  background: var(--cad-sheet);
+}
+.tool:disabled {
+  color: var(--cad-text-disabled);
+  cursor: not-allowed;
+}
+.tool:focus-visible {
+  outline: 2px solid var(--cad-measure);
+  outline-offset: 1px;
+}
+@media (max-width: 719.98px) {
+  .palette {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.25rem;
+    padding: 0.25rem var(--margin) max(0.25rem, env(safe-area-inset-bottom));
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-top: 1px solid var(--cad-border);
+    -webkit-overflow-scrolling: touch;
+  }
+  .tool {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 4.5rem;
+    min-height: var(--touch);
+    padding: 0.25rem 0.5rem;
+  }
+  .tool-label {
+    display: block;
+    white-space: nowrap;
+  }
+  .tool[aria-pressed='true'] {
+    color: var(--cad-accent-fill); /* il testo piccolo usa accent-fill, non accent-stroke */
+  }
+  .tool[aria-pressed='true'] .icon {
+    color: var(--cad-accent-stroke);
+  }
+}
+
+/* ---- Area di lavoro ---- */
+.work {
+  position: relative;
+  display: block;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  background: var(--cad-canvas);
+}
+.work .viewer {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+.work .viewer .viewer-empty {
+  display: none;
+}
+.viewer[data-mode='pan'] {
+  cursor: grab;
+}
+.viewer[data-mode='point'] {
+  cursor: crosshair;
+}
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pt-mark line,
+.pt-mark circle,
+.aim-mark line {
+  stroke: var(--cad-measure);
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linecap: square;
+}
+.pt-mark text {
+  fill: var(--cad-measure);
+  stroke: var(--cad-sheet);
+  stroke-width: 3;
+  paint-order: stroke;
+  font: 500 11px var(--font-mono);
+}
+
+.empty-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--margin);
+  padding: var(--margin);
+  text-align: center;
+}
+.empty-panel > :not(.btn) {
+  width: min(100%, 24rem);
+}
+.empty-title {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+}
+.btn.big {
+  min-height: 3rem;
+  padding: 0 1.5rem;
+  font-size: 1rem;
+}
+.samples-box {
+  max-width: 100%;
+  text-align: center;
+  color: var(--cad-text-secondary);
+  font-size: 0.75rem;
+}
+.samples-box summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit);
+  cursor: pointer;
+}
+.samples {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gutter);
+  padding-top: 0.25rem;
+}
+
+.float-zoom {
+  position: absolute;
+  right: var(--margin);
+  bottom: var(--margin);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+.float-zoom .btn {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  background: var(--cad-sheet);
+  border-color: var(--cad-border);
+  box-shadow: var(--shadow-2);
+}
+@media (min-width: 720px) {
+  .float-zoom {
+    display: none;
+  }
+}
+
+/* ---- Lente ---- */
+.lens {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  overflow: hidden;
+  background: var(--cad-canvas);
+  border: 2px solid var(--cad-text);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-3);
+  pointer-events: none;
+}
+.lens-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.lens-h,
+.lens-v {
+  position: absolute;
+  background: var(--cad-measure);
+}
+.lens-h {
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.75px);
+  height: 1.5px;
+}
+.lens-v {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.75px);
+  width: 1.5px;
+}
+.lens-mag {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+  padding: 0 0.25rem;
+  background: var(--cad-text);
+  color: #ffffff;
+  border-radius: var(--r-sm);
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+}
+
+/* ---- Inspector ---- */
+.inspector {
+  display: none;
+  z-index: 8;
+  width: min(var(--insp-w), 100%);
+  justify-self: end;
+  overflow-y: auto;
+  padding: var(--margin);
+  background: var(--cad-chrome);
+  border-left: 1px solid var(--cad-border);
+}
+.app.insp-open .inspector {
+  display: block;
+}
+.insp-sec {
+  padding-bottom: var(--margin);
+  margin-bottom: var(--margin);
+  border-bottom: 1px solid var(--cad-border);
+}
+.insp-sec:last-child {
+  border-bottom: 0;
+}
+.insp-sec > * + * {
+  margin-top: 0.375rem;
+}
+.insp-h {
+  margin: 0;
+  font-size: 0.625rem;
+  line-height: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gutter);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.kv .k {
+  flex: none;
+  color: var(--cad-text-secondary);
+}
+.kv .v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.pt-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.pt-n {
+  min-width: 1.25rem;
+  color: var(--cad-measure);
+  font-weight: 500;
+}
+.unit,
+.statusbar .lbl {
+  color: var(--cad-text-secondary);
+}
+
+/* ---- Barra di stato ---- */
+.statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  min-height: 1.75rem;
+  padding: 0 var(--margin) env(safe-area-inset-bottom);
+  background: var(--cad-toolbar);
+  border-top: 1px solid var(--cad-border);
+  font: 400 0.75rem/1rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.st-coord {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.st-coord .num {
+  display: inline-block;
+  min-width: 5.5ch;
+  text-align: right;
+}
+.st-coord .unit {
+  margin-right: 0.5rem;
+}
+.st-scale {
+  white-space: nowrap;
+}
+.st-scale .lbl {
+  margin-right: 0.25rem;
+}
+.st-msg {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  color: var(--cad-text-secondary);
+}
+.st-pager {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+.st-btn {
+  min-height: var(--hit);
+  min-width: var(--hit);
+  padding: 0 0.25rem;
+  background: transparent;
+  border-color: transparent;
+}
+.st-page {
+  min-width: 3.5rem;
+  text-align: center;
+}
+
+/* ---- Finestre di dialogo (livello 3) ---- */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--margin);
+  background: rgba(30, 35, 42, 0.4);
+}
+.dialog {
+  width: min(24rem, 100%);
+  padding: 1rem;
+  background: var(--cad-sheet);
+  border: 1px solid var(--cad-border-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-3);
+}
+.dialog-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+.dialog-msg {
+  margin: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gutter);
+}
+
+/* Input file: fuori schermo ma presente nel DOM (iOS apre il selettore da .click() dentro il tocco) */
+.file-hidden {
+  position: fixed;
+  left: -100px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}

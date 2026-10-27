@@ -1,5 +1,5 @@
 // Pagina diagnostica di CP0: serve a misurare sul dispositivo reale cio' che nel PASSO 0 era NON VERIFICATO.
-import { PIXEL_BUDGET, ptToMm } from '../geometry/pixels';
+import { PIXEL_BUDGET, SCREEN_PIXEL_BUDGET, ptToMm } from '../geometry/pixels';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { type Child, h } from '../ui/dom';
 import { icon } from '../ui/icons';
@@ -27,13 +27,14 @@ function dataList(rows: Row[]): HTMLDListElement {
   return dl;
 }
 
-export function mountDiagPage(root: HTMLElement): void {
+export function mountDiagPage(root: HTMLElement, back: () => void): void {
   // ---------- Testata ----------
   const topbar = h(
     'header',
     { class: 'topbar' },
+    h('button', { class: 'btn', type: 'button', onclick: back }, icon('chevron-left'), 'App'),
     h('h1', null, 'GT-Pdf'),
-    h('span', { class: 'tag' }, 'CP0 · diagnostica'),
+    h('span', { class: 'tag' }, 'Diagnostica'),
     h('span', { class: 'build mono' }, __BUILD_ID__),
   );
 
@@ -57,7 +58,7 @@ export function mountDiagPage(root: HTMLElement): void {
     if (s.render) {
       const r = s.render;
       lines.push(`render: ${r.w} x ${r.h} px = ${mpx(r.w * r.h)} (${nf(r.scale, 3)} px/pt) · ${nf(r.ms, 0)} ms`);
-      if (r.clamped) lines.push(`ATTENZIONE: tetto di ${PIXEL_BUDGET.toLocaleString('it-IT')} px raggiunto, l'immagine è sfocata a questo zoom.`);
+      if (r.clamped) lines.push(`ATTENZIONE: tetto a schermo di ${SCREEN_PIXEL_BUDGET.toLocaleString('it-IT')} px raggiunto, l'immagine è sfocata a questo zoom.`);
     } else lines.push('render: in corso o nessuno');
     if (s.error) lines.push(`ERRORE render: ${s.error}`);
     lines.push(`puntatori: ${s.pointers} (max ${s.maxPointers}) · eventi gesto Safari: ${s.gestureEvents} · zoom pagina: ${s.pageZoom === null ? 'n/d' : nf(s.pageZoom, 2)}`);
@@ -270,7 +271,7 @@ export function mountDiagPage(root: HTMLElement): void {
   const canvasCard = card(
     'Limiti del canvas',
     false,
-    h('div', { class: 'notice' }, `Tetto provvisorio dell'app: ${PIXEL_BUDGET.toLocaleString('it-IT')} px. Ogni prova alloca un canvas, disegna, rilegge un pixel e codifica in JPEG. Prove grandi possono far ricaricare la pagina: in quel caso il risultato viene segnalato al riavvio.`),
+    h('div', { class: 'notice' }, `Tetti dell'app: ${PIXEL_BUDGET.toLocaleString('it-IT')} px per l'esportazione (decisione 4 = A, misurato su iPhone in CP0), ${SCREEN_PIXEL_BUDGET.toLocaleString('it-IT')} px per il canvas a schermo. Ogni prova alloca un canvas, disegna, rilegge un pixel e codifica in JPEG. Prove grandi possono far ricaricare la pagina: in quel caso il risultato viene segnalato al riavvio.`),
     interruptedNote,
     tierList,
     h('div', { class: 'row' }, seqBtn),
@@ -288,16 +289,16 @@ export function mountDiagPage(root: HTMLElement): void {
     if (diagPdf) await fn(diagPdf);
   };
   const shareBtns = [
-    h('button', { class: 'btn primary', type: 'button', onclick: need((b) => shareFile(b, 'Condividi (immediato)')) }, icon('share'), 'Condividi PDF'),
+    h('button', { class: 'btn primary', type: 'button', onclick: need((b) => shareFile(b, 'Condividi PDF di prova (immediato)')) }, icon('share'), 'Condividi PDF di prova'),
     h('button', { class: 'btn', type: 'button', onclick: need(async (b) => {
       const ms = Number((delaySel as HTMLSelectElement).value);
-      log(`Condividi dopo attesa: attendo ${ms} ms poi chiamo share()`);
+      log(`Condividi PDF di prova dopo attesa: attendo ${ms} ms poi chiamo share()`);
       await sleep(ms);
-      await shareFile(b, `Condividi (dopo ${ms} ms)`);
-    }) }, icon('share'), 'Condividi dopo attesa'),
-    h('button', { class: 'btn', type: 'button', onclick: need((b) => downloadFile(b, 'application/pdf', 'Scarica (pdf)')) }, icon('download'), 'Scarica (application/pdf)'),
-    h('button', { class: 'btn', type: 'button', onclick: need((b) => downloadFile(b, 'application/octet-stream', 'Scarica (octet-stream)')) }, icon('download'), 'Scarica (octet-stream)'),
-    h('button', { class: 'btn', type: 'button', onclick: need((b) => openBlob(b, 'Apri in scheda')) }, icon('file-up'), 'Apri in nuova scheda'),
+      await shareFile(b, `Condividi PDF di prova (dopo ${ms} ms)`);
+    }) }, icon('share'), 'Condividi PDF di prova dopo attesa'),
+    h('button', { class: 'btn', type: 'button', onclick: need((b) => downloadFile(b, 'application/pdf', 'Scarica PDF di prova (application/pdf)')) }, icon('download'), 'Scarica PDF di prova (application/pdf)'),
+    h('button', { class: 'btn', type: 'button', onclick: need((b) => downloadFile(b, 'application/octet-stream', 'Scarica PDF di prova (octet-stream)')) }, icon('download'), 'Scarica PDF di prova (octet-stream)'),
+    h('button', { class: 'btn', type: 'button', onclick: need((b) => openBlob(b, 'Apri PDF di prova in scheda')) }, icon('file-up'), 'Apri PDF di prova in nuova scheda'),
   ];
   for (const b of shareBtns) b.disabled = true;
   void (async () => {
@@ -316,12 +317,13 @@ export function mountDiagPage(root: HTMLElement): void {
   const shareCard = card(
     'Condivisione e scarico',
     false,
+    h('div', { class: 'notice' }, 'Questi pulsanti usano un PDF di prova generato dalla pagina (una pagina A4 con testo fittizio), NON il documento aperto nell’app.'),
     shareStatus,
     h('div', { class: 'row grow' }, shareBtns[0] as Node),
     h('div', { class: 'row grow' }, delaySel, shareBtns[1] as Node),
     h('div', { class: 'row grow' }, shareBtns[2] as Node, shareBtns[3] as Node),
     h('div', { class: 'row grow' }, shareBtns[4] as Node),
-    h('p', { class: 'hint' }, 'Ogni esito (anche l’annullamento) finisce nel registro. Dopo "Condividi PDF" scegliere "Salva su File" e poi riaprire il file da File per verificarlo.'),
+    h('p', { class: 'hint' }, 'Ogni esito (anche l’annullamento) finisce nel registro. Dopo "Condividi PDF di prova" scegliere "Salva su File" e poi riaprire il file da File per verificarlo.'),
   );
 
   // ---------- Registro ----------
@@ -357,7 +359,7 @@ export function mountDiagPage(root: HTMLElement): void {
   );
 
   root.replaceChildren(topbar, h('main', null, pdfCard, canvasCard, shareCard, envCard, logCard));
-  log(`Avvio GT-Pdf ${__BUILD_ID__} (CP0)`);
+  log(`Avvio GT-Pdf ${__BUILD_ID__} (diagnostica)`);
   log(`User agent: ${navigator.userAgent}`);
   log(`DPR ${window.devicePixelRatio}, schermo ${screen.width}x${screen.height}, finestra ${window.innerWidth}x${window.innerHeight}`);
 }
