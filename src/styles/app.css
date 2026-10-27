@@ -908,7 +908,7 @@ body.app-mode {
 .style-glyph svg {
   display: block;
 }
-@media (max-width: 899.98px) {
+@media (max-width: 719.98px) {
   .ctx-hint {
     flex-basis: 100%;
   }
@@ -1022,4 +1022,17 @@ body.app-mode {
 }
 .ctl-msg:empty {
   display: none;
+}
+
+/* ---- Touch con poca altezza (iPhone in orizzontale): barra su una riga, zoom nei pulsanti sul foglio ---- */
+@media (pointer: coarse) and (max-height: 500px) {
+  .zoom-ctl,
+  .doc-name {
+    display: none;
+  }
+  .float-zoom {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+  }
 }

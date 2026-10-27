@@ -560,6 +560,132 @@ async function touchSuite(browser) {
   await ctx.close();
 }
 
+// =====================================================================
+async function extraSuite(browser) {
+  section = 'pagine, tastiera, orizzontale';
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await openSample(page, '3 pagine miste');
+  const a4 = { sheet: { w: A4.w, h: A4.h } };
+  const pageLabel = () => page.locator('.st-page').innerText();
+  const undo = page.locator('.undo-ctl button').nth(0);
+  const redo = page.locator('.undo-ctl button').nth(1);
+  const next = page.locator('.st-pager button').nth(1);
+  const prev = page.locator('.st-pager button').nth(0);
+  check('3 pagine: si parte dalla pagina 1', (await pageLabel()) === '1 / 3');
+
+  // pagina 1: scala 1:1 e una retta
+  await tool(page, 'Scala');
+  const ref = SAMPLES['A4 vettoriale'].ref;
+  await clickAt(page, await toClient(page, a4, ref[0]));
+  await clickAt(page, await toClient(page, a4, ref[1]));
+  await page.waitForSelector('.dialog');
+  // Invio nel campo conferma
+  await page.locator('.dialog .dlg-fields input').fill('100');
+  await page.locator('.dialog .dlg-fields input').press('Enter');
+  await page.waitForSelector('.dialog', { state: 'detached' });
+  const s1 = await scaleText(page);
+  check('Pagina 1: Invio nel campo conferma la scala (~1:1)', near(Number(s1.replace('1:', '')), 1, 0.02), s1);
+  await tool(page, 'Retta');
+  await clickAt(page, await toClient(page, a4, { x: 100, y: 100 }));
+  await clickAt(page, await toClient(page, a4, { x: 300, y: 100 }));
+  check('Pagina 1: una retta', (await objects(page)).length === 1);
+
+  // pagina 2: non calibrata, nessun oggetto; calibra con un altro valore e disegna
+  await next.click();
+  await page.waitForTimeout(900);
+  check('Pagina 2: scala propria (non calibrata) e nessun oggetto della pagina 1', (await scaleText(page)) === 'non calibrata' && (await objects(page)).length === 0);
+  const a3 = { sheet: { w: 1190.551, h: 841.89 } };
+  await tool(page, 'Scala');
+  await clickAt(page, await toClient(page, a3, { x: 100, y: 400 }));
+  await clickAt(page, await toClient(page, a3, { x: 100 + 100 * MM, y: 400 }));
+  await page.waitForSelector('.dialog');
+  await page.locator('.dialog .dlg-fields input').fill('200');
+  await page.locator('.dialog .btn.primary').click();
+  await page.waitForSelector('.dialog', { state: 'detached' });
+  const s2 = await scaleText(page);
+  check('Pagina 2: scala ~1:2, indipendente dalla pagina 1', near(Number(s2.replace('1:', '')), 2, 0.05), s2);
+  await tool(page, 'Linea');
+  for (const p of [{ x: 200, y: 200 }, { x: 400, y: 260 }, { x: 600, y: 200 }]) await clickAt(page, await toClient(page, a3, p));
+  await page.keyboard.press('Enter');
+  check('Pagina 2: una linea', (await objects(page)).length === 1);
+  // Distanza usa la scala della pagina: 50 mm di foglio = ~100 mm reali
+  await tool(page, 'Distanza');
+  await clickAt(page, await toClient(page, a3, { x: 100, y: 600 }));
+  await clickAt(page, await toClient(page, a3, { x: 100 + 50 * MM, y: 600 }));
+  const bd = await page.locator('.measure-badge').innerText();
+  check('Pagina 2: Distanza con la scala della pagina (~100 mm per 50 mm di foglio)', near(Number(/L (\d+\.\d\d)/.exec(bd)?.[1]), 100, 3), bd);
+
+  // Annulla attraversa le pagine: torna alla pagina interessata
+  await tool(page, 'Sposta vista');
+  await undo.click(); // annulla la linea (pagina 2)
+  check('Annulla: toglie la linea della pagina 2', (await objects(page)).length === 0 && (await pageLabel()) === '2 / 3');
+  await undo.click(); // annulla la calibrazione (pagina 2)
+  check('Annulla: toglie la calibrazione della pagina 2', (await scaleText(page)) === 'non calibrata' && (await pageLabel()) === '2 / 3');
+  await prev.click();
+  await page.waitForTimeout(700);
+  check('Tornando alla pagina 1: scala e retta ci sono ancora', near(Number((await scaleText(page)).replace('1:', '')), 1, 0.02) && (await objects(page)).length === 1);
+  await next.click();
+  await page.waitForTimeout(700);
+  await undo.click(); // annulla la retta, che e' della pagina 1: l'app mostra la pagina 1
+  await page.waitForTimeout(700);
+  check('Annulla di un\'azione di un\'altra pagina: l\'app mostra quella pagina', (await pageLabel()) === '1 / 3' && (await objects(page)).length === 0, await pageLabel());
+  await redo.click();
+  await page.waitForTimeout(500);
+  check('Ripeti: la retta torna (pagina 1)', (await objects(page)).length === 1 && (await pageLabel()) === '1 / 3');
+
+  // Cambiare pagina con punti in costruzione: la costruzione e' scartata
+  await tool(page, 'Linea');
+  await clickAt(page, await toClient(page, a4, { x: 300, y: 300 }));
+  check('Linea: un punto in costruzione', (await page.locator('.pt-mark').count()) === 1);
+  await next.click();
+  await page.waitForTimeout(700);
+  check('Cambio pagina: punti in costruzione scartati', (await page.locator('.pt-mark').count()) === 0 && (await page.locator('.ctx-act.primary').isDisabled()));
+  // Esc annulla la costruzione
+  await clickAt(page, await toClient(page, a3, { x: 300, y: 300 }));
+  await page.keyboard.press('Escape');
+  check('Esc: annulla la costruzione', (await page.locator('.pt-mark').count()) === 0);
+  // Esc chiude il dialogo di scala e scarta i punti
+  await tool(page, 'Scala');
+  await clickAt(page, await toClient(page, a3, { x: 300, y: 300 }));
+  await clickAt(page, await toClient(page, a3, { x: 500, y: 300 }));
+  await page.waitForSelector('.dialog');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.dialog', { state: 'detached' });
+  check('Dialogo scala annullato: nessuna scala applicata e punti scartati', (await scaleText(page)) === 'non calibrata' && (await page.locator('.pt-mark').count()) === 0);
+  await page.screenshot({ path: join(SHOTS, 'pagine-a3.png') });
+  check('Nessun errore in console (pagine)', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+
+  // --- iPhone in orizzontale (780x390) e A+ al massimo (390x780) ---
+  const phone = (w, h) => browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  const land = await phone(780, 390);
+  const lp = await land.newPage();
+  await openSample(lp, 'A4 vettoriale');
+  await tool(lp, 'Linea');
+  await lp.screenshot({ path: join(SHOTS, 'iphone-orizzontale.png') });
+  const lw = await lp.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, sh: document.documentElement.scrollHeight, ih: innerHeight }));
+  check('iPhone orizzontale: nessuno scorrimento della pagina', lw.sw <= lw.iw && lw.sh <= lw.ih, JSON.stringify(lw));
+  const vb = await lp.locator('.viewer').boundingBox();
+  check('iPhone orizzontale: il foglio ha almeno 150 px di altezza', vb && vb.height >= 150, JSON.stringify(vb));
+  await land.close();
+
+  const big = await phone(390, 780);
+  const bp = await big.newPage();
+  await openSample(bp, 'A4 vettoriale');
+  for (let i = 0; i < 3; i++) await bp.locator('.size-btn').nth(1).click(); // 16 -> 22 px in 3 passi
+  await tool(bp, 'Linea');
+  await bp.screenshot({ path: join(SHOTS, 'iphone-A-piu-max.png') });
+  const items = await bp.$$eval('.ctxbar .ctx-actions > *, .st-toggle, .st-scale-btn', (els) => els.filter((e) => e.offsetParent !== null).map((e) => { const r = e.getBoundingClientRect(); return { n: (e.textContent || '').trim().slice(0, 12), l: r.left, r: r.right }; }));
+  check('A+ al massimo (22 px): barra contestuale e stato dentro i 390 px', items.every((b) => b.l >= -0.5 && b.r <= 390.5), JSON.stringify(items));
+  const ov = await bp.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  check('A+ al massimo: nessuno scorrimento orizzontale', ov);
+  await big.close();
+}
+
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch();
@@ -567,6 +693,7 @@ async function touchSuite(browser) {
     await mouseSuite(browser);
     await rotateCropSuite(browser);
     await touchSuite(browser);
+    await extraSuite(browser);
   } catch (e) {
     check('esecuzione senza eccezioni', false, e.stack || String(e));
   } finally {
