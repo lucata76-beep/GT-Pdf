@@ -231,7 +231,7 @@ function checkSamePage(page: PDFPage, spec: PageSpec, no: number): void {
   const specRot = (((spec.rotate % 360) + 360) % 360) as number;
   const uu = page.node.lookupMaybe(PDFName.of('UserUnit'), PDFNumber)?.asNumber() ?? 1;
   const same = view.every((v, i) => Math.abs(v - (spec.view[i] as number)) <= 0.01) && rot === specRot && Math.abs(uu - (spec.userUnit > 0 ? spec.userUnit : 1)) <= 1e-9;
-  if (!same) throw new ExportError('mismatch', `La pagina ${no} risulta diversa tra la lettura per la vista e quella per la scrittura (area visibile, rotazione o UserUnit).`);
+  if (!same) throw new ExportError('mismatch', `La pagina ${no} risulta diversa tra la lettura per la vista e quella per la scrittura (area visibile, rotazione o UserUnit).`, undefined, no);
 }
 
 /** Annotazioni con aspetto proprio (/AP), non nascoste: i lettori le disegnano dopo il contenuto, cioe' sopra le coperture. */
@@ -273,7 +273,7 @@ export async function exportCoverSimple(original: Uint8Array, pages: readonly Ex
   const t1 = now();
 
   if (pdfLibPages !== pages.length) {
-    throw new ExportError('mismatch', `Il PDF ha ${pages.length} pagine per la vista e ${pdfLibPages} per la scrittura.`);
+    throw new ExportError('mismatch', `Il PDF ha ${pages.length} ${pages.length === 1 ? 'pagina' : 'pagine'} per la vista e ${pdfLibPages} per la scrittura.`);
   }
   const targets: number[] = [];
   pages.forEach((p, i) => {
@@ -287,8 +287,15 @@ export async function exportCoverSimple(original: Uint8Array, pages: readonly Ex
     for (const i of targets) {
       const input = pages[i] as ExportPage;
       const no = i + 1;
-      const page = doc.getPage(i);
-      checkSamePage(page, input.spec, no);
+      let page: PDFPage;
+      try {
+        page = doc.getPage(i);
+        checkSamePage(page, input.spec, no);
+      } catch (e) {
+        if (e instanceof ExportError) throw e;
+        // pagina senza /Type /Page, riquadro che non e' un rettangolo, ...: PDF.js la legge, la libreria di scrittura no
+        throw new ExportError('unreadable', `La pagina ${no} non e' leggibile dalla libreria di scrittura.`, e, no);
+      }
       const geom = new PageGeometry(input.spec);
 
       // 1) isolamento: normalize() racchiude il contenuto originale tra q e Q; poi si correggono q aperti, Q in piu' e matrice.

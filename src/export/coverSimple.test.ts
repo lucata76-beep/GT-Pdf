@@ -474,3 +474,40 @@ describe('controllo del file generato', () => {
     await expect(verifyExport(bytes, [FULL, { ...FULL, rotate: 0 }])).rejects.toMatchObject({ code: 'verify' });
   });
 });
+
+describe('errori: PDF che PDF.js apre ma la libreria di scrittura legge male (trovati con mutazioni di un PDF di prova)', () => {
+  const toStr = (b: Uint8Array): string => Array.from(b, (c) => String.fromCharCode(c)).join('');
+  const mutate = (bytes: Uint8Array, f: (s: string) => string): Uint8Array => Uint8Array.from(f(toStr(bytes)), (c) => c.charCodeAt(0));
+  const cannot = (...pages: number[]): ExportPage[] => pages.map(() => page(FULL, [segment([{ x: 10, y: 10 }, { x: 50, y: 50 }])]));
+
+  it('pagina senza /Type /Page: la libreria non la vede, "mismatch" (1 pagina per la vista, 0 per la scrittura), nulla scritto', async () => {
+    const bytes = mutate(await fx.dirtyPdf('clean'), (s) => s.replace(/\/Type \/Page\b(?!s)/g, '/TypeX /Page'));
+    const h = await sha(bytes);
+    const err = await exportCoverSimple(bytes, cannot(1)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExportError);
+    expect((err as ExportError).code).toBe('mismatch');
+    const d = describeExportError(err);
+    expect(d.message).toContain('1 pagina per la vista e 0 per la scrittura');
+    expect(d.message).toContain('nulla è stato perso');
+    expect(await sha(bytes)).toBe(h);
+  });
+
+  it('MediaBox che non e\' un rettangolo: "unreadable" con il numero della pagina', async () => {
+    const bytes = mutate(await fx.dirtyPdf('clean'), (s) => s.replace(/\/MediaBox \[[^\]]*\]/, '/MediaBox [0 0 595]'));
+    const err = await exportCoverSimple(bytes, cannot(1)).catch((e: unknown) => e);
+    expect((err as ExportError).code).toBe('unreadable');
+    expect((err as ExportError).page).toBe(1);
+    expect(describeExportError(err).message).toContain('(pagina 1)');
+    expect(describeExportError(err).detail).toContain('PDFArrayIsNotRectangleError');
+  });
+
+  it('PDF.js e pdf-lib contano pagine diverse (Resources rotto): "mismatch" invece di perdere una pagina in silenzio', async () => {
+    const three = await fx.build({ pages: [{ raw: '' }, { raw: '' }, { raw: '' }] });
+    const broken = mutate(three, (s) => s.replace(/\/Resources <<[^>]*>>/, '/Resources << /Font')); // PDF.js: 3 pagine, pdf-lib: 2
+    const doc = await open(broken);
+    expect(doc.numPages).toBe(3);
+    const err = await exportCoverSimple(broken, cannot(1, 2, 3)).catch((e: unknown) => e);
+    expect((err as ExportError).code).toBe('mismatch');
+    expect(describeExportError(err).message).toContain('3 pagine per la vista e 2 per la scrittura');
+  });
+});

@@ -17,17 +17,23 @@ export type ExportErrorCode =
 
 export class ExportError extends Error {
   readonly code: ExportErrorCode;
-  constructor(code: ExportErrorCode, message: string, cause?: unknown) {
+  /** Pagina (da 1) a cui si riferisce l'errore, se e' di una pagina. */
+  readonly page: number | undefined;
+  constructor(code: ExportErrorCode, message: string, cause?: unknown, page?: number) {
     super(message);
     this.name = 'ExportError';
     this.code = code;
+    this.page = page;
     if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
   }
 }
 
 /** Nome e messaggio originali (in inglese: vengono dalle librerie), accorciati: servono a chi deve riferire il problema. */
 export function technicalDetail(e: unknown): string {
-  const name = (e as { name?: string } | null)?.name ?? 'Errore';
+  let name = (e as { name?: string } | null)?.name ?? 'Errore';
+  // le librerie lanciano spesso `Error` semplici di una sottoclasse con nome proprio (es. PDFArrayIsNotRectangleError): il nome della classe dice di piu'
+  const ctor = (e as { constructor?: { name?: string } } | null)?.constructor?.name;
+  if (name === 'Error' && ctor && ctor !== 'Error') name = ctor;
   const msg = e instanceof Error ? e.message : String(e);
   const cause = (e as { cause?: unknown } | null)?.cause;
   const own = `${name}: ${msg}`;
@@ -61,7 +67,7 @@ export function describeExportError(e: unknown): { title: string; message: strin
     case 'unreadable':
       return {
         title: 'PDF non esportabile',
-        message: `Non riesco a leggere la struttura di questo PDF per scrivere il nuovo file (si apre e si vede, ma la libreria che lo riscrive non lo interpreta). ${safe}`,
+        message: `Non riesco a leggere la struttura di questo PDF${err.page ? ` (pagina ${err.page})` : ''} per scrivere il nuovo file: si apre e si vede, ma la libreria che lo riscrive non lo interpreta. ${safe}`,
         detail: technicalDetail(err),
       };
     case 'mismatch':
