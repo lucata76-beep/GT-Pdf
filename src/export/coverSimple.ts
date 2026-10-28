@@ -94,6 +94,7 @@ export interface ExportOptions {
 }
 
 const yieldToUi = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+const YIELD_EVERY_MS = 50;
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 const colorOf = (hex: string): [number, number, number] => [Number.parseInt(hex.slice(1, 3), 16) / 255, Number.parseInt(hex.slice(3, 5), 16) / 255, Number.parseInt(hex.slice(5, 7), 16) / 255];
@@ -284,6 +285,7 @@ export async function exportCoverSimple(original: Uint8Array, pages: readonly Ex
   let objectCount = 0;
   try {
     let done = 0;
+    let lastYield = now();
     for (const i of targets) {
       const input = pages[i] as ExportPage;
       const no = i + 1;
@@ -386,7 +388,11 @@ export async function exportCoverSimple(original: Uint8Array, pages: readonly Ex
         }
       }
       options.onProgress?.(++done, targets.length);
-      await yieldToUi();
+      // si cede il controllo all'interfaccia al massimo ogni 50 ms: setTimeout(0) costa ~4 ms a pagina e con 124 pagine sarebbe mezzo secondo di attesa
+      if (now() - lastYield >= YIELD_EVERY_MS) {
+        await yieldToUi();
+        lastYield = now();
+      }
     }
   } catch (e) {
     throw toExportError(e, 'write');

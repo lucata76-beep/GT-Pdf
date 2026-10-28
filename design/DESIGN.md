@@ -288,9 +288,16 @@ Dialog Esporta PDF
   - Pixel calcolati: A4 150 dpi = 2.174.960; A4 300 dpi = 8.699.840; A4 600 dpi = 34.806.376; A3 150 dpi = 4.349.920; A3 300 dpi = 17.403.188; A3 600 dpi = 69.605.736 (sopra il limite: disabilitato). Calcolare sempre sulla dimensione reale della pagina.
 - Nessuna stima di peso del file inventata: mostrare un valore solo se calcolato.
 - Riepilogo: nome file, pagine, modalita', DPI. Pulsanti Annulla ed Esporta.
+- **Realizzato in CP5a** (solo "Copertura semplice"; l'esportazione "Appiattito" e i DPI arrivano in 5b):
+  - Scelta: due schede (radio) "Copertura semplice" (predefinita, "Il testo sotto le coperture resta nel file.") e "Appiattito" (visibile ma **disattivata**, etichetta `5b`, "Le pagine diventano immagini: il testo sotto sparisce. Non ancora disponibile."). Nessun DPI e nessuna stima di peso: la scelta DPI compare in 5b; il peso si mostra solo a file generato, calcolato.
+  - Riepilogo: File, Nuovo file (`<nome originale senza .pdf>-quotato.pdf`), Pagine (e quante hanno oggetti), Oggetti, Modalita'. Pulsanti `Annulla` ed `Esporta` (>= 44 px).
+  - Generazione: "Esporta" produce il PDF **senza** aprire il foglio di condivisione (su iPhone share() riesce solo dentro il gesto: CP0). Durante il lavoro il dialogo mostra l'avanzamento ("Scrittura delle pagine con oggetti: 3 di 12") e non si puo' chiudere.
+  - Pronto: riepilogo (nome, dimensione calcolata, pagine riscritte, controllo di riapertura, tempo), eventuali **avvisi** in italiano (per esempio annotazioni che restano sopra le coperture) e tre pulsanti: `Chiudi`, `Scarica` (blob `application/octet-stream`, si salva in Download) e `Condividi` (foglio di condivisione con un File `application/pdf`, chiamato direttamente dal tocco). Se il browser non puo' condividere file (`navigator.canShare` assente o `canShare({files})` falso) il dialogo lo scrive in una riga; l'annullamento del foglio di condivisione non e' un errore ("Condivisione annullata.").
+  - Errore: titolo, messaggio in italiano ("... nulla e' stato perso"), dettaglio tecnico (inglese, dalle librerie) e `Chiudi` / `Riprova`; il lavoro non viene toccato.
+  - Con iPhone in orizzontale il dialogo scorre dentro lo schermo (altezza = altezza visibile, `100dvh` con ripiego `100vh`).
 
 Menu
-- File: Apri, Salva con nome, Esporta PDF, Chiudi (niente "Nuovo", decisione 27/10/2026).
+- File: Apri, Salva con nome (disattivato fino a 5c), Esporta PDF (attivo dal 5a), Chiudi (niente "Nuovo", decisione 27/10/2026).
 - Modifica: Annulla, Ripeti, Seleziona/sposta, Copia, Duplica, Cancella.
 - Inserisci: Linea (tipi di linea), Retta, Cerchio, Arco, Raccordo, Testo, Quota (allineata, orizzontale, verticale, diametro Ø, raggio R), Copertura bianca (rettangolo, quadrato, cerchio).
 - Zoom: zoom documento (separato da `A-` / `A+`).

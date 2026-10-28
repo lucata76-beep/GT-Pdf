@@ -41,7 +41,7 @@ import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { describeOpenError } from '../pdf/openError';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
-import { showExportDialog } from '../ui/exportDialog';
+import { type ExportRunResult, showExportDialog } from '../ui/exportDialog';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
 import { Keypad } from '../ui/keypad';
@@ -1137,7 +1137,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     cancelConstruction();
     const outName = exportFileName(doc.name);
-    const pageObjects = (n: number): PageObject[] => [...model.objects(n)];
     let touched = 0;
     for (let n = 1; n <= doc.pages.length; n++) if (model.objects(n).length > 0) touched++;
     await showExportDialog({
@@ -1146,20 +1145,33 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       pageCount: doc.pages.length,
       objectCount: model.objectCount(),
       pagesWithObjects: touched,
-      run: async (onProgress) => {
-        const t0 = performance.now();
-        const [{ exportCoverSimple }, { verifyExport }] = await Promise.all([import('../export/coverSimple'), import('../export/verify')]);
-        const specs = doc.pages.map((p) => ({ view: p.view, rotate: p.rotate, userUnit: p.userUnit }));
-        const res = await exportCoverSimple(
-          doc.bytes,
-          specs.map((spec, i) => ({ spec, objects: pageObjects(i + 1), scale: model.scale(i + 1) })),
-          { onProgress },
-        );
-        const check = await verifyExport(res.bytes, specs);
-        const file = makePdfFile(res.bytes, outName); // il File tiene i dati: i byte generati non servono piu'
-        return { file, touchedPages: res.touchedPages, pageCount: res.pageCount, objectCount: res.objectCount, warnings: res.warnings, ms: performance.now() - t0, verifiedPages: check.pageCount };
-      },
+      run: (onProgress) => generatePdf(doc, outName, onProgress),
     });
+  }
+
+  /** Genera il PDF esportato (scrittura + controllo). Usata dal dialogo e, nel build di prova, dal gancio `runExport` delle misure di prestazione. */
+  async function generatePdf(doc: OpenedPdf, outName: string, onProgress: (done: number, total: number) => void, objectsPerTick?: number): Promise<ExportRunResult & { timing: { load: number; draw: number; save: number; verify: number } }> {
+    const t0 = performance.now();
+    const [{ exportCoverSimple }, { verifyExport }] = await Promise.all([import('../export/coverSimple'), import('../export/verify')]);
+    const specs = doc.pages.map((p) => ({ view: p.view, rotate: p.rotate, userUnit: p.userUnit }));
+    const pageObjects = (n: number): PageObject[] => [...model.objects(n)];
+    const res = await exportCoverSimple(
+      doc.bytes,
+      specs.map((spec, i) => ({ spec, objects: pageObjects(i + 1), scale: model.scale(i + 1) })),
+      { onProgress, objectsPerTick },
+    );
+    const check = await verifyExport(res.bytes, specs);
+    const file = makePdfFile(res.bytes, outName); // il File tiene i dati: i byte generati non servono piu'
+    return {
+      file,
+      touchedPages: res.touchedPages,
+      pageCount: res.pageCount,
+      objectCount: res.objectCount,
+      warnings: res.warnings,
+      ms: performance.now() - t0,
+      verifiedPages: check.pageCount,
+      timing: { ...res.timing, verify: check.ms },
+    };
   }
 
   async function loadFile(f: File): Promise<void> {
@@ -1245,6 +1257,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       pages: () => pdf?.pages.map((p) => ({ ...p })) ?? [],
       sheet: () => viewer.sheetSize,
       objectCount: () => model.objectCount(),
+      /** Genera il PDF come fa il dialogo, senza interfaccia; restituisce tempi e dimensione (per scripts/perf-cp5a.cjs). */
+      runExport: async (objectsPerTick?: number) => {
+        if (!pdf) throw new Error('nessun documento');
+        const t0 = performance.now();
+        const r = await generatePdf(pdf, exportFileName(pdf.name), () => undefined, objectsPerTick);
+        return { bytes: r.file.size, total: performance.now() - t0, ...r.timing, warnings: r.warnings.length, touchedPages: r.touchedPages, objectCount: r.objectCount };
+      },
       zoomTo: (z: number) => viewer.zoomTo(z),
       fit: () => viewer.fit(),
     };
