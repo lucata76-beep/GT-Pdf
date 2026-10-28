@@ -1,7 +1,7 @@
 // Guscio dell'app (CP4): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
 // Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella. Oggetti e scala sono in memoria
 // nella sessione (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
-import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo, dimensionLabel } from '../geometry/dimension';
+import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
 import { distToShape, pickTop } from '../geometry/hit';
@@ -33,6 +33,7 @@ import {
   propsEqual,
   propsOf,
 } from '../model/model';
+import { type DrawItem, buildDrawItems, objectLayoutFor, sheetLine } from '../model/scene';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile } from '../export/deliver';
@@ -46,7 +47,6 @@ import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
 import { Keypad } from '../ui/keypad';
 import { type MenuEntry, menuButton } from '../ui/menu';
-import type { DrawItem } from '../ui/overlay';
 import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
 import { Construction, type ConstructionTool } from './construction';
@@ -752,29 +752,21 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
 
   // ---------- Scena: oggetti della pagina come li disegna il livello sul foglio ----------
-  /** Layout di un testo o di una quota (sempre dritti sul foglio). Una quota automatica senza scala non dovrebbe esistere: "?" per non nascondere l'errore. */
-  function objectLayout(o: TextObject | DimensionObject, g: PageGeometry): Layout {
-    if (o.kind === 'text') return layoutText(o, g);
-    return dimLayout(o, o, g, dimensionLabel(o, g, model.scale(pageNo)) ?? '?');
-  }
+  /** Layout di un testo o di una quota (sempre dritti sul foglio): lo stesso codice dell'esportazione (`model/scene`). */
+  const objectLayout = (o: TextObject | DimensionObject, g: PageGeometry): Layout => objectLayoutFor(o, g, model.scale(pageNo));
   function dimLayout(def: DimensionDef, style: { color: string; widthPt: number; textPt: number } | null, g: PageGeometry, label: string): Layout {
     return layoutDimension({ ...def, color: style?.color ?? stroke.color, widthPt: style?.widthPt ?? stroke.widthPt, textPt: style?.textPt ?? textPt }, g, label);
   }
-  const sheetLine = (o: LineObject, g: PageGeometry): SheetPoint[] => o.points.map((p) => g.userToSheet(p));
   const shapeOf = (o: PageObject): Shape => {
     const g = viewer.geometry;
     if (!g) return { lines: [], rects: [], circles: [] };
     if (o.kind === 'cover') return coverShapeOf(coverOnSheet(o, g));
     return isLine(o) ? { lines: [sheetLine(o, g)], rects: [], circles: [] } : objectLayout(o, g).hit;
   };
-  /** Gli oggetti dal fondo al primo piano: le coperture stanno sotto tutto, anche se disegnate dopo. */
+  /** Gli oggetti dal fondo al primo piano (le coperture sotto tutto): la stessa scena che disegna l'esportazione "Appiattito". */
   function sceneItems(): DrawItem[] {
     const g = viewer.geometry;
-    if (!g) return [];
-    return drawOrder(model.objects(pageNo)).map((o): DrawItem => {
-      if (o.kind === 'cover') return { kind: 'cover', id: o.id, cover: coverOnSheet(o, g) };
-      return isLine(o) ? { kind: 'line', id: o.id, points: sheetLine(o, g), stroke: o.stroke } : { kind: 'layout', id: o.id, layout: objectLayout(o, g) };
-    });
+    return g ? buildDrawItems(model.objects(pageNo), g, model.scale(pageNo)) : [];
   }
 
   // ---------- Testo e valore delle quote con il tastierino ----------

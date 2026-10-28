@@ -5,6 +5,7 @@
 import { type SheetCover, coverShapeOf } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
+import { DRAWING_FONT, type DrawItem } from '../model/scene';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
 import { h } from './dom';
 
@@ -13,14 +14,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Spessore minimo visibile sullo schermo (pixel CSS): una linea di 0.25 pt a zoom ridotto non deve sparire. */
 export const MIN_SCREEN_STROKE_PX = 1;
 
-/**
- * Rette e linee (spezzata con tipo di linea), testi e quote (primitive gia' calcolate dal layout) oppure coperture.
- * Le coperture vanno in uno strato SOTTO a tutto il resto: l'ordine della lista conta solo dentro lo stesso strato.
- */
-export type DrawItem =
-  | { kind: 'line'; id: number; points: readonly SheetPoint[]; stroke: Stroke }
-  | { kind: 'layout'; id: number; layout: Layout }
-  | { kind: 'cover'; id: number; cover: SheetCover };
+export type { DrawItem };
 export interface Marker {
   p: SheetPoint;
   label?: string;
@@ -43,8 +37,7 @@ interface StrokeEl {
   widthPt: number;
 }
 
-/** Carattere dei testi sul foglio: Helvetica come nell'esportazione (decisione 6); Arial e Liberation Sans hanno le stesse larghezze. */
-export const DRAWING_FONT = "Helvetica, Arial, 'Liberation Sans', sans-serif";
+export { DRAWING_FONT };
 
 /** Riempimento delle coperture: bianco pieno, senza bordo. */
 const COVER_FILL = '#ffffff';
