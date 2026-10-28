@@ -126,7 +126,7 @@ describe('rasterizePage', () => {
     expect(f.canvas.released()).toBe(true);
   });
   it('getImageData che lancia, getContext nullo, canvas ridotto, toBlob nullo: tutti fermano l\'esportazione con messaggio e canvas rilasciato', async () => {
-    for (const [mode, text] of [['throws', 'RangeError: boom'], ['no-context', 'il canvas non e\' disponibile'], ['clamped', 'ridotto a 2000 x 3508 px'], ['null-blob', 'non riesce a codificare in JPEG']] as const) {
+    for (const [mode, text] of [['throws', 'RangeError: boom'], ['no-context', 'il canvas non è disponibile'], ['clamped', 'ridotto a 2000 x 3508 px'], ['null-blob', 'non riesce a codificare in JPEG']] as const) {
       const f = fake(mode);
       const err = await rasterizePage(request(f, { dpi: 300 }), f.env).catch((e: unknown) => e);
       expect((err as ExportError).code, mode).toBe('canvas');

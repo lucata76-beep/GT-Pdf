@@ -8,7 +8,7 @@ import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
 import { fmt, fmtTrim } from '../geometry/numbers';
-import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
+import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { type Command, History } from '../model/history';
@@ -38,11 +38,12 @@ import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile } from '../export/deliver';
 import { exportFileName } from '../export/fileName';
-import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
+import { type OpenedPdf, type PageInfo, closePdf, openPdf } from '../pdf/loader';
 import { describeOpenError } from '../pdf/openError';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
-import { type ExportRunResult, showExportDialog } from '../ui/exportDialog';
+import { type ExportChoice, type ExportProgress, type ExportRunResult, showExportDialog } from '../ui/exportDialog';
+import { JPEG_QUALITY, type RasterPage } from '../export/flatPlan';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
 import { Keypad } from '../ui/keypad';
@@ -1129,40 +1130,106 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     cancelConstruction();
     const outName = exportFileName(doc.name);
-    let touched = 0;
-    for (let n = 1; n <= doc.pages.length; n++) if (model.objects(n).length > 0) touched++;
+    // le pagine con oggetti, con le dimensioni reali del foglio mostrato (CropBox, /Rotate e UserUnit inclusi): le sole che "Appiattito" rasterizza
+    const rasterPages: RasterPage[] = [];
+    for (let n = 1; n <= doc.pages.length; n++) {
+      const info = doc.pages[n - 1];
+      if (info && model.objects(n).length > 0) rasterPages.push({ page: n, widthPt: info.widthPt, heightPt: info.heightPt });
+    }
     await showExportDialog({
       fileName: doc.name,
       outName,
       pageCount: doc.pages.length,
       objectCount: model.objectCount(),
-      pagesWithObjects: touched,
-      run: (onProgress) => generatePdf(doc, outName, onProgress),
+      pagesWithObjects: rasterPages.length,
+      rasterPages,
+      run: (choice, onProgress) => generatePdf(doc, outName, choice, onProgress),
     });
   }
 
-  /** Genera il PDF esportato (scrittura + controllo). Usata dal dialogo e, nel build di prova, dal gancio `runExport` delle misure di prestazione. */
-  async function generatePdf(doc: OpenedPdf, outName: string, onProgress: (done: number, total: number) => void, objectsPerTick?: number): Promise<ExportRunResult & { timing: { load: number; draw: number; save: number; verify: number } }> {
+  interface GenerateOptions {
+    /** Oggetti PDF per giro del salvataggio (predefinito di pdf-lib: 50). */
+    objectsPerTick?: number;
+    /** Solo "Appiattito": false = il PNG passa da `embedPng` di pdf-lib (misure). */
+    pngDirect?: boolean;
+    /** Solo "Appiattito": qualita' JPEG da 0 a 1 (predefinita `JPEG_QUALITY`). */
+    jpegQuality?: number;
+  }
+  type GenerateTiming = Record<string, number>;
+  /** Genera il PDF esportato (scrittura + controllo). Usata dal dialogo e, nel build di prova, dal gancio `runExport` delle misure. */
+  async function generatePdf(
+    doc: OpenedPdf,
+    outName: string,
+    choice: ExportChoice,
+    onProgress: (p: ExportProgress) => void,
+    options: GenerateOptions = {},
+  ): Promise<ExportRunResult & { timing: GenerateTiming; images?: { page: number; via: string; bytes: number; width: number; height: number }[] }> {
     const t0 = performance.now();
-    const [{ exportCoverSimple }, { verifyExport }] = await Promise.all([import('../export/coverSimple'), import('../export/verify')]);
+    const { verifyExport } = await import('../export/verify');
     const specs = doc.pages.map((p) => ({ view: p.view, rotate: p.rotate, userUnit: p.userUnit }));
     const pageObjects = (n: number): PageObject[] => [...model.objects(n)];
-    const res = await exportCoverSimple(
-      doc.bytes,
-      specs.map((spec, i) => ({ spec, objects: pageObjects(i + 1), scale: model.scale(i + 1) })),
-      { onProgress, objectsPerTick },
-    );
+    const exportPages = specs.map((spec, i) => ({ spec, objects: pageObjects(i + 1), scale: model.scale(i + 1) }));
+
+    if (choice.mode === 'simple') {
+      const { exportCoverSimple } = await import('../export/coverSimple');
+      const res = await exportCoverSimple(doc.bytes, exportPages, { onProgress: (done, total) => onProgress({ done, total }), objectsPerTick: options.objectsPerTick });
+      const check = await verifyExport(res.bytes, specs);
+      const file = makePdfFile(res.bytes, outName); // il File tiene i dati: i byte generati non servono piu'
+      return {
+        file,
+        mode: 'simple',
+        touchedPages: res.touchedPages,
+        pageCount: res.pageCount,
+        objectCount: res.objectCount,
+        warnings: res.warnings,
+        ms: performance.now() - t0,
+        verifiedPages: check.pageCount,
+        timing: { ...res.timing, verify: check.ms },
+      };
+    }
+
+    // "Appiattito": una pagina per volta (rasterizzazione, immagine nel PDF, canvas rilasciato), poi pulizia del vecchio contenuto
+    const [{ exportFlattened }, { rasterizePage }] = await Promise.all([import('../export/flatten'), import('../export/rasterize')]);
+    const quality = options.jpegQuality ?? JPEG_QUALITY;
+    let res: Awaited<ReturnType<typeof exportFlattened>>;
+    try {
+      res = await exportFlattened(
+        doc.bytes,
+        exportPages,
+        async (i) => {
+          const no = i + 1;
+          const info = doc.pages[i] as PageInfo;
+          const page = await doc.doc.getPage(no);
+          try {
+            const items = buildDrawItems(pageObjects(no), new PageGeometry(specs[i] as PageSpec), model.scale(no));
+            return await rasterizePage({ pageNo: no, page, sheetWidthPt: info.widthPt, sheetHeightPt: info.heightPt, items, dpi: choice.dpi, format: choice.format, jpegQuality: quality });
+          } finally {
+            page.cleanup();
+          }
+        },
+        { onProgress: (p) => onProgress({ done: p.current, total: p.total, page: p.page, imageBytes: p.imageBytes }), objectsPerTick: options.objectsPerTick, pngDirect: options.pngDirect },
+      );
+    } finally {
+      void doc.doc.cleanup(); // libera le cache di immagini e font di PDF.js usate dalla rasterizzazione
+    }
     const check = await verifyExport(res.bytes, specs);
-    const file = makePdfFile(res.bytes, outName); // il File tiene i dati: i byte generati non servono piu'
+    const file = makePdfFile(res.bytes, outName);
     return {
       file,
-      touchedPages: res.touchedPages,
+      mode: 'flat',
+      dpi: choice.dpi,
+      format: choice.format,
+      touchedPages: res.flattenedPages,
       pageCount: res.pageCount,
       objectCount: res.objectCount,
       warnings: res.warnings,
       ms: performance.now() - t0,
       verifiedPages: check.pageCount,
+      imageBytes: res.imageBytes,
+      prunedObjects: res.pruned.deleted,
+      prunedBytes: res.pruned.freedBytes,
       timing: { ...res.timing, verify: check.ms },
+      images: res.images.map((im) => ({ page: im.page, via: im.via, bytes: im.bytes, width: im.width, height: im.height })),
     };
   }
 
@@ -1206,6 +1273,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // Gancio per le prove Chromium: presente solo nel build di prova (GTPDF_TEST=1), mai in quello pubblicato (la costante e' false e il blocco sparisce).
   if (__TEST_HOOKS__) {
+    let lastFile: File | null = null;
     const win = window as unknown as { __gtpdf?: unknown };
     win.__gtpdf = {
       /** Aggiunge oggetti (senza id) alla pagina con un comando annullabile, come fa l'interfaccia. */
@@ -1249,12 +1317,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       pages: () => pdf?.pages.map((p) => ({ ...p })) ?? [],
       sheet: () => viewer.sheetSize,
       objectCount: () => model.objectCount(),
-      /** Genera il PDF come fa il dialogo, senza interfaccia; restituisce tempi e dimensione (per scripts/perf-cp5a.cjs). */
-      runExport: async (objectsPerTick?: number) => {
+      /** Genera il PDF come fa il dialogo, senza interfaccia; restituisce tempi e dimensione (per scripts/perf-cp5a.cjs e scripts/measure-cp5b.cjs). */
+      runExport: async (opts: { mode?: 'simple' | 'flat'; dpi?: 150 | 300 | 600; format?: 'jpeg' | 'png'; objectsPerTick?: number; pngDirect?: boolean; jpegQuality?: number; keep?: boolean } = {}) => {
         if (!pdf) throw new Error('nessun documento');
         const t0 = performance.now();
-        const r = await generatePdf(pdf, exportFileName(pdf.name), () => undefined, objectsPerTick);
-        return { bytes: r.file.size, total: performance.now() - t0, ...r.timing, warnings: r.warnings.length, touchedPages: r.touchedPages, objectCount: r.objectCount };
+        const choice: ExportChoice = opts.mode === 'flat' ? { mode: 'flat', dpi: opts.dpi ?? 300, format: opts.format ?? 'jpeg' } : { mode: 'simple' };
+        const progress: ExportProgress[] = [];
+        const r = await generatePdf(pdf, exportFileName(pdf.name), choice, (p) => progress.push(p), { objectsPerTick: opts.objectsPerTick, pngDirect: opts.pngDirect, jpegQuality: opts.jpegQuality });
+        lastFile = opts.keep ? r.file : null;
+        return { bytes: r.file.size, total: performance.now() - t0, ...r.timing, warnings: r.warnings.map((w) => w.text), touchedPages: r.touchedPages, objectCount: r.objectCount, imageBytes: r.imageBytes ?? null, prunedObjects: r.prunedObjects ?? null, prunedBytes: r.prunedBytes ?? null, images: r.images ?? null, progress: progress.length };
+      },
+      /** L'ultimo file generato con `runExport({keep: true})`, in base64 (per confrontarlo fuori dalla pagina). */
+      lastExportBase64: async () => {
+        if (!lastFile) return null;
+        const b = new Uint8Array(await lastFile.arrayBuffer());
+        let s = '';
+        for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+        return btoa(s);
       },
       zoomTo: (z: number) => viewer.zoomTo(z),
       fit: () => viewer.fit(),

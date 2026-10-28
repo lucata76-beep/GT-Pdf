@@ -128,7 +128,7 @@ export async function exportFlattened(
         node = page.node;
       } catch (e) {
         if (e instanceof ExportError) throw e;
-        throw new ExportError('unreadable', `La pagina ${no} non e' leggibile dalla libreria di scrittura.`, e, no);
+        throw new ExportError('unreadable', `La pagina ${no} non è leggibile dalla libreria di scrittura.`, e, no);
       }
       const geom = new PageGeometry(input.spec as PageSpec);
 

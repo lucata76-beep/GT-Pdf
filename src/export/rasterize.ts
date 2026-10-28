@@ -79,16 +79,16 @@ export async function rasterizePage(req: RasterRequest, env: RasterEnv = browser
   try {
     canvas.width = px.w;
     canvas.height = px.h;
-    if (canvas.width !== px.w || canvas.height !== px.h) fail(`Il dispositivo non crea un'immagine di ${px.w} x ${px.h} px ${where}: il canvas e' stato ridotto a ${canvas.width} x ${canvas.height} px.`);
+    if (canvas.width !== px.w || canvas.height !== px.h) fail(`Il dispositivo non crea un'immagine di ${px.w} x ${px.h} px ${where}: il canvas è stato ridotto a ${canvas.width} x ${canvas.height} px.`);
     // alpha: false -> il PNG del canvas e' RGB (Chromium) e si puo' inserire senza decodificarlo (`flatImage`); il JPEG non ha trasparenza comunque
     const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return fail(`Il dispositivo non crea un'immagine di ${px.w} x ${px.h} px (${fmtInt(px.area)} px) ${where}: il canvas non e' disponibile.`);
+    if (!ctx) return fail(`Il dispositivo non crea un'immagine di ${px.w} x ${px.h} px (${fmtInt(px.area)} px) ${where}: il canvas non è disponibile.`);
 
     // Ultimo pixel (decisione 4): sopra il limite iOS non da' errori, il canvas e' solo vuoto
     const probe = checkLastPixel(ctx, px.w, px.h);
     if (!probe.ok) {
-      const what = probe.error ? `la lettura e' fallita (${probe.error})` : `il pixel scritto si rilegge come (${probe.read.join(', ')}) invece che come scritto`;
-      fail(`Il dispositivo non ha memoria per un'immagine di ${px.w} x ${px.h} px (${fmtInt(px.area)} px) ${where}: l'ultimo pixel non e' confermato, ${what}.`);
+      const what = probe.error ? `la lettura è fallita (${probe.error})` : `il pixel scritto si rilegge come (${probe.read.join(', ')}) invece che come scritto`;
+      fail(`Il dispositivo non ha memoria per un'immagine di ${px.w} x ${px.h} px (${fmtInt(px.area)} px) ${where}: l'ultimo pixel non è confermato, ${what}.`);
     }
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, px.w, px.h);
