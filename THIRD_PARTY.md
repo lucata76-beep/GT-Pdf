@@ -1,6 +1,7 @@
 # Componenti di terze parti
 
 Versioni e licenze verificate il 26/10/2026 sul registro npm e sui file LICENSE dei pacchetti.
+Ricontrollate il 28/10/2026 (CP4.6) sul registro npm (versione piu' recente e campo `license`) e nei pacchetti installati: pdfjs-dist 6.4.299 (Apache-2.0), @cantoo/pdf-lib 2.11.1 (MIT), TypeScript 7.0.2 (Apache-2.0), Vite 8.3.5 (MIT), Vitest 5.0.5 (MIT), @fontsource/inter e @fontsource/jetbrains-mono 5.3.0 (OFL-1.1) sono ancora le versioni piu' recenti e le licenze non sono cambiate. Unica differenza: `lucide-static` e' alla 1.63.0 (ISC), il progetto usa le icone della 1.61.0 e non e' stato aggiornato. I testi dei file LICENSE non sono stati riletti: le versioni sono identiche a quelle del 26/10.
 I testi di licenza sono in `LICENSES/`. Nessun componente viene caricato da CDN.
 
 | Componente | Versione | Licenza | Dove |
