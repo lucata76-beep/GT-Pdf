@@ -550,7 +550,30 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     refreshStyleChip();
     renderInspector();
     renderConstruction();
+    revealTool(id); // per ultimo: la barra contestuale appena comparsa o sparita cambia l'altezza della palette
   }
+
+  /**
+   * La palette scorre (in orizzontale su iPhone in verticale, in verticale dove non c'e' altezza per tutte le voci):
+   * porta il pulsante dello strumento attivo tutto in vista, anche quando lo strumento e' scelto dal menu. Scrive
+   * scrollLeft/scrollTop, senza animazione; non fa nulla se la palette non si vede o il pulsante e' nascosto (Distanza su schermo stretto).
+   */
+  function revealTool(id: string): void {
+    const b = toolBtns.get(id);
+    if (!b || palette.clientWidth === 0) return;
+    const p = palette.getBoundingClientRect();
+    const r = b.getBoundingClientRect();
+    if (r.width === 0) return;
+    const cs = getComputedStyle(palette);
+    const padX = Number.parseFloat(cs.paddingLeft) || 0;
+    const padY = Number.parseFloat(cs.paddingTop) || 0;
+    if (r.left < p.left + padX) palette.scrollLeft += r.left - (p.left + padX);
+    else if (r.right > p.right - padX) palette.scrollLeft += r.right - (p.right - padX);
+    if (r.top < p.top + padY) palette.scrollTop += r.top - (p.top + padY);
+    else if (r.bottom > p.bottom - padY) palette.scrollTop += r.bottom - (p.bottom - padY);
+  }
+  // Se la palette cambia dimensione (barra contestuale che compare o va a capo, rotazione) lo strumento attivo resta tutto in vista.
+  new ResizeObserver(() => revealTool(tool)).observe(palette);
 
   /** Sceglie la forma della copertura (e passa allo strumento Copertura). */
   function selectCoverKind(k: CoverKind): void {

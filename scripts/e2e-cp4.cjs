@@ -805,6 +805,174 @@ async function landscapeSuite(browser) {
   await ctx.close();
 }
 
+
+// =====================================================================
+// Palette che scorre fino allo strumento attivo (anche scelto dal menu) e colonna sul foglio con Distanza solo icona.
+async function paletteAndColumnSuite(browser) {
+  for (const [w, h] of [[390, 780], [780, 390]]) {
+    section = `palette e colonna ${w}x${h}`;
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: IPHONE_UA });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    const sample = SAMPLES['A4 vettoriale'];
+    await openSample(page, 'A4 vettoriale');
+    const menu = async (top, item) => {
+      await page.getByRole('button', { name: top, exact: true }).click();
+      await page.getByRole('menuitem', { name: new RegExp(`^${item}`) }).click();
+      await page.waitForTimeout(150);
+    };
+    const active = () =>
+      page.evaluate(() => {
+        const pal = document.querySelector('.palette');
+        const p = pal.getBoundingClientRect();
+        const b = document.querySelector('.tool[aria-pressed="true"]');
+        const r = b.getBoundingClientRect();
+        return {
+          title: b.title,
+          ok: r.width > 0 && r.left >= p.left - 0.5 && r.right <= p.right + 0.5 && r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5,
+          btn: [r.left, r.right, r.top, r.bottom].map(Math.round),
+          bar: [p.left, p.right, p.top, p.bottom].map(Math.round),
+          sl: Math.round(pal.scrollLeft),
+          st: Math.round(pal.scrollTop),
+          overflowX: pal.scrollWidth > pal.clientWidth,
+          overflowY: pal.scrollHeight > pal.clientHeight,
+        };
+      });
+    const narrow = w < 720;
+    const first = await active();
+    info(`palette ${narrow ? 'orizzontale' : 'verticale'}: scorre ${narrow ? first.overflowX : first.overflowY}, barra ${JSON.stringify(first.bar)}`);
+    check('Palette: all\'inizio Sposta vista e\' attivo e tutto in vista', first.title === 'Sposta vista' && first.ok, JSON.stringify(first));
+    check('Palette: la barra scorre (non entrano tutte le voci)', narrow ? first.overflowX : first.overflowY);
+
+    // Con l'iPhone in orizzontale (altezza 390) il menu Inserisci esce dallo schermo e non scorre: le voci in fondo
+    // (Quota raggio R, le tre coperture, Cerchio) non si raggiungono dal menu. Si segnala; per quegli strumenti si
+    // attiva il pulsante dal codice della pagina (senza che il browser lo porti in vista da solo).
+    await page.getByRole('button', { name: 'Inserisci', exact: true }).click();
+    const offscreen = await page.evaluate(() => [...document.querySelectorAll('.menu-panel .menu-item')].filter((e) => e.getBoundingClientRect().bottom > innerHeight).map((e) => e.textContent.trim()));
+    await page.keyboard.press('Escape');
+    info(`menu Inserisci: voci sotto il bordo dello schermo e non raggiungibili: ${offscreen.length ? offscreen.join(', ') : 'nessuna'}`);
+    const jsTool = async (title) => {
+      await page.evaluate((t) => document.querySelector(`.palette .tool[title="${t}"]`).click(), title);
+      await page.waitForTimeout(150);
+    };
+    const seq = narrow
+      ? [
+          ['menu', 'Inserisci', 'Copertura rettangolare', 'Copertura'],
+          ['menu', 'Modifica', 'Seleziona / sposta', 'Seleziona'],
+          ['menu', 'Inserisci', 'Testo', 'Testo'],
+          ['menu', 'Inserisci', 'Quota allineata', 'Quota'],
+          ['menu', 'Modifica', 'Cancella', 'Cancella'],
+          ['menu', 'Inserisci', 'Retta', 'Retta'],
+          ['menu', 'Inserisci', 'Linea', 'Linea'],
+          ['menu', 'Inserisci', 'Copertura circolare', 'Copertura'],
+        ]
+      : [
+          ['js', '', 'Copertura', 'Copertura'],
+          ['menu', 'Modifica', 'Seleziona / sposta', 'Seleziona'],
+          ['menu', 'Inserisci', 'Testo', 'Testo'],
+          ['menu', 'Inserisci', 'Quota allineata', 'Quota'],
+          ['menu', 'Modifica', 'Cancella', 'Cancella'],
+          ['menu', 'Inserisci', 'Retta', 'Retta'],
+          ['menu', 'Inserisci', 'Linea', 'Linea'],
+          ['js', '', 'Copertura', 'Copertura'],
+        ];
+    let prev = first;
+    for (const [via, top, item, title] of seq) {
+      if (via === 'menu') await menu(top, item);
+      else await jsTool(title);
+      const a = await active();
+      check(`${via === 'menu' ? `Dal menu ${top} > ${item}` : `Attivando ${title} senza che la barra sia gia' scorsa`}: ${title} e' attivo e il suo pulsante e' TUTTO in vista`, a.title === title && a.ok, JSON.stringify(a));
+      prev = a;
+    }
+    // la barra torna indietro quando lo strumento e' all'inizio
+    await menu('Modifica', 'Seleziona / sposta');
+    const back = await active();
+    const moved = narrow ? back.sl < prev.sl : back.st < prev.st;
+    check('Tornando a una voce vicina all\'inizio la barra scorre indietro', back.ok && moved, JSON.stringify({ prev, back }));
+    // Scala dal pulsante SCALA della barra di stato (non dal menu)
+    await page.locator('.st-scale-btn').click();
+    await page.waitForTimeout(150);
+    const sc = await active();
+    check('Dal pulsante SCALA della barra di stato: Scala attivo e tutto in vista', sc.title === 'Scala' && sc.ok, JSON.stringify(sc));
+    // cambiare strumento dalla palette resta tutto in vista (un pulsante tagliato si porta in vista)
+    await page.locator('button.tool[title="Sposta vista"]').click();
+    const pan = await active();
+    check('Sposta vista dalla palette: attivo e tutto in vista', pan.title === 'Sposta vista' && pan.ok, JSON.stringify(pan));
+    // Distanza dalla colonna sul foglio: su schermo stretto non c'e' in palette, nessun errore e la palette non si muove
+    const before = await active();
+    await page.locator('.float-zoom .float-dist').click();
+    await page.waitForTimeout(150);
+    const afterDist = await active();
+    if (narrow) check('Distanza dalla colonna (su schermo stretto non e\' in palette): la palette non si sposta e nessun errore', afterDist.sl === before.sl && afterDist.title === 'Distanza' && afterDist.btn.every((v) => v === 0) && errors.length === 0, JSON.stringify({ before, afterDist }));
+    else check('Distanza: attiva e tutta in vista nella palette', afterDist.title === 'Distanza' && afterDist.ok, JSON.stringify(afterDist));
+    await page.locator('button.tool[title="Sposta vista"]').click();
+
+    // --- Colonna sul foglio ---
+    const col = await page.evaluate(() => {
+      const f = document.querySelector('.float-zoom');
+      const fr = f.getBoundingClientRect();
+      const btns = [...f.querySelectorAll('.btn')].map((e) => {
+        const r = e.getBoundingClientRect();
+        return { n: e.getAttribute('aria-label'), w: +r.width.toFixed(1), h: +r.height.toFixed(1), text: e.innerText.trim(), title: e.title };
+      });
+      const c = document.querySelector('.viewer-stage canvas').getBoundingClientRect();
+      const v = document.querySelector('.viewer').getBoundingClientRect();
+      return { w: +fr.width.toFixed(1), h: +fr.height.toFixed(1), l: Math.round(fr.left), t: Math.round(fr.top), btns, page: { l: Math.round(c.left), t: Math.round(c.top), w: Math.round(c.width), h: Math.round(c.height) }, viewer: { l: Math.round(v.left), t: Math.round(v.top), r: Math.round(v.right), b: Math.round(v.bottom) } };
+    });
+    const dist = col.btns.find((b) => b.n === 'Distanza');
+    check('Colonna: Distanza e\' solo icona (nessun testo visibile) ma ha nome accessibile e titolo', dist && dist.text === '' && /^Distanza/.test(dist.title), JSON.stringify(dist));
+    check('Colonna: tutti i pulsanti >= 44 x 44 px', col.btns.length === 4 && col.btns.every((b) => b.w >= 43.5 && b.h >= 43.5), JSON.stringify(col.btns));
+    check('Colonna: i quattro pulsanti hanno la stessa larghezza (46 px)', col.btns.every((b) => Math.abs(b.w - col.btns[0].w) < 0.6) && col.btns[0].w <= 48, JSON.stringify(col.btns.map((b) => b.w)));
+    check(narrow ? 'Colonna in verticale: larga come un pulsante (<= 48 px) e alta 200 px' : 'Colonna in orizzontale (riga): alta come un pulsante e larga 4 pulsanti', narrow ? col.w <= 48 && near(col.h, 200, 2) : near(col.h, 44, 2) && col.w <= 4 * 48 + 3 * 8 + 2, JSON.stringify({ w: col.w, h: col.h }));
+    // Dove finisce un tocco sul foglio: griglia di punti della pagina visibile, e un tocco vero sotto la colonna
+    const grid = await page.evaluate(() => {
+      const c = document.querySelector('.viewer-stage canvas').getBoundingClientRect();
+      const v = document.querySelector('.viewer').getBoundingClientRect();
+      const x0 = Math.max(c.left, v.left);
+      const x1 = Math.min(c.right, v.right);
+      const y0 = Math.max(c.top, v.top);
+      const y1 = Math.min(c.bottom, v.bottom);
+      let n = 0;
+      let onBtn = 0;
+      for (let i = 0; i < 60; i++) {
+        for (let j = 0; j < 60; j++) {
+          const x = x0 + ((x1 - x0) * (i + 0.5)) / 60;
+          const y = y0 + ((y1 - y0) * (j + 0.5)) / 60;
+          n++;
+          if (document.elementFromPoint(x, y)?.closest('.float-zoom')) onBtn++;
+        }
+      }
+      return { n, onBtn, area: ((onBtn * 100) / n).toFixed(1) };
+    });
+    info(`colonna ${col.w}x${col.h} px a (${col.l},${col.t}); pagina visibile ${col.page.w}x${col.page.h}: ${grid.area}% dei punti del foglio cade sotto un pulsante (${grid.onBtn}/${grid.n})`);
+    if (grid.onBtn > 0) {
+      const target = await page.evaluate(() => {
+        const f = document.querySelector('.float-zoom').getBoundingClientRect();
+        const c = document.querySelector('.viewer-stage canvas').getBoundingClientRect();
+        // un punto della pagina dentro il riquadro di un pulsante
+        const btn = [...document.querySelectorAll('.float-zoom .btn')].map((e) => e.getBoundingClientRect()).find((r) => r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top);
+        return btn ? { x: (Math.max(btn.left, c.left) + Math.min(btn.right, c.right)) / 2, y: (Math.max(btn.top, c.top) + Math.min(btn.bottom, c.bottom)) / 2 } : null;
+      });
+      if (target) {
+        const cdp = await ctx.newCDPSession(page);
+        await page.evaluate(() => {
+          window.__hit = null;
+          document.addEventListener('pointerdown', (e) => (window.__hit = e.target.closest('.float-zoom .btn')?.getAttribute('aria-label') ?? 'foglio'), true);
+        });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: target.x, y: target.y, id: 1 }] });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await page.waitForTimeout(100);
+        info(`un tocco su un punto della pagina sotto la colonna (${Math.round(target.x)},${Math.round(target.y)}) arriva a: ${await page.evaluate(() => window.__hit)}`);
+      }
+    }
+    check(`Nessun errore in console (${w}x${h})`, errors.length === 0, errors.join(' | '));
+    await page.screenshot({ path: join(SHOTS, `palette-${w}x${h}.png`) });
+    await ctx.close();
+  }
+}
+
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch();
@@ -814,6 +982,7 @@ async function landscapeSuite(browser) {
     await rotateAndPagesSuite(browser, decoderPage);
     await touchSuite(browser, decoderPage);
     await landscapeSuite(browser);
+    await paletteAndColumnSuite(browser);
   } catch (e) {
     check('esecuzione senza eccezioni', false, e.stack || String(e));
   } finally {

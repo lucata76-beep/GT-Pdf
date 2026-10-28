@@ -557,11 +557,9 @@ body.app-mode {
   border-color: var(--cad-border);
   box-shadow: var(--shadow-2);
 }
-.float-zoom .float-dist {
-  align-self: flex-end;
-  padding: 0 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+/* Distanza solo icona (il nome resta in aria-label e title): cosi' la colonna e' larga come i pulsanti dello zoom (46 px) e copre meno foglio */
+.float-zoom .float-dist span:not(.icon) {
+  display: none;
 }
 .float-zoom .float-dist[aria-pressed='true'] {
   border-color: var(--cad-accent-stroke);
