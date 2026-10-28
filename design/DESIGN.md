@@ -253,6 +253,7 @@ Dialog Calibra scala
   - `foglio_mm = d_pt * 25.4 / 72`
   - `mm_reali_per_pt = L_reale_mm / d_pt`
   - scala 1:N con `N = L_reale_mm / foglio_mm` (esempio: 100 mm reali su 283.46 pt = 100 mm di foglio = 1:1)
+  - etichetta: N >= 1 (riduzione) `1:N`; N < 1 (ingrandimento) `M:1` con `M = 1 / N = foglio_mm / L_reale_mm` (N = 0.2234 -> `4.48:1`); max 2 decimali senza zeri finali, mai `1.00:1`. Solo testo: la scala (`mm_reali_per_pt`) e le misure non cambiano (decisione 18 di `docs/PIANO.md`).
 - Mai pixel di schermo: dipenderebbero dallo zoom. La scala e' per pagina.
 
 Barra contestuale e proprieta' della linea (CP2)
@@ -294,6 +295,7 @@ Menu
 - Inserisci: Linea (tipi di linea), Retta, Cerchio, Arco, Raccordo, Testo, Quota (allineata, orizzontale, verticale, diametro Ø, raggio R), Copertura bianca (rettangolo, quadrato, cerchio).
 - Zoom: zoom documento (separato da `A-` / `A+`).
 - Pulsante Distanza sempre raggiungibile.
+- Un menu piu' alto dello spazio sotto il pulsante (iPhone in orizzontale, `A+`) scorre in verticale: tutte le voci raggiungibili, voci >= 44 px sui dispositivi touch; se entra non cambia nulla (decisione 17).
 
 ## 7. Fuori dalla V1
 
@@ -305,5 +307,5 @@ Tolleranze (campi, classi), Livelli, funzioni CNC, stampa, account/registrazione
 - Separatore decimale: deciso il 27/10/2026: mostrato sempre ".", in digitazione la "," e' accettata e normalizzata a ".". Tasto segno meno per valori negativi: non serve nelle quote (valori positivi); aperto per il futuro.
 - Snap su Estremo e Punto medio: in V2 (decisione 27/10/2026), non in CP3.
 - Schermate non ancora disegnate: copia/duplica, menu aperti. Coperture, Seleziona, Cancella e i layout ABC e simboli sono stati realizzati in CP3-CP4 seguendo questo file.
-- Colonna di pulsanti sul foglio: copre ancora una striscia del foglio (12 % della larghezza a pagina intera, 390 x 780); l'eventuale pulsante apri/chiudi si decide dopo la prova su iPhone (decisione 16). Menu Inserisci piu' alto dello schermo con l'iPhone in orizzontale: da decidere.
+- Colonna di pulsanti sul foglio: copre ancora una striscia del foglio (12 % della larghezza a pagina intera, 390 x 780); l'eventuale pulsante apri/chiudi si decide dopo la prova su iPhone (decisione 16).
 - Layout iPhone definitivo da tarare su dispositivo.
