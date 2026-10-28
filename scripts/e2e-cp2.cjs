@@ -20,6 +20,11 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  [${section}] ${name}${detail && !ok ? `  -> ${detail}` : ''}`);
 };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+/** Dall'etichetta della scala ("1:N" per N >= 1, "M:1" per N < 1, CP4.6) al numero N = reale / foglio. */
+const labelN = (t) => {
+  const [a, b] = t.split(':').map(Number);
+  return a === 1 ? b : 1 / a;
+};
 
 // Pagine di prova: dimensioni del foglio mostrato in pt (CropBox e /Rotate applicati) e posizione del riferimento di 100 mm.
 // Il riferimento e' disegnato da scripts/make-test-pdfs.mjs: da (28, 62) a (28 + 100 mm, 62) nello spazio utente
@@ -190,12 +195,12 @@ async function mouseSuite(browser) {
   await page.locator('.dialog .dlg-fields input').fill('100,0');
   await page.locator('.dialog .dlg-fields input').dispatchEvent('change');
   check('Dialogo: "100,0" normalizzato a "100"', (await page.locator('.dialog .dlg-fields input').inputValue()) === '100');
-  check('Dialogo: scala calcolata mostrata con "."', /Nuova scala: 1:(0\.9\d|1(\.0\d)?)/.test(await page.locator('.dlg-calc').innerText()), await page.locator('.dlg-calc').innerText());
+  check('Dialogo: scala calcolata mostrata con "."', /Nuova scala: (1:(0\.9\d|1(\.0\d)?)|1(\.\d{1,2})?:1)/.test(await page.locator('.dlg-calc').innerText()), await page.locator('.dlg-calc').innerText());
   await page.locator('.dialog .btn.primary').click();
   await page.waitForSelector('.dialog', { state: 'detached' });
   const sc = await scaleText(page);
-  const n = Number(sc.replace('1:', ''));
-  check('Scala applicata ~1:1 (clic al pixel: tolleranza 2%)', sc.startsWith('1:') && near(n, 1, 0.02), sc);
+  const n = labelN(sc);
+  check('Scala applicata ~1:1 (clic al pixel: tolleranza 2%)', /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(sc) && near(n, 1, 0.02), sc);
 
   // --- Distanza con scala ---
   await tool(page, 'Distanza');
@@ -341,7 +346,7 @@ async function rotateCropSuite(browser) {
     await page.waitForSelector('.dialog');
     await calibrateWith(page, '100');
     await page.waitForSelector('.dialog', { state: 'detached' });
-    const n = Number((await scaleText(page)).replace('1:', ''));
+    const n = labelN(await scaleText(page));
     check(`${title}: calibrazione sul riferimento = ~1:1`, near(n, 1, 0.02), await scaleText(page));
     // 3. una retta disegnata sul riferimento sta sopra il tratto del PDF (stessa posizione nel foglio)
     await tool(page, 'Retta');
@@ -530,7 +535,7 @@ async function touchSuite(browser) {
   await page.locator('.dialog .btn.primary').tap();
   await page.waitForSelector('.dialog', { state: 'detached' });
   const sc = await scaleText(page);
-  check('Scala applicata dal tocco (virgola accettata): ~1:1.005', sc.startsWith('1:') && near(Number(sc.slice(2)), 1.005, 0.03), sc);
+  check('Scala applicata dal tocco (virgola accettata): ~1:1.005', /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(sc) && near(labelN(sc), 1.005, 0.03), sc);
 
   // --- Distanza dal pulsante fluttuante ---
   await page.locator('.float-dist').tap();
@@ -580,7 +585,7 @@ async function extraSuite(browser) {
   await page.locator('.dialog .dlg-fields input').press('Enter');
   await page.waitForSelector('.dialog', { state: 'detached' });
   const s1 = await scaleText(page);
-  check('Pagina 1: Invio nel campo conferma la scala (~1:1)', near(Number(s1.replace('1:', '')), 1, 0.02), s1);
+  check('Pagina 1: Invio nel campo conferma la scala (~1:1)', near(labelN(s1), 1, 0.02), s1);
   await tool(page, 'Retta');
   await clickAt(page, await toClient(page, a4, { x: 100, y: 100 }));
   await clickAt(page, await toClient(page, a4, { x: 300, y: 100 }));
@@ -599,7 +604,7 @@ async function extraSuite(browser) {
   await page.locator('.dialog .btn.primary').click();
   await page.waitForSelector('.dialog', { state: 'detached' });
   const s2 = await scaleText(page);
-  check('Pagina 2: scala ~1:2, indipendente dalla pagina 1', near(Number(s2.replace('1:', '')), 2, 0.05), s2);
+  check('Pagina 2: scala ~1:2, indipendente dalla pagina 1', near(labelN(s2), 2, 0.05), s2);
   await tool(page, 'Linea');
   for (const p of [{ x: 200, y: 200 }, { x: 400, y: 260 }, { x: 600, y: 200 }]) await clickAt(page, await toClient(page, a3, p));
   await page.keyboard.press('Enter');
@@ -619,7 +624,7 @@ async function extraSuite(browser) {
   check('Annulla: toglie la calibrazione della pagina 2', (await scaleText(page)) === 'non calibrata' && (await pageLabel()) === '2 / 3');
   await prev.click();
   await page.waitForTimeout(700);
-  check('Tornando alla pagina 1: scala e retta ci sono ancora', near(Number((await scaleText(page)).replace('1:', '')), 1, 0.02) && (await objects(page)).length === 1);
+  check('Tornando alla pagina 1: scala e retta ci sono ancora', near(labelN(await scaleText(page)), 1, 0.02) && (await objects(page)).length === 1);
   await next.click();
   await page.waitForTimeout(700);
   await undo.click(); // annulla la retta, che e' della pagina 1: l'app mostra la pagina 1

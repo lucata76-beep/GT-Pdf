@@ -23,6 +23,11 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  [${section}] ${name}${detail && !ok ? `  -> ${detail}` : ''}`);
 };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+/** Dall'etichetta della scala ("1:N" per N >= 1, "M:1" per N < 1, CP4.6) al numero N = reale / foglio. */
+const labelN = (t) => {
+  const [a, b] = t.split(':').map(Number);
+  return a === 1 ? b : 1 / a;
+};
 
 // Dimensioni del foglio mostrato (pt) e riferimento di 100 mm (stesso calcolo di e2e-cp2).
 const SAMPLES = {
@@ -258,7 +263,7 @@ async function mouseSuite(browser) {
 
   // --- Calibrazione e quote automatiche ---
   await calibrate(page, sample, tapSheet);
-  const scaleN = Number((await page.locator('.st-scale-btn').innerText()).replace('1:', ''));
+  const scaleN = labelN(await page.locator('.st-scale-btn').innerText());
   check('Scala ~1:1 dopo la calibrazione', near(scaleN, 1, 0.03), String(scaleN));
   const expectMm = (a, b) => mmOf(a, b) * (near(scaleN, 1, 0.03) ? scaleN : 1);
 

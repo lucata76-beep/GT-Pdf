@@ -20,7 +20,7 @@ export function calibrate(dPt: number, realMm: number): PageScale | null {
   return { mmPerPt: realMm / dPt };
 }
 
-/** Il numero N della scala 1:N. 1 = scala 1:1; 50 = 1:50; 0.5 = 1:0.5 (ingrandimento 2:1). */
+/** Il numero N = reale / foglio. 1 = 1:1; 50 = 1:50 (riduzione); 0.5 = ingrandimento 2:1 (vedi `scaleLabel`). */
 export const scaleN = (s: PageScale): number => s.mmPerPt / ptToMm(1);
 
 /** Lunghezza reale in mm di una distanza `dPt` sul foglio. */
@@ -32,5 +32,14 @@ export const ptForRealMm = (mm: number, s: PageScale): number => mm / s.mmPerPt;
 /** 100 mm sul foglio, in pt (riferimento dei PDF di prova). */
 export const REFERENCE_100MM_PT = mmToPt(100);
 
-/** Etichetta "1:N" (es. "1:50", "1:2.5", "1:0.5"), con "." come separatore decimale. */
-export const scaleLabel = (s: PageScale): string => `1:${fmtTrim(scaleN(s), 2)}`;
+/**
+ * Etichetta della scala, con "." come separatore decimale e al massimo 2 decimali (senza zeri finali).
+ * N >= 1 (riduzione): "1:N" ("1:50", "1:2.5", "1:1"). N < 1 (ingrandimento): "M:1" con M = 1 / N = foglio / reale
+ * ("4.48:1" per N = 0.2234, "2:1" per N = 0.5). Il confronto con 1 e' sul valore pieno; poi si arrotonda: un valore che
+ * arrotonda a 1 si scrive "1:1" da entrambe le parti (mai "1.00:1"). Solo testo: `PageScale`, quote e distanze usano
+ * `mmPerPt` e non cambiano.
+ */
+export const scaleLabel = (s: PageScale): string => {
+  const n = scaleN(s);
+  return n < 1 ? `${fmtTrim(1 / n, 2)}:1` : `1:${fmtTrim(n, 2)}`;
+};

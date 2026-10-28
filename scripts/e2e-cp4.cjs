@@ -1060,6 +1060,81 @@ async function menuScrollSuite(browser) {
   }
 }
 
+// =====================================================================
+// CP4.6 B) Etichetta della scala "M:1" per N < 1 (ingrandimento), "1:N" per N >= 1; quote e distanze non cambiano.
+async function scaleLabelSuite(browser) {
+  section = 'etichetta scala';
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  const sample = SAMPLES['A4 vettoriale'];
+  await openSample(page, 'A4 vettoriale');
+  const tapSheet = async (p) => {
+    const c = await toClient(page, sample, p);
+    await page.mouse.move(c.x, c.y);
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+  const labelN = (t) => {
+    const [a, b] = t.split(':').map(Number);
+    return a === 1 ? b : 1 / a;
+  };
+  const barLabel = () => page.locator('.st-scale-btn').innerText();
+  const inspScale = () => page.locator('.inspector .kv', { hasText: /^Scala/ }).locator('.v').innerText();
+  async function calibrateReal(real) {
+    await tool(page, 'Scala');
+    await tapSheet(sample.ref[0]);
+    await tapSheet(sample.ref[1]);
+    await page.waitForSelector('.dialog');
+    const current = await page.locator('.dialog .kv', { hasText: 'Scala attuale della pagina' }).locator('.v').innerText().catch(() => null);
+    await page.locator('.dialog .dlg-fields input').fill(real);
+    const live = await page.locator('.dlg-calc').innerText();
+    await page.locator('.dialog .btn.primary').click();
+    await page.waitForSelector('.dialog', { state: 'detached' });
+    return { current, live };
+  }
+
+  // segmento da 100 mm sul foglio; reale 25 mm -> ingrandimento 4:1
+  let r = await calibrateReal('25');
+  let bar = await barLabel();
+  info(`reale 25: dialogo "${r.live}", barra di stato "SCALA: ${bar}", inspector "${await inspScale()}", messaggio "${await status(page)}"`);
+  check('Reale 25 su 100 mm di foglio: il dialogo dice "Nuova scala: ~4:1"', /^Nuova scala: (3\.9\d|4|4\.0\d):1$/.test(r.live.trim()), r.live);
+  check('...la barra di stato dice "~4:1" (N = reale / foglio = 0.25)', /^(3\.9\d|4|4\.0\d):1$/.test(bar) && near(labelN(bar), 0.25, 0.01), bar);
+  check('...l\'inspector (Scala) mostra la stessa etichetta', (await inspScale()) === bar, await inspScale());
+  check('...il messaggio dice "Scala della pagina 1: ..." con la stessa etichetta', (await status(page)).includes(`Scala della pagina 1: ${bar}`), await status(page));
+  // quote e distanze non cambiano: la quota sul segmento di riferimento vale 25.00 mm (valore pieno, non dall'etichetta)
+  await tool(page, 'Distanza');
+  await tapSheet(sample.ref[0]);
+  await tapSheet(sample.ref[1]);
+  const badge = await page.locator('.measure-badge').innerText();
+  const L = Number((badge.match(/L\s+(\d+\.\d+)/) ?? [])[1]);
+  check('Distanza sul segmento da 100 mm con scala 4:1: L = 25 mm (la scala non e\' cambiata, solo il testo)', near(L, 25, 0.3), badge);
+  await tool(page, 'Quota');
+  await page.locator('.ctx-types button', { hasText: 'Orizz.' }).click();
+  await tapSheet(sample.ref[0]);
+  await tapSheet(sample.ref[1]);
+  await tapSheet({ x: 150, y: sample.ref[0].y - 40 });
+  const dimText = (await page.locator('.kp-display').innerText()).trim();
+  check('Quota orizzontale sullo stesso segmento: 25.xx mm', near(Number(dimText), 25, 0.3) && /^\d+\.\d\d$/.test(dimText), dimText);
+  await page.locator('.kp-cancel').click();
+
+  // ricalibrazione a 100 mm reali -> 1:1; il dialogo mostra anche la scala attuale con il nuovo formato
+  r = await calibrateReal('100');
+  bar = await barLabel();
+  check('Ricalibrando: "Scala attuale della pagina" nel dialogo usa il formato nuovo (4:1)', r.current !== null && /^(3\.9\d|4|4\.0\d):1$/.test(r.current), String(r.current));
+  check('Reale 100 su 100 mm: ~1:1', near(labelN(bar), 1, 0.02) && /^(1|1\.\d\d?):1$|^1:(1|1\.\d\d?|0\.\d\d?)$/.test(bar), bar);
+  info(`reale 100: barra di stato "SCALA: ${bar}"`);
+  r = await calibrateReal('200');
+  bar = await barLabel();
+  check('Reale 200 su 100 mm: ~1:2 (riduzione, formato 1:N)', /^1:(1\.9\d|2|2\.0\d)$/.test(bar), bar);
+  info(`reale 200: barra di stato "SCALA: ${bar}"`);
+  check('Nessun errore in console', errors.length === 0, errors.join(' | '));
+  await page.screenshot({ path: join(SHOTS, 'scala-label.png') });
+  await ctx.close();
+}
+
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch();
@@ -1071,6 +1146,7 @@ async function menuScrollSuite(browser) {
     await landscapeSuite(browser);
     await paletteAndColumnSuite(browser);
     await menuScrollSuite(browser);
+    await scaleLabelSuite(browser);
   } catch (e) {
     check('esecuzione senza eccezioni', false, e.stack || String(e));
   } finally {
