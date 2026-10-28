@@ -88,6 +88,8 @@ export function defaultDpi(plans: readonly DpiPlan[]): Dpi | null {
 }
 
 /**
- * Qualita' JPEG (0-1) di `canvas.toBlob('image/jpeg', q)`. Valore provvisorio: lo fissa la misura di 5b (docs/PIANO.md, "Misure per la decisione 5").
+ * Qualita' JPEG (0-1) di `canvas.toBlob('image/jpeg', q)`. 0.85, scelta con le misure di 5b (decisione 26 e "Misure per la decisione 5" in
+ * docs/PIANO.md): a 300 dpi il PSNR contro il PNG dello stesso canvas e' di 44.0 dB (vettoriale) e 42.2 dB (scansione di prova); da 0.85 a 0.95 il file
+ * cresce del 35 % (vettoriale) e del 48 % (scansione) per +1.5 e +2.5 dB. Misurato con l'encoder di Chromium: quello di Safari NON VERIFICATO.
  */
 export const JPEG_QUALITY = 0.85;
