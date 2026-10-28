@@ -1,22 +1,7 @@
 // Serie di prove di e2e-cp5a.cjs (separate per leggibilita'): ricevono gli strumenti dal file principale.
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
-
-/** Contenuto di una pagina sintetica (riquadro, cerchio, titolo in alto a sinistra) per le pagine create dalle prove. */
-function drawRaw(x0, y0, w, h) {
-  const cx = x0 + w / 2;
-  const cy = y0 + h * 0.58;
-  const r = Math.min(w, h) * 0.27;
-  const k = 0.5523 * r;
-  return [
-    `0.4 w ${x0 + 3} ${y0 + 3} ${w - 6} ${h - 6} re S`,
-    `${cx + r} ${cy} m ${cx + r} ${cy + k} ${cx + k} ${cy + r} ${cx} ${cy + r} c ${cx - k} ${cy + r} ${cx - r} ${cy + k} ${cx - r} ${cy} c ${cx - r} ${cy - k} ${cx - k} ${cy - r} ${cx} ${cy - r} c ${cx + k} ${cy - r} ${cx + r} ${cy - k} ${cx + r} ${cy} c S`,
-    `[4 2] 0 d ${cx - r * 1.1} ${cy} m ${cx + r * 1.1} ${cy} l S [] 0 d`,
-    `BT /F1 ${Math.max(5, h / 55)} Tf ${x0 + 8} ${y0 + h - 14} Td (TITOLO FITTIZIO SINTETICO) Tj ET`,
-    `BT /F1 ${Math.max(4, h / 70)} Tf ${x0 + 8} ${y0 + h - 24} Td (seconda riga del titolo) Tj ET`,
-    `BT /F1 ${Math.max(4, h / 70)} Tf ${x0 + 8} ${y0 + 12} Td (RIFERIMENTO FITTIZIO) Tj ET`,
-  ].join('\n');
-}
+const { drawRaw } = require('./export-specs.cjs');
 
 const INIT = `(() => {
   window.__share = { log: [], mode: 'ok', canShare: true, hasCanShare: true };
@@ -68,9 +53,9 @@ module.exports = async (t) => {
     await openDialog(page);
     const radios = await page.$$eval('.export-dialog input[type=radio]', (els) => els.map((e) => ({ v: e.value, checked: e.checked, disabled: e.disabled })));
     check('"Copertura semplice" e\' predefinita', radios.find((r) => r.v === 'simple')?.checked === true && radios.find((r) => r.v === 'simple')?.disabled === false, JSON.stringify(radios));
-    check('"Appiattito" e\' visibile ma disattivato', radios.find((r) => r.v === 'flat')?.disabled === true && radios.find((r) => r.v === 'flat')?.checked === false, JSON.stringify(radios));
+    check('"Appiattito" e\' visibile, ATTIVO dalla tappa 5b e non predefinito', radios.find((r) => r.v === 'flat')?.disabled === false && radios.find((r) => r.v === 'flat')?.checked === false, JSON.stringify(radios));
     const body = await text(dlg(page));
-    check('"Appiattito" porta l\'etichetta 5b', /Appiattito\s*5b/.test(body), body);
+    check('"Appiattito" non porta piu\' l\'etichetta 5b', !/Appiattito\s*5b/.test(body), body);
     check('descrizione di Copertura semplice: "Il testo sotto le coperture resta nel file."', body.includes('Il testo sotto le coperture resta nel file.'));
     check('descrizione di Appiattito: "Le pagine diventano immagini: il testo sotto sparisce."', body.includes('Le pagine diventano immagini: il testo sotto sparisce.'));
     check('riepilogo: nome file, nuovo file, pagine, oggetti, modalita\'', body.includes('File a4-vettoriale.pdf') && body.includes('Nuovo file a4-vettoriale-quotato.pdf') && body.includes('Pagine 1 (1 con oggetti)') && body.includes('Oggetti 2') && body.includes('Modalità Copertura semplice'), body);

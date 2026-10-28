@@ -28,4 +28,20 @@ function fullSpecs() {
   ];
 }
 
-module.exports = { fullSpecs };
+/** Contenuto di una pagina sintetica (riquadro, cerchio, titolo in alto a sinistra) per le pagine create dalle prove. */
+function drawRaw(x0, y0, w, h) {
+  const cx = x0 + w / 2;
+  const cy = y0 + h * 0.58;
+  const r = Math.min(w, h) * 0.27;
+  const k = 0.5523 * r;
+  return [
+    `0.4 w ${x0 + 3} ${y0 + 3} ${w - 6} ${h - 6} re S`,
+    `${cx + r} ${cy} m ${cx + r} ${cy + k} ${cx + k} ${cy + r} ${cx} ${cy + r} c ${cx - k} ${cy + r} ${cx - r} ${cy + k} ${cx - r} ${cy} c ${cx - r} ${cy - k} ${cx - k} ${cy - r} ${cx} ${cy - r} c ${cx + k} ${cy - r} ${cx + r} ${cy - k} ${cx + r} ${cy} c S`,
+    `[4 2] 0 d ${cx - r * 1.1} ${cy} m ${cx + r * 1.1} ${cy} l S [] 0 d`,
+    `BT /F1 ${Math.max(5, h / 55)} Tf ${x0 + 8} ${y0 + h - 14} Td (TITOLO FITTIZIO SINTETICO) Tj ET`,
+    `BT /F1 ${Math.max(4, h / 70)} Tf ${x0 + 8} ${y0 + h - 24} Td (seconda riga del titolo) Tj ET`,
+    `BT /F1 ${Math.max(4, h / 70)} Tf ${x0 + 8} ${y0 + 12} Td (RIFERIMENTO FITTIZIO) Tj ET`,
+  ].join('\n');
+}
+
+module.exports = { fullSpecs, drawRaw };
