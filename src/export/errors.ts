@@ -13,7 +13,9 @@ export type ExportErrorCode =
   /** Il file generato non supera il controllo di lettura. */
   | 'verify'
   /** Memoria esaurita. */
-  | 'memory';
+  | 'memory'
+  /** "Appiattito": il dispositivo non riesce a creare o codificare il canvas di una pagina (ultimo pixel non confermato, immagine nulla). */
+  | 'canvas';
 
 export class ExportError extends Error {
   readonly code: ExportErrorCode;
@@ -69,6 +71,12 @@ export function describeExportError(e: unknown): { title: string; message: strin
       };
     case 'mismatch':
       return { title: 'Esportazione annullata', message: `${err.message} Non scrivo nulla a occhi chiusi. ${safe}`, detail: technicalDetail(err) };
+    case 'canvas':
+      return {
+        title: 'Immagine troppo grande per questo dispositivo',
+        message: `${err.message} Scegli un DPI più basso e riprova. ${safe}`,
+        detail: technicalDetail(err),
+      };
     case 'memory':
       return { title: 'Memoria insufficiente', message: `Non c'è abbastanza memoria per esportare questo PDF su questo dispositivo. ${safe}`, detail: technicalDetail(err) };
     case 'verify':
