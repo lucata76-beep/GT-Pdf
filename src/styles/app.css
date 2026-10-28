@@ -248,6 +248,13 @@ body.app-mode {
   border: 1px solid var(--cad-border-strong);
   border-radius: var(--r);
   box-shadow: var(--shadow-3);
+  /* Piu' alto dello spazio sotto il pulsante: scorre in verticale (--menu-top la imposta menu.ts). Se entra, nulla cambia.
+     100vh prima come ripiego dove dvh non c'e'; dvh segue la barra di Safari. Le voci restano >= 44 px sui dispositivi touch. */
+  max-height: calc(100vh - var(--menu-top, 0px) - 0.5rem - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - var(--menu-top, 0px) - 0.5rem - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .menu-item {
   display: flex;

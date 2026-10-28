@@ -846,13 +846,12 @@ async function paletteAndColumnSuite(browser) {
     check('Palette: all\'inizio Sposta vista e\' attivo e tutto in vista', first.title === 'Sposta vista' && first.ok, JSON.stringify(first));
     check('Palette: la barra scorre (non entrano tutte le voci)', narrow ? first.overflowX : first.overflowY);
 
-    // Con l'iPhone in orizzontale (altezza 390) il menu Inserisci esce dallo schermo e non scorre: le voci in fondo
-    // (Quota raggio R, le tre coperture, Cerchio) non si raggiungono dal menu. Si segnala; per quegli strumenti si
-    // attiva il pulsante dal codice della pagina (senza che il browser lo porti in vista da solo).
+    // Con l'iPhone in orizzontale (altezza 390) le voci in fondo al menu Inserisci stanno sotto il bordo: il menu scorre (CP4.6).
+    // Il pulsante attivato dal codice della pagina (`jsTool`) prova lo scorrimento della palette senza che il browser lo porti in vista da solo.
     await page.getByRole('button', { name: 'Inserisci', exact: true }).click();
     const offscreen = await page.evaluate(() => [...document.querySelectorAll('.menu-panel .menu-item')].filter((e) => e.getBoundingClientRect().bottom > innerHeight).map((e) => e.textContent.trim()));
     await page.keyboard.press('Escape');
-    info(`menu Inserisci: voci sotto il bordo dello schermo e non raggiungibili: ${offscreen.length ? offscreen.join(', ') : 'nessuna'}`);
+    info(`menu Inserisci: voci sotto il bordo dello schermo (si raggiungono scorrendo il menu): ${offscreen.length ? offscreen.join(', ') : 'nessuna'}`);
     const jsTool = async (title) => {
       await page.evaluate((t) => document.querySelector(`.palette .tool[title="${t}"]`).click(), title);
       await page.waitForTimeout(150);
@@ -869,7 +868,7 @@ async function paletteAndColumnSuite(browser) {
           ['menu', 'Inserisci', 'Copertura circolare', 'Copertura'],
         ]
       : [
-          ['js', '', 'Copertura', 'Copertura'],
+          ['menu', 'Inserisci', 'Copertura rettangolare', 'Copertura'],
           ['menu', 'Modifica', 'Seleziona / sposta', 'Seleziona'],
           ['menu', 'Inserisci', 'Testo', 'Testo'],
           ['menu', 'Inserisci', 'Quota allineata', 'Quota'],
@@ -973,6 +972,94 @@ async function paletteAndColumnSuite(browser) {
   }
 }
 
+// =====================================================================
+// CP4.6 A) Menu con scorrimento verticale: nessuna voce resta sotto il bordo, bersagli touch >= 44 px, verticale invariato.
+async function menuScrollSuite(browser) {
+  const combos = [[780, 390], [844, 390], [932, 430], [390, 780]];
+  for (const [w, h] of combos) {
+    for (const aPlus of [false, true]) {
+      section = `menu ${w}x${h}${aPlus ? ' A+ al massimo' : ''}`;
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: IPHONE_UA });
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+      const cdp = await ctx.newCDPSession(page);
+      await openSample(page, 'A4 vettoriale');
+      if (aPlus) {
+        for (let i = 0; i < 6 && !(await page.locator('.size-btn').nth(1).isDisabled()); i++) await page.locator('.size-btn').nth(1).click();
+        check('A+ al massimo (22 px)', (await page.evaluate(() => document.documentElement.style.fontSize)) === '22px');
+      }
+      for (const name of ['File', 'Modifica', 'Inserisci', 'Zoom']) {
+        await page.getByRole('button', { name, exact: true }).click();
+        await page.waitForTimeout(80);
+        const m = await page.evaluate(() => {
+          const p = document.querySelector('.menu-panel');
+          const pr = p.getBoundingClientRect();
+          const items = [...p.querySelectorAll('.menu-item')];
+          const small = items.filter((e) => e.getBoundingClientRect().height < 43.5).map((e) => e.textContent.trim());
+          const unreachable = [];
+          for (const it of items) {
+            it.scrollIntoView({ block: 'nearest' });
+            const r = it.getBoundingClientRect();
+            const q = p.getBoundingClientRect();
+            if (r.top < q.top - 0.5 || r.bottom > q.bottom + 0.5) unreachable.push(it.textContent.trim());
+          }
+          p.scrollTop = 0;
+          return { top: pr.top, bottom: pr.bottom, innerH: innerHeight, n: items.length, scrollH: p.scrollHeight, clientH: p.clientHeight, overflow: p.scrollHeight > p.clientHeight, small, unreachable, itemH: items[0].getBoundingClientRect().height };
+        });
+        const tag = `${name}`;
+        info(`${tag}: ${m.n} voci, altezza ${m.clientH} su ${m.scrollH} px${m.overflow ? ' (scorre)' : ''}, voce da ${m.itemH.toFixed(1)} px, pannello ${Math.round(m.top)}-${Math.round(m.bottom)} su ${m.innerH}`);
+        check(`${tag}: il pannello sta nello schermo (fondo ${Math.round(m.bottom)} <= ${m.innerH})`, m.top >= 0 && m.bottom <= m.innerH + 0.5, JSON.stringify(m));
+        check(`${tag}: tutte le ${m.n} voci sono raggiungibili scorrendo`, m.unreachable.length === 0, m.unreachable.join(', '));
+        check(`${tag}: bersagli touch >= 44 px`, m.small.length === 0, m.small.join(', '));
+        if (!aPlus && w === 390 && h === 780 && name === 'Inserisci') check('Verticale invariato: il menu Inserisci entra intero (545 px, nessuno scorrimento)', !m.overflow && near(m.clientH, 545, 2), JSON.stringify(m));
+        if (!aPlus && w === 390) check(`${tag}: in verticale non scorre`, !m.overflow, JSON.stringify(m));
+        if (m.overflow) {
+          // scorrimento vero col dito: trascinamenti touch verso l'alto (CDP dispatchTouchEvent: `synthesizeScrollGesture` in questa emulazione non scorre il pannello, mentre il trascinamento e la rotella si), poi l'ultima voce attivabile si tocca
+          for (let i = 0; i < 10; i++) {
+            const d = await page.evaluate(() => {
+              const p = document.querySelector('.menu-panel');
+              const r = p.getBoundingClientRect();
+              return { x: r.left + r.width / 2, y: r.bottom - 14, span: Math.max(40, Math.min(r.height - 28, 220)), done: p.scrollTop >= p.scrollHeight - p.clientHeight - 1 };
+            });
+            if (d.done) break;
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: d.x, y: d.y, id: 1 }] });
+            for (let k = 1; k <= 8; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: d.x, y: d.y - (d.span * k) / 8, id: 1 }] });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await page.waitForTimeout(350);
+          }
+          const atEnd = await page.evaluate(() => {
+            const p = document.querySelector('.menu-panel');
+            const items = [...p.querySelectorAll('.menu-item')];
+            const last = items.at(-1).getBoundingClientRect();
+            const q = p.getBoundingClientRect();
+            return { st: Math.round(p.scrollTop), max: p.scrollHeight - p.clientHeight, lastIn: last.bottom <= q.bottom + 0.5 && last.top >= q.top - 0.5, pageScrolled: window.scrollY !== 0 || document.documentElement.scrollTop !== 0 };
+          });
+          check(`${tag}: trascinando col dito si arriva in fondo al menu e l'ultima voce e' tutta in vista`, atEnd.st >= atEnd.max - 1 && atEnd.lastIn && !atEnd.pageScrolled, JSON.stringify(atEnd));
+          if (name === 'Inserisci') {
+            const tap = await page.evaluate(() => {
+              const it = [...document.querySelectorAll('.menu-panel .menu-item')].find((e) => e.textContent.trim() === 'Copertura circolare');
+              const r = it.getBoundingClientRect();
+              return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: tap.x, y: tap.y, id: 1 }] });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await page.waitForTimeout(200);
+            check(`${tag}: toccando "Copertura circolare" in fondo al menu si attiva Copertura con la forma Cerchio`, (await page.locator('button.tool[aria-pressed="true"]').getAttribute('title')) === 'Copertura' && (await page.locator('.ctx-covers button[aria-pressed="true"]').innerText()) === 'Cerchio');
+            continue; // il menu si e' chiuso scegliendo
+          }
+        }
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(50);
+      }
+      check(`Nessun errore in console (${section})`, errors.length === 0, errors.join(' | '));
+      if (!aPlus && w === 780) await page.screenshot({ path: join(SHOTS, `menu-${w}x${h}.png`) });
+      await ctx.close();
+    }
+  }
+}
+
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch();
@@ -983,6 +1070,7 @@ async function paletteAndColumnSuite(browser) {
     await touchSuite(browser, decoderPage);
     await landscapeSuite(browser);
     await paletteAndColumnSuite(browser);
+    await menuScrollSuite(browser);
   } catch (e) {
     check('esecuzione senza eccezioni', false, e.stack || String(e));
   } finally {

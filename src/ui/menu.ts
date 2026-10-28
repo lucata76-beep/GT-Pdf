@@ -67,6 +67,8 @@ export function menuButton(label: string, items: () => MenuEntry[]): HTMLButtonE
     const w = panel.offsetWidth;
     panel.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - w - 4))}px`;
     panel.style.top = `${r.bottom + 2}px`;
+    // Il menu non esce dallo schermo: se e' piu' alto dello spazio sotto il pulsante (iPhone in orizzontale, A+) scorre (CSS .menu-panel).
+    panel.style.setProperty('--menu-top', `${r.bottom + 2}px`);
     btn.setAttribute('aria-expanded', 'true');
     document.addEventListener('pointerdown', onOutside, true);
     document.addEventListener('keydown', onKey, true);
