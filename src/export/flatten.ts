@@ -14,7 +14,7 @@ import { PageGeometry, type PageSpec } from '../geometry/page';
 import { type ExportPage, type ExportWarning, checkSamePage } from './coverSimple';
 import { ExportError, toExportError } from './errors';
 import { type EmbedVia, embedFlatImage } from './flatImage';
-import { PAGE_KEEP_KEYS, annotationRefs, pageGarbageCandidates, pruneOrphans, removeFormFields } from './prune';
+import { PAGE_KEEP_KEYS, annotationParentRefs, annotationRefs, pageGarbageCandidates, pruneOrphans, removeFormFields } from './prune';
 import type { RasterResult } from './rasterize';
 
 export type Matrix6 = readonly [number, number, number, number, number, number];
@@ -144,8 +144,10 @@ export async function exportFlattened(
       images.push({ page: no, via: emb.via, width: emb.width, height: emb.height, bytes: r.bytes.length, ms: r.ms });
 
       // 3) la pagina sul posto: prima si ricorda cio' che si toglie (per i campi e per gli orfani), poi si sostituisce
-      for (const ref of annotationRefs(node)) widgets.add(ref.tag);
-      const dropped: PDFObject[] = [];
+      const annots = annotationRefs(node);
+      for (const ref of annots) widgets.add(ref.tag);
+      const dropped: PDFObject[] = [...annotationParentRefs(doc.context, annots)]; // i campi padre dei widget (valore e nome) sono candidati come il resto
+
       for (const [k, v] of node.entries()) {
         if (PAGE_KEEP_KEYS.has(k.asString())) continue;
         dropped.push(v);

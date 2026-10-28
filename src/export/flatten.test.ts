@@ -65,6 +65,9 @@ async function buildDoc(): Promise<Uint8Array> {
   return doc.save({ useObjectStreams: false });
 }
 
+/** Una stringa di pdf-lib per testo con BOM: esadecimale UTF-16BE (nome `/T` e valore `/V` dei campi di modulo). */
+const hex = (t: string): string => `feff${[...t].map((c) => c.charCodeAt(0).toString(16).padStart(4, '0')).join('')}`;
+
 const jpegRaster = (w = 600, h = 800): (() => Promise<RasterResult>) => async () => ({ kind: 'jpeg', bytes: fakeJpeg(w, h), width: w, height: h, ms: { render: 1, paint: 1, encode: 1 } });
 
 describe('flatImageMatrix: l\'immagine riempie l\'area visibile come la mostra PDF.js', () => {
@@ -129,9 +132,14 @@ describe('exportFlattened: pagine con oggetti sostituite, le altre intatte', () 
     const original = await buildDoc();
     const before = text(original);
     for (const marker of ['TESTO PRIVATO NASCOSTO', 'THUMB-PRIVATA-DELLA-PAGINA-DUE', 'DATI PRIVATI DELL APP', 'esempio.invalid/PRIVATO']) expect(before, marker).toContain(marker);
+    // nome e valore di un campo di modulo li scrive pdf-lib come stringhe esadecimali UTF-16BE (con BOM): il campo e' un oggetto padre del widget, non raggiungibile da lui
+    for (const value of ['Mario Rossi', 'campo2', 'Luigi Verdi', 'campo1']) expect(before.toLowerCase(), value).toContain(hex(value));
     const r = await exportFlattened(original, exportPages([0, 1, 0]), jpegRaster(), {});
     const after = text(r.bytes);
     for (const marker of ['TESTO PRIVATO NASCOSTO', 'THUMB-PRIVATA-DELLA-PAGINA-DUE', 'DATI PRIVATI DELL APP', 'esempio.invalid/PRIVATO']) expect(after, marker).not.toContain(marker);
+    // il campo della pagina appiattita (valore e nome) non resta, nemmeno come oggetto orfano; quello della pagina 1 resta
+    for (const value of ['Mario Rossi', 'campo2']) expect(after.toLowerCase(), value).not.toContain(hex(value));
+    for (const value of ['Luigi Verdi', 'campo1']) expect(after.toLowerCase(), value).toContain(hex(value));
     // le pagine 1 e 3 conservano tutto
     expect(after).toContain('CONTENUTO PAGINA UNO');
     expect(after).toContain('CONTENUTO PAGINA TRE');
@@ -154,6 +162,17 @@ describe('exportFlattened: pagine con oggetti sostituite, le altre intatte', () 
     const a2 = await (await pdf.getPage(2)).getAnnotations();
     expect(a1.map((a) => a.fieldName)).toEqual(['campo1']);
     expect(a2).toEqual([]); // niente annotazioni, campi ne' collegamenti
+  });
+
+  it('un campo che ha il widget sulla pagina appiattita ma non e\' elencato in /AcroForm /Fields non resta nel file (valore e nome)', async () => {
+    const doc0 = await PDFDocument.load(await buildDoc());
+    doc0.catalog.lookup(PDFName.of('AcroForm'), PDFDict).set(PDFName.of('Fields'), doc0.context.obj([]));
+    const original = await doc0.save({ useObjectStreams: false });
+    expect(text(original).toLowerCase()).toContain(hex('Mario Rossi'));
+    const r = await exportFlattened(original, exportPages([0, 1, 0]), jpegRaster(), {});
+    const after = text(r.bytes).toLowerCase();
+    for (const value of ['Mario Rossi', 'campo2']) expect(after, value).not.toContain(hex(value));
+    expect(after).toContain(hex('Luigi Verdi')); // il campo della pagina 1 e' raggiunto dalla sua pagina
   });
 
   it('pagine senza oggetti: operatori e testi identici a quelli dell\'originale (anche se condividono font e immagine con la pagina appiattita)', async () => {

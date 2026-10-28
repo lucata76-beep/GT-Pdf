@@ -99,6 +99,25 @@ export interface PruneResult {
   skipped: 'invalid-objects' | null;
 }
 
+/**
+ * Campi "padre" dei widget indicati (catena di `/Parent`). Il valore `/V` e il nome `/T` di un campo stanno nel padre, che NON e' raggiungibile dal widget perche'
+ * `/Parent` non si segue (porterebbe a tutto il documento): senza questi candidati il testo compilato resterebbe nel file come oggetto orfano. Sono solo
+ * candidati: `pruneOrphans` elimina solo cio' che non e' piu' raggiungibile dalla radice (un campo con altri widget su pagine non appiattite resta).
+ */
+export function annotationParentRefs(context: PDFContext, annots: readonly PDFRef[]): PDFRef[] {
+  const out = new Map<string, PDFRef>();
+  for (const ref of annots) {
+    let cur: PDFObject | undefined = context.lookup(ref);
+    for (let depth = 0; depth < 32 && cur instanceof PDFDict; depth++) {
+      const parent: PDFObject | undefined = cur.get(PDFName.of('Parent'));
+      if (!(parent instanceof PDFRef) || out.has(parent.tag)) break;
+      out.set(parent.tag, parent);
+      cur = context.lookup(parent);
+    }
+  }
+  return [...out.values()];
+}
+
 /** Riferimenti raggiungibili dai valori che si stanno per togliere da una pagina (senza risalire ai padri). */
 export function pageGarbageCandidates(context: PDFContext, dropped: readonly PDFObject[]): Map<string, PDFRef> {
   return reachableRefs(context, dropped, BACK_REFS);
