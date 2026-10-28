@@ -276,7 +276,8 @@ Coperture e Seleziona (CP4)
 - Seleziona: un tocco sceglie l'oggetto **in primo piano** entro la tolleranza (22 px col dito, 10 col mouse, la stessa di Cancella; le coperture, sotto tutto, vincono solo se non c'e' altro a portata). Evidenziazione in `cad.measure`: alone di 5 px sulle linee, cornice di 1.5 px con velo leggero su testi, badge e coperture. La barra contestuale dice "Selezionata: Retta" (testo breve: la barra non deve cambiare altezza, altrimenti il foglio si ridimensiona sotto il dito).
 - Spostare: trascinare l'oggetto **selezionato** lo sposta (segue il dito, un solo comando annullabile); trascinare altrove sposta la vista. Un secondo dito durante il trascinamento annulla lo spostamento e passa al pinch. Una quota spostata trasla tutti i suoi punti; il valore automatico non cambia.
 - Proprieta' dell'oggetto selezionato: gli stessi controlli dei nuovi oggetti (inspector su desktop, riquadro con la linea in miniatura su iPhone) lavorano sull'oggetto selezionato: linee e quote tipo/colore/spessore, testi e quote altezza; ogni modifica e' annullabile. La copertura non ha proprieta' (nessun riquadro). Senza selezione i controlli valgono per i nuovi oggetti, come prima.
-- Palette: con Seleziona le voci visibili su iPhone sono 9 (Distanza sta nella colonna sul foglio) e la barra scorre in orizzontale; 9 voci da 44 pt non entrano nei 390 px.
+- Palette: con Seleziona le voci visibili su iPhone sono 9 (Distanza sta nella colonna sul foglio) e la barra scorre in orizzontale; 9 voci da 44 pt non entrano nei 390 px. Quando cambia lo strumento attivo (anche dal menu o dalla barra di stato) la barra scorre fino al pulsante attivo, che resta tutto in vista (decisione 15 di `docs/PIANO.md`).
+- Colonna sul foglio: Distanza solo icona (nome in `aria-label` e `title`), colonna larga come i pulsanti (46 px) (decisione 16).
 
 Dialog Esporta PDF
 - Predefinito: **Copertura semplice** - "Il testo sotto le coperture resta nel file."
@@ -304,5 +305,5 @@ Tolleranze (campi, classi), Livelli, funzioni CNC, stampa, account/registrazione
 - Separatore decimale: deciso il 27/10/2026: mostrato sempre ".", in digitazione la "," e' accettata e normalizzata a ".". Tasto segno meno per valori negativi: non serve nelle quote (valori positivi); aperto per il futuro.
 - Snap su Estremo e Punto medio: in V2 (decisione 27/10/2026), non in CP3.
 - Schermate non ancora disegnate: copia/duplica, menu aperti. Coperture, Seleziona, Cancella e i layout ABC e simboli sono stati realizzati in CP3-CP4 seguendo questo file.
-- Palette con 9 voci e colonna di pulsanti sul foglio (copre una striscia della pagina a pagina intera): proposte in `docs/PIANO.md` (CP4), da decidere dopo la prova su iPhone.
+- Colonna di pulsanti sul foglio: copre ancora una striscia del foglio (12 % della larghezza a pagina intera, 390 x 780); l'eventuale pulsante apri/chiudi si decide dopo la prova su iPhone (decisione 16). Menu Inserisci piu' alto dello schermo con l'iPhone in orizzontale: da decidere.
 - Layout iPhone definitivo da tarare su dispositivo.
