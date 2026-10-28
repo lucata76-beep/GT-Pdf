@@ -28,5 +28,10 @@
     "file": "misto-3-pagine.pdf",
     "titolo": "3 pagine miste",
     "note": "A4, A3, A4 ruotata"
+  },
+  {
+    "file": "a4-annotazioni.pdf",
+    "titolo": "A4 con annotazioni",
+    "note": "timbro, campo di testo, casella e collegamento fittizi (per Appiattito)"
   }
 ]

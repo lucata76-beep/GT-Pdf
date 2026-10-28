@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
-import { PDFDocument, StandardFonts, degrees, rgb } from '@cantoo/pdf-lib';
+import { PDFDocument, PDFString, StandardFonts, degrees, rgb } from '@cantoo/pdf-lib';
 
 const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'test-pdfs');
 mkdirSync(out, { recursive: true });
@@ -188,6 +188,36 @@ await scan();
   writeFileSync(join(out, 'misto-3-pagine.pdf'), await doc.save({ useObjectStreams: false }));
 }
 
+// Pagina con annotazioni FITTIZIE per provare "Appiattito" (5b): un timbro con aspetto proprio, un campo di testo compilato, una casella spuntata e un
+// collegamento sul titolo (https://example.com/, dominio riservato). Nell'esportazione appiattita timbro, campo e casella diventano parte dell'immagine e il collegamento sparisce.
+{
+  const doc = await newDoc();
+  const [font, bold] = await fonts(doc);
+  const page = doc.addPage(A4);
+  drawSheet(page, font, bold, { x: 0, y: 0, w: A4[0], h: A4[1] }, 'A4 con annotazioni fittizie: timbro, campo, casella, collegamento');
+  const ctx = doc.context;
+  const stampAp = ctx.register(
+    ctx.stream('1 0 0 RG 2 w 1 1 168 38 re S 1 0 0 rg BT /Helv 14 Tf 10 14 Td (TIMBRO FITTIZIO) Tj ET', {
+      Type: 'XObject',
+      Subtype: 'Form',
+      BBox: [0, 0, 170, 40],
+      Resources: { Font: { Helv: font.ref } },
+    }),
+  );
+  page.node.addAnnot(ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Stamp', Rect: [380, 760, 550, 800], AP: { N: stampAp }, F: 4, Contents: PDFString.of('Timbro fittizio') })));
+  page.node.addAnnot(
+    ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: [28, 795, 220, 810], Border: [0, 0, 0], F: 4, A: { Type: 'Action', S: 'URI', URI: PDFString.of('https://example.com/') } })),
+  );
+  const form = doc.getForm();
+  const field = form.createTextField('campo-prova');
+  field.setText('Campo compilato (fittizio)');
+  field.addToPage(page, { x: 28, y: 700, width: 220, height: 24, font });
+  const box = form.createCheckBox('casella-prova');
+  box.check();
+  box.addToPage(page, { x: 270, y: 700, width: 24, height: 24 });
+  writeFileSync(join(out, 'a4-annotazioni.pdf'), await doc.save({ useObjectStreams: false }));
+}
+
 const index = [
   { file: 'a4-vettoriale.pdf', titolo: 'A4 vettoriale', note: 'font standard non incorporati (prova gli asset di PDF.js)' },
   { file: 'a3-vettoriale.pdf', titolo: 'A3 vettoriale', note: 'pagina grande: 17.403.188 px a 300 dpi' },
@@ -195,6 +225,7 @@ const index = [
   { file: 'a4-cropbox.pdf', titolo: 'A4 con CropBox', note: 'area visibile 400 x 550 pt' },
   { file: 'a4-scansione.pdf', titolo: 'A4 scansione (immagine)', note: 'sola immagine in grigi, 150 dpi' },
   { file: 'misto-3-pagine.pdf', titolo: '3 pagine miste', note: 'A4, A3, A4 ruotata' },
+  { file: 'a4-annotazioni.pdf', titolo: 'A4 con annotazioni', note: 'timbro, campo di testo, casella e collegamento fittizi (per Appiattito)' },
 ];
 writeFileSync(join(out, 'index.json'), JSON.stringify(index, null, 2) + '\n');
 console.log('PDF di prova scritti in', out);
