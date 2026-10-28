@@ -220,7 +220,7 @@ const norm = (a: number, b: number): [number, number] => (a <= b ? [a, b] : [b, 
  * Confronta la pagina vista da PDF.js (quella dell'app, su cui sono salvati gli oggetti) con quella vista da pdf-lib (su cui si scrive):
  * stessa area visibile, stessa rotazione, stesso UserUnit. Se non coincidono gli oggetti finirebbero nel posto sbagliato.
  */
-function checkSamePage(page: PDFPage, spec: PageSpec, no: number): void {
+export function checkSamePage(page: PDFPage, spec: PageSpec, no: number): void {
   const media = page.getMediaBox();
   const crop = page.getCropBox();
   const [mx0, mx1] = norm(media.x, media.x + media.width);
