@@ -30,10 +30,7 @@ export class ExportError extends Error {
 
 /** Nome e messaggio originali (in inglese: vengono dalle librerie), accorciati: servono a chi deve riferire il problema. */
 export function technicalDetail(e: unknown): string {
-  let name = (e as { name?: string } | null)?.name ?? 'Errore';
-  // le librerie lanciano spesso `Error` semplici di una sottoclasse con nome proprio (es. PDFArrayIsNotRectangleError): il nome della classe dice di piu'
-  const ctor = (e as { constructor?: { name?: string } } | null)?.constructor?.name;
-  if (name === 'Error' && ctor && ctor !== 'Error') name = ctor;
+  const name = (e as { name?: string } | null)?.name ?? 'Errore';
   const msg = e instanceof Error ? e.message : String(e);
   const cause = (e as { cause?: unknown } | null)?.cause;
   const own = `${name}: ${msg}`;

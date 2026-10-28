@@ -167,7 +167,7 @@ export function showExportDialog(input: ExportDialogInput): Promise<void> {
           kv('Tempo', `${fmt(r.ms / 1000, 1)} s`),
         ),
         r.warnings.length > 0
-          ? h('div', { class: 'exp-warn', role: 'note' }, h('p', { class: 'exp-warn-h' }, plural(r.warnings.length, 'avviso', 'avvisi')), h('ul', null, ...r.warnings.map((w) => h('li', null, w.text))))
+          ? h('div', { class: 'exp-warn exp-warnings', role: 'note' }, h('p', { class: 'exp-warn-h' }, plural(r.warnings.length, 'avviso', 'avvisi')), h('ul', null, ...r.warnings.map((w) => h('li', null, w.text))))
           : null,
         avail.ok ? null : h('p', { id: 'exp-share-note', class: 'exp-warn exp-share-note', role: 'note' }, avail.reason),
         status,

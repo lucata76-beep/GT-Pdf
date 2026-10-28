@@ -498,7 +498,7 @@ describe('errori: PDF che PDF.js apre ma la libreria di scrittura legge male (tr
     expect((err as ExportError).code).toBe('unreadable');
     expect((err as ExportError).page).toBe(1);
     expect(describeExportError(err).message).toContain('(pagina 1)');
-    expect(describeExportError(err).detail).toContain('PDFArrayIsNotRectangleError');
+    expect(describeExportError(err).detail).toContain('Attempted to convert PDFArray with 3 elements to rectangle');
   });
 
   it('PDF.js e pdf-lib contano pagine diverse (Resources rotto): "mismatch" invece di perdere una pagina in silenzio', async () => {

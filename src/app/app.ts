@@ -3,12 +3,12 @@
 // nella sessione (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo, dimensionLabel } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
-import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf } from '../geometry/cover';
+import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
 import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
 import { fmt, fmtTrim } from '../geometry/numbers';
-import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
+import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { type Command, History } from '../model/history';
@@ -38,6 +38,7 @@ import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile } from '../export/deliver';
 import { exportFileName } from '../export/fileName';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
+import { describeOpenError } from '../pdf/openError';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
 import { showExportDialog } from '../ui/exportDialog';
@@ -82,6 +83,14 @@ const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' 
 const fem = (o: PageObject): 'o' | 'a' => (o.kind === 'text' ? 'o' : 'a');
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
 type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
+
+/** Descrizione di un oggetto per il gancio di prova (vedi `__gtpdf.addSpecs`). Solo tipi: nessun costo nel build pubblicato. */
+type Frac = [number, number];
+type HookSpec =
+  | { k: 'segment' | 'polyline'; pts: Frac[]; style?: Stroke['style']; color?: string; w?: number }
+  | { k: 'cover'; shape: CoverKind; a: Frac; b: Frac }
+  | { k: 'text'; at: Frac; text: string; pt?: number; color?: string }
+  | { k: 'dim'; dim: DimType; pts: Frac[]; value?: string | null; color?: string; w?: number; pt?: number };
 
 export interface AppOptions {
   openDiagnostics: () => void;
@@ -1180,12 +1189,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       window.setTimeout(() => viewer.fit(), 0); // dopo il layout definitivo (barre, tastiera, rotazione)
     } catch (e) {
       say('');
-      const msg = e instanceof Error ? e.message : String(e);
-      const named = (e as { name?: string } | null)?.name;
-      await showDialog({
-        title: 'Apertura non riuscita',
-        message: named === 'PasswordException' ? `${name}: il file richiede una password; i PDF protetti non sono previsti in questa versione.` : `${name}: ${msg}`,
-      });
+      const d = describeOpenError(name, e);
+      await showDialog({ title: 'Apertura non riuscita', message: `${d.message} (${d.detail})` });
     } finally {
       opening = false;
     }
@@ -1203,11 +1208,42 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       add: (page: number, objs: Omit<PageObject, 'id'>[]) => {
         for (const o of objs) history.exec(new AddObject(page, { ...o, id: model.newId() } as PageObject));
       },
+      /**
+       * Oggetti descritti con coordinate FRAZIONARIE (fx, fy) dell'area visibile della pagina nello spazio utente (origine in basso a sinistra,
+       * come il PDF non ruotato): la stessa descrizione vale per pagine di dimensione, /Rotate e CropBox diversi. Quote e quadrati si
+       * costruiscono con le stesse funzioni dell'interfaccia (buildDimension, squareUser).
+       */
+      addSpecs: (page: number, specs: HookSpec[]) => {
+        const info = pdf?.pages[page - 1];
+        if (!info) throw new Error(`pagina ${page} inesistente`);
+        const [x0, y0, x1, y1] = info.view;
+        const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+        const u = (f: [number, number]): UserPoint => ({ x: x0 + f[0] * (x1 - x0), y: y0 + f[1] * (y1 - y0) });
+        for (const sp of specs) {
+          let obj: PageObject | null = null;
+          if (sp.k === 'segment' || sp.k === 'polyline') {
+            obj = { id: model.newId(), kind: sp.k, points: sp.pts.map(u), stroke: { style: sp.style ?? 'solid', color: sp.color ?? '#D32F2F', widthPt: sp.w ?? 1 } };
+          } else if (sp.k === 'cover') {
+            const p1 = u(sp.a);
+            const p2 = sp.shape === 'square' ? squareUser(p1, u(sp.b), g) : u(sp.b);
+            obj = { id: model.newId(), kind: 'cover', shape: sp.shape, p1, p2 };
+          } else if (sp.k === 'text') {
+            obj = { id: model.newId(), kind: 'text', at: u(sp.at), text: sp.text, textPt: sp.pt ?? 10, color: sp.color ?? '#D32F2F' };
+          } else if (sp.k === 'dim') {
+            const def = buildDimension(sp.dim, sp.pts.map(u), g);
+            if (!def) throw new Error(`quota ${sp.dim} degenere`);
+            obj = { id: model.newId(), kind: 'dim', ...def, valueText: sp.value ?? null, color: sp.color ?? '#D32F2F', widthPt: sp.w ?? 1, textPt: sp.pt ?? 10 };
+          }
+          if (obj) history.exec(new AddObject(page, obj));
+        }
+      },
       setScale: (page: number, mmPerPt: number) => history.exec(new SetScale(page, model.scale(page), { mmPerPt })),
       goTo: (n: number) => goTo(n),
       /** I byte originali del PDF aperto (stesso Uint8Array dell'app: serve a provare che non cambiano). */
       originalBytes: () => pdf?.bytes ?? null,
       page: () => pageNo,
+      pages: () => pdf?.pages.map((p) => ({ ...p })) ?? [],
+      sheet: () => viewer.sheetSize,
       objectCount: () => model.objectCount(),
       zoomTo: (z: number) => viewer.zoomTo(z),
       fit: () => viewer.fit(),
