@@ -35,9 +35,12 @@ import {
 } from '../model/model';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
+import { makePdfFile } from '../export/deliver';
+import { exportFileName } from '../export/fileName';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
+import { showExportDialog } from '../ui/exportDialog';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
 import { Keypad } from '../ui/keypad';
@@ -219,8 +222,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   const fileMenu = (): MenuEntry[] => [
     { label: 'Apri…', onSelect: () => void openFlow() },
-    { label: 'Salva con nome…', hint: 'CP5', disabled: true },
-    { label: 'Esporta PDF…', hint: 'CP5', disabled: true },
+    { label: 'Salva con nome…', hint: '5c', disabled: true },
+    { label: 'Esporta PDF…', disabled: !pdf, onSelect: () => void exportFlow() },
     { label: 'Chiudi', disabled: !pdf, onSelect: () => void closeFlow() },
     'separator',
     { label: 'Diagnostica', onSelect: opts.openDiagnostics },
@@ -1096,7 +1099,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     void showDialog({
       title: 'Modifiche non salvate',
-      message: `Ci sono ${contentSummary()} (il salvataggio arriva in CP5). ${what}`,
+      message: `Ci sono ${contentSummary()} (il salvataggio del progetto arriva in 5c; Esporta PDF crea un nuovo file ma non salva il lavoro). ${what}`,
       confirmLabel: 'Procedi',
       cancelLabel: 'Annulla',
       onConfirm: action,
@@ -1109,6 +1112,45 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
   function closeFlow(): void {
     confirmDiscard('Chiudere il documento le scarta.', resetSession);
+  }
+
+  /**
+   * Esporta PDF (CP5a, "Copertura semplice"): il modulo di scrittura (pdf-lib, circa 580 kB) si carica solo qui. Il lavoro (oggetti,
+   * scala, cronologia) non viene toccato: un errore lascia tutto com'era. Il PDF si genera con "Esporta"; condividere o scaricare
+   * sono tocchi successivi (share() va chiamata dal tocco).
+   */
+  async function exportFlow(): Promise<void> {
+    const doc = pdf;
+    if (!doc) return;
+    if (entry) {
+      say('Conferma o annulla prima il testo o la quota in corso');
+      return;
+    }
+    cancelConstruction();
+    const outName = exportFileName(doc.name);
+    const pageObjects = (n: number): PageObject[] => [...model.objects(n)];
+    let touched = 0;
+    for (let n = 1; n <= doc.pages.length; n++) if (model.objects(n).length > 0) touched++;
+    await showExportDialog({
+      fileName: doc.name,
+      outName,
+      pageCount: doc.pages.length,
+      objectCount: model.objectCount(),
+      pagesWithObjects: touched,
+      run: async (onProgress) => {
+        const t0 = performance.now();
+        const [{ exportCoverSimple }, { verifyExport }] = await Promise.all([import('../export/coverSimple'), import('../export/verify')]);
+        const specs = doc.pages.map((p) => ({ view: p.view, rotate: p.rotate, userUnit: p.userUnit }));
+        const res = await exportCoverSimple(
+          doc.bytes,
+          specs.map((spec, i) => ({ spec, objects: pageObjects(i + 1), scale: model.scale(i + 1) })),
+          { onProgress },
+        );
+        const check = await verifyExport(res.bytes, specs);
+        const file = makePdfFile(res.bytes, outName); // il File tiene i dati: i byte generati non servono piu'
+        return { file, touchedPages: res.touchedPages, pageCount: res.pageCount, objectCount: res.objectCount, warnings: res.warnings, ms: performance.now() - t0, verifiedPages: check.pageCount };
+      },
+    });
   }
 
   async function loadFile(f: File): Promise<void> {
@@ -1152,4 +1194,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   updateChrome();
   renderConstruction();
   viewer.setMode('pan');
+
+  // Gancio per le prove Chromium: presente solo nel build di prova (GTPDF_TEST=1), mai in quello pubblicato (la costante e' false e il blocco sparisce).
+  if (__TEST_HOOKS__) {
+    const win = window as unknown as { __gtpdf?: unknown };
+    win.__gtpdf = {
+      /** Aggiunge oggetti (senza id) alla pagina con un comando annullabile, come fa l'interfaccia. */
+      add: (page: number, objs: Omit<PageObject, 'id'>[]) => {
+        for (const o of objs) history.exec(new AddObject(page, { ...o, id: model.newId() } as PageObject));
+      },
+      setScale: (page: number, mmPerPt: number) => history.exec(new SetScale(page, model.scale(page), { mmPerPt })),
+      goTo: (n: number) => goTo(n),
+      /** I byte originali del PDF aperto (stesso Uint8Array dell'app: serve a provare che non cambiano). */
+      originalBytes: () => pdf?.bytes ?? null,
+      page: () => pageNo,
+      objectCount: () => model.objectCount(),
+      zoomTo: (z: number) => viewer.zoomTo(z),
+      fit: () => viewer.fit(),
+    };
+  }
 }

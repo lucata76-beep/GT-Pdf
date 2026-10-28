@@ -9,6 +9,8 @@ export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(buildId),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    // Gancio per le prove Chromium (scripts/e2e-cp5a.cjs): SOLO se si costruisce con GTPDF_TEST=1. Il build pubblicato non lo contiene.
+    __TEST_HOOKS__: JSON.stringify(process.env.GTPDF_TEST === '1'),
   },
   build: {
     target: 'safari16',

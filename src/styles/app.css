@@ -832,6 +832,130 @@ body.app-mode {
   gap: var(--gutter);
 }
 
+/* ---- Dialogo "Esporta PDF" (CP5a) ---- */
+.export-dialog {
+  width: min(28rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dialog-backdrop:has(.export-dialog) {
+  /* l'altezza e' quella visibile: con iPhone in orizzontale il dialogo scorre invece di uscire dallo schermo */
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+}
+.exp-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.exp-mode {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-start;
+  min-height: var(--touch);
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--cad-border);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.exp-mode input {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--cad-accent-fill);
+}
+.exp-mode-on {
+  border-color: var(--cad-accent-stroke);
+  box-shadow: inset 0 0 0 1px var(--cad-accent-stroke);
+}
+.exp-mode-off {
+  background: var(--cad-chrome);
+  color: var(--cad-text-disabled);
+  cursor: not-allowed;
+}
+.exp-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.exp-mode-name {
+  font-weight: 600;
+}
+.exp-mode-desc {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--cad-text-secondary);
+}
+.exp-mode-off .exp-mode-desc {
+  color: var(--cad-text-disabled);
+}
+.exp-tag {
+  margin-left: 0.5rem;
+  padding: 0 0.375rem;
+  background: var(--cad-toolbar);
+  border: 1px solid var(--cad-border);
+  border-radius: var(--r-sm);
+  font: 700 0.625rem/1rem var(--font-ui);
+  letter-spacing: 0.06em;
+}
+.exp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem;
+  background: var(--cad-chrome);
+  border: 1px solid var(--cad-border);
+  border-radius: var(--r-sm);
+}
+.exp-progress {
+  width: 100%;
+  margin: 0 0 1rem;
+  accent-color: var(--cad-accent-fill);
+}
+.exp-warn {
+  margin: 0 0 0.75rem;
+  padding: 0.375rem 0.5rem;
+  background: var(--error-container);
+  color: var(--on-error-container);
+  border-radius: var(--r-sm);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  overflow-wrap: anywhere;
+}
+.exp-warn-h {
+  margin: 0 0 0.125rem;
+  font-weight: 700;
+}
+.exp-warn ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+.exp-status {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  overflow-wrap: anywhere;
+}
+.exp-status:empty {
+  display: none;
+}
+.exp-status[data-state='failed'] {
+  color: var(--on-error-container);
+}
+.exp-done-actions {
+  flex-wrap: wrap;
+}
+.exp-detail {
+  overflow-wrap: anywhere;
+  margin: 0 0 1rem;
+}
+
 /* Dialogo con un campo da compilare: sta in alto, cosi' la tastiera su schermo non lo copre */
 .dialog-backdrop.has-field {
   align-items: flex-start;
