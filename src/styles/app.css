@@ -836,6 +836,30 @@ body.app-mode {
   min-width: 3.5rem;
   text-align: center;
 }
+/* CP5e. Nei layout a piu' colonne (>= 720 px) intestazione e barra di stato restano su UNA riga, a qualunque larghezza: la loro altezza non deve dipendere
+   dalla larghezza a cui le dimensiona il browser. Sull'iPhone 14 Pro Max in orizzontale (Safari, commit 0fd1884) l'utente ha letto negli screenshot circa 128 pt
+   per l'intestazione e 81 per lo stato invece di 49 e 66: in Chromium le stesse altezze si hanno con gli stessi elementi forzati a circa 330 pt di larghezza
+   (con `wrap` vanno a capo), non a 814. La causa in Safari NON e' verificata; con `nowrap` l'altezza e' quella di una riga qualunque sia la larghezza
+   (provato in Chromium: scripts/e2e-cp5e.cjs). Cio' che non entra in una riga SCORRE in orizzontale, senza barra visibile (quella classica del desktop
+   sommerebbe la sua altezza): nessun pulsante e' tagliato senza una via d'uscita. .doc-name e .st-msg hanno min-width: 0 e ellissi, quindi cedono per primi. */
+@media (min-width: 720px) {
+  .bar,
+  .statusbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .bar::-webkit-scrollbar,
+  .statusbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* Un contenitore con overflow taglia anche il bordo di fuoco (2 px a 1 px dal pulsante) vicino al suo bordo: lo si disegna dentro il pulsante. */
+  .bar :focus-visible,
+  .statusbar :focus-visible {
+    outline-offset: -2px;
+  }
+}
 
 /* ---- Finestre di dialogo (livello 3) ---- */
 .dialog-backdrop {
