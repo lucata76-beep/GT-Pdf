@@ -1,4 +1,4 @@
-// Consegna del PDF esportato: "Condividi" (foglio di condivisione) e "Scarica" (salva in Download).
+// Consegna dei file che l'app produce (PDF esportato, progetto .json): "Condividi" (foglio di condivisione) e "Scarica" (salva in Download).
 //
 // Esito di CP0 (iPhone, Safari, iOS 27.2, dichiarato dall'utente): navigator.share() con un File riesce se chiamata subito dal tocco e
 // fallisce con NotAllowedError dopo 6 s; un blob application/octet-stream si salva in Download, application/pdf si apre senza salvare.
@@ -12,8 +12,15 @@
 
 type ShareNavigator = Pick<Navigator, 'share' | 'canShare'> | { share?: undefined; canShare?: undefined };
 
-/** Un File application/pdf con i byte generati (e' lui a tenere i dati: dopo si possono lasciar andare i byte). */
-export const makePdfFile = (bytes: Uint8Array, name: string): File => new File([bytes as BlobPart], name, { type: 'application/pdf' });
+/** Un File con i byte generati (e' lui a tenere i dati: dopo si possono lasciar andare i byte). */
+export const makeFile = (data: BlobPart, name: string, type: string): File => new File([data], name, { type });
+export const makePdfFile = (bytes: Uint8Array, name: string): File => makeFile(bytes as BlobPart, name, 'application/pdf');
+/**
+ * Il progetto (.json, 5c): `application/json` per Condividi. Che Safari lo accetti in `canShare({files})` e' NON VERIFICATO: gli elenchi dei tipi
+ * condivisibili (MDN, W3C Web Share) non erano raggiungibili dal sandbox e una ricerca web non ha confermato l'elenco di Safari; un resoconto
+ * secondario riferisce che con Chromium/Edge `application/json` dava "Permission denied". Si usa `canShare` come per il PDF: se e' falso il dialogo lo dice.
+ */
+export const makeProjectFile = (text: string, name: string): File => makeFile(text, name, 'application/json');
 
 export type ShareStatus = 'shared' | 'cancelled' | 'unavailable' | 'failed';
 export interface ShareOutcome {
@@ -25,7 +32,7 @@ export interface ShareOutcome {
 }
 
 /** Vero se il browser dice di poter condividere questo file; altrimenti il motivo, da mostrare all'utente. */
-export function shareAvailability(file: File, nav: ShareNavigator = navigator): { ok: true } | { ok: false; reason: string } {
+export function shareAvailability(file: File, nav: ShareNavigator = navigator, what = 'un file PDF'): { ok: true } | { ok: false; reason: string } {
   if (typeof nav.share !== 'function') return { ok: false, reason: 'Questo browser non ha navigator.share: usa "Scarica".' };
   if (typeof nav.canShare !== 'function') return { ok: false, reason: 'Questo browser non dice se può condividere file (navigator.canShare assente): "Condividi" non è utilizzabile, usa "Scarica".' };
   let can = false;
@@ -34,7 +41,7 @@ export function shareAvailability(file: File, nav: ShareNavigator = navigator): 
   } catch (e) {
     return { ok: false, reason: `Il browser non riesce a verificare la condivisione del file (canShare ha dato errore: ${(e as { name?: string })?.name ?? 'errore'}): usa "Scarica".` };
   }
-  return can ? { ok: true } : { ok: false, reason: 'Questo browser non può condividere un file PDF (canShare({files}) è falso): usa "Scarica".' };
+  return can ? { ok: true } : { ok: false, reason: `Questo browser non può condividere ${what} (canShare({files}) è falso): usa "Scarica".` };
 }
 
 const nameOf = (e: unknown): string => (e as { name?: string } | null)?.name ?? '';
@@ -43,8 +50,8 @@ const nameOf = (e: unknown): string => (e as { name?: string } | null)?.name ?? 
  * Apre il foglio di condivisione. DA CHIAMARE DIRETTAMENTE dal gestore del tocco (funzione non `async`: nessun `await` prima di share()).
  * La promessa non e' mai respinta: l'esito dice com'e' andata. L'annullamento del foglio (AbortError) NON e' un errore.
  */
-export function shareFile(file: File, nav: ShareNavigator = navigator): Promise<ShareOutcome> {
-  const avail = shareAvailability(file, nav);
+export function shareFile(file: File, nav: ShareNavigator = navigator, what = 'un file PDF'): Promise<ShareOutcome> {
+  const avail = shareAvailability(file, nav, what);
   if (!avail.ok) return Promise.resolve({ status: 'unavailable', message: avail.reason });
   let p: Promise<void>;
   try {
@@ -94,7 +101,8 @@ const browserEnv = (): DownloadEnv => ({
 });
 
 /**
- * Scarico via <a download> di un blob application/octet-stream (si salva in Download; application/pdf lo aprirebbe senza salvare).
+ * Scarico via <a download> di un blob application/octet-stream (si salva in Download; application/pdf lo aprirebbe senza salvare; per il .json il comportamento
+ * di Safari con application/json NON e' verificato: si usa octet-stream come per il PDF).
  * Il blob condivide i dati del File (nessuna copia). `release()` alla chiusura del dialogo: se uno scarico e' partito da poco si attende
  * RELEASE_DELAY_MS prima di revocare l'indirizzo, altrimenti si revoca subito; poi non resta nessun riferimento ai dati.
  */

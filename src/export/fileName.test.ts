@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportFileName } from './fileName';
+import { exportFileName, projectFileName } from './fileName';
 
 describe('exportFileName', () => {
   it('aggiunge -quotato prima di .pdf', () => {
@@ -39,5 +39,39 @@ describe('exportFileName', () => {
     const emoji = exportFileName(`${'😀'.repeat(200)}.pdf`);
     expect([...emoji].length).toBe(120 + '-quotato.pdf'.length);
     expect(emoji).not.toContain('�');
+  });
+});
+
+describe('projectFileName (5c, decisione 22): <nome del PDF senza .pdf>.json', () => {
+  it('toglie .pdf con qualunque maiuscola e aggiunge .json (senza -quotato)', () => {
+    expect(projectFileName('disegno.pdf')).toBe('disegno.json');
+    for (const ext of ['.PDF', '.Pdf', '.pDf', '.pdF']) expect(projectFileName(`Disegno${ext}`)).toBe('Disegno.json');
+  });
+  it('spazi, accenti e piu\' punti restano come sono', () => {
+    expect(projectFileName('Flangia rev 3.pdf')).toBe('Flangia rev 3.json');
+    expect(projectFileName('perché è così più.PDF')).toBe('perché è così più.json');
+    expect(projectFileName('flangia.rev.3.v2.pdf')).toBe('flangia.rev.3.v2.json');
+    expect(projectFileName('Tavola 12.A.pdf.PDF')).toBe('Tavola 12.A.pdf.json');
+  });
+  it('la forma Unicode scomposta (NFD, come i nomi di iOS) resta scomposta', () => {
+    const nfd = 'perché.pdf';
+    expect(nfd.normalize('NFC')).not.toBe(nfd);
+    expect(projectFileName(nfd)).toBe('perché.json');
+    expect(projectFileName(nfd).normalize('NFD')).toBe('perché.json');
+  });
+  it('un nome che finisce gia\' in ".JSON" (non e\' un PDF, ma succede) non perde l\'estensione: si aggiunge .json', () => {
+    expect(projectFileName('Progetto.JSON')).toBe('Progetto.JSON.json');
+    expect(projectFileName('x.json.pdf')).toBe('x.json.json');
+  });
+  it('"/" e "\\" e i caratteri di controllo si cambiano; nome vuoto -> documento.json; nomi lunghi si accorciano per code point', () => {
+    expect(projectFileName('a/b\\c.pdf')).toBe('a_b_c.json');
+    expect(projectFileName('a\u0007b.pdf')).toBe('ab.json');
+    expect(projectFileName('.pdf')).toBe('documento.json');
+    expect(projectFileName('   .pdf')).toBe('documento.json');
+    const long = projectFileName(`${'😀'.repeat(200)}.pdf`);
+    expect([...long.replace(/\.json$/, '')]).toHaveLength(120);
+  });
+  it('stesse regole di exportFileName: stesso nome base', () => {
+    for (const n of ['Disegno 1.pdf', 'perché.PDF', 'a.b.c.pdf', '.pdf']) expect(exportFileName(n).replace(/-quotato\.pdf$/, '')).toBe(projectFileName(n).replace(/\.json$/, ''));
   });
 });
