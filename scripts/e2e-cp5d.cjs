@@ -151,10 +151,12 @@ async function pointerSuite(browser) {
   const w = 844;
   const { ctx, page, cdp } = await phone(browser, w, 700, 4);
   await openSample(page);
-  await page.setViewportSize({ width: w, height: 326 }); // visore basso come nello screenshot dell'utente (circa 94 px), A+ al massimo
+  // Visore basso come nello screenshot dell'utente (circa 94 px), A+ al massimo. Era 326 px di altezza con 0fd1884 (intestazione 127.5 e stato 104.5 a 844 px con A+ 22);
+  // da CP5e l'intestazione non va piu' a capo a quella larghezza (67 e 82.5): per avere lo stesso visore la finestra e' alta 244 px.
+  await page.setViewportSize({ width: w, height: 244 });
   await page.waitForTimeout(800);
   const V = await page.evaluate(() => { const b = document.querySelector('.viewer').getBoundingClientRect(); const f = document.querySelector('.float-zoom').getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, f: { x: f.left, y: f.top, w: f.width, h: f.height } }; });
-  info(`visore ${Math.round(V.w)}x${Math.round(V.h)} px a ${w}x326, A+ 22 px; riga dei pulsanti sul foglio ${Math.round(V.f.w)}x${Math.round(V.f.h)} = ${(100 * (V.f.w * V.f.h)) / (V.w * V.h) > 0 ? ((100 * V.f.w * V.f.h) / (V.w * V.h)).toFixed(1) : 0} % dell'area del visore (${((100 * V.f.w) / V.w).toFixed(0)} % della larghezza, ${((100 * V.f.h) / V.h).toFixed(0)} % dell'altezza)`);
+  info(`visore ${Math.round(V.w)}x${Math.round(V.h)} px a ${w}x244, A+ 22 px; riga dei pulsanti sul foglio ${Math.round(V.f.w)}x${Math.round(V.f.h)} = ${(100 * (V.f.w * V.f.h)) / (V.w * V.h) > 0 ? ((100 * V.f.w * V.f.h) / (V.w * V.h)).toFixed(1) : 0} % dell'area del visore (${((100 * V.f.w) / V.w).toFixed(0)} % della larghezza, ${((100 * V.f.h) / V.h).toFixed(0)} % dell'altezza)`);
   check('il visore e\' basso come nello screenshot dell\'utente (tra 80 e 130 px)', V.h > 80 && V.h < 130, String(V.h));
   const cx = V.x + 150; // a sinistra dei pulsanti sul foglio
   const cy = V.y + V.h / 2;
