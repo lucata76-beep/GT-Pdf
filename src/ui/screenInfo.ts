@@ -39,7 +39,52 @@ const rectOf = (selector: string): string => {
   return `${f1(r.width)}x${f1(r.height)}`;
 };
 
-/** Righe di testo con lo stato dello schermo adesso. */
+/** Un riquadro verticale: da `top` a `bottom` (px). */
+export interface VBox {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Raggruppa riquadri in righe (CP5e): un riquadro entra nella riga precedente se comincia prima della sua fine (sovrapposizione verticale, 0.5 px di tolleranza).
+ * Non si contano i valori distinti di offsetTop: con `align-items: center` due figli sulla stessa riga ma di altezza diversa (logo 36 px, pulsante 44 px)
+ * hanno offsetTop diversi e verrebbero contati come due righe. Restituisce una riga per gruppo, dall'alto in basso.
+ */
+export function groupRows(boxes: readonly VBox[]): VBox[] {
+  const rows: VBox[] = [];
+  for (const r of [...boxes].sort((a, b) => a.top - b.top)) {
+    const last = rows[rows.length - 1];
+    if (last && r.top < last.bottom - 0.5) last.bottom = Math.max(last.bottom, r.bottom);
+    else rows.push({ top: r.top, bottom: r.bottom });
+  }
+  return rows;
+}
+
+/** Righe visive dei figli diretti di un elemento: quelli con altezza > 0 e nel flusso. Restituisce l'inizio di ogni riga in px dal bordo alto dell'elemento. */
+export function visualRows(el: Element): number[] {
+  const top = el.getBoundingClientRect().top;
+  const boxes = Array.from(el.children)
+    .filter((c) => {
+      const p = getComputedStyle(c).position;
+      return p !== 'absolute' && p !== 'fixed';
+    })
+    .map((c) => c.getBoundingClientRect())
+    .filter((r) => r.height > 0);
+  return groupRows(boxes).map((r) => r.top - top);
+}
+
+/** Una barra: altezza, padding su/giu' calcolati, righe visive e larghezza visibile contro larghezza del contenuto (se supera, la barra scorre o taglia). */
+const barLine = (name: string, selector: string): string => {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (!el) return `${name}: -`;
+  const cs = getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  if (cs.display === 'none' || r.height === 0) return `${name}: nascosta`;
+  const rows = visualRows(el);
+  return `${name}: alta ${f1(r.height)} · padding su/giu ${f1(parseFloat(cs.paddingTop) || 0)}/${f1(parseFloat(cs.paddingBottom) || 0)} · righe visive ${rows.length} [${rows.map(f1).join(', ')}] · larga ${f1(el.clientWidth)}, contenuto ${el.scrollWidth}`;
+};
+
+/** Righe di testo con lo stato dello schermo adesso. Le prime 7 righe non cambiano posto: la "Prova menu" di Diagnostica ne usa solo le prime 7. */
 export function screenLines(): string[] {
   const vv = window.visualViewport;
   const ins = safeAreaInsets();
@@ -54,5 +99,15 @@ export function screenLines(): string[] {
   lines.push(`pointer coarse: ${mq('(pointer: coarse)')} · any-pointer coarse: ${mq('(any-pointer: coarse)')} · hover none: ${mq('(hover: none)')} · max-height 500px: ${mq('(max-height: 500px)')} · min-width 900px: ${mq('(min-width: 900px)')}`);
   lines.push(`base ${getComputedStyle(document.documentElement).fontSize} · scorrimento pagina ${f1(window.scrollX)},${f1(window.scrollY)}`);
   lines.push(`barre (larg x alt): bar ${rectOf('.bar')} · visore ${rectOf('.viewer')} · lavoro ${rectOf('.work')} · contestuale ${rectOf('.ctxbar')} · stato ${rectOf('.statusbar')} · palette ${rectOf('.palette')} · pannello ${rectOf('.inspector')} · tastierino ${rectOf('.keypad')}`);
+  // CP5e. Griglia dell'editor: getComputedStyle(...).gridTemplateRows/Columns di un contenitore griglia restituisce il VALORE USATO, una misura in px per ogni
+  // traccia (CSS Grid, "Resolved Value of a Track Listing"; letto sul sorgente della specifica, non su Safari: li' NON VERIFICATO). Es. "49px 205px 0px 0px 66px".
+  const app = document.querySelector<HTMLElement>('.app');
+  if (app) {
+    const g = getComputedStyle(app);
+    lines.push(`griglia .app ${rectOf('.app')} · righe ${g.gridTemplateRows} · colonne ${g.gridTemplateColumns}`);
+    lines.push(barLine('intestazione .bar', '.bar'));
+    lines.push(barLine('stato .statusbar', '.statusbar'));
+    lines.push(barLine('contestuale .ctxbar', '.ctxbar'));
+  }
   return lines;
 }
