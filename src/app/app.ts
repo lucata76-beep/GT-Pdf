@@ -500,14 +500,24 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   });
   const emptyOpenBtn = h('button', { class: 'btn primary big', type: 'button', onclick: () => void openFlow() }, icon('folder-open'), 'Apri PDF…');
   const samples = h('div', { class: 'samples' });
+  // Il pannello scorre se non entra nel visore (CP5e); logo e testi stanno in un solo contenitore centrato con `margin: auto` (non taglia in alto), che in
+  // orizzontale su touch con poca altezza mette il logo accanto al resto (app.css).
   const emptyPanel = h(
     'div',
     { class: 'empty-panel' },
-    h('img', { class: 'empty-logo', src: assetUrl('brand/logo-empty-384.png'), width: 160, height: 160, alt: 'GT-Pdf' }),
-    h('p', { class: 'empty-title' }, 'Nessun documento aperto'),
-    emptyOpenBtn,
-    h('p', { class: 'hint' }, 'Il file resta su questo dispositivo: nulla viene inviato.'),
-    h('details', { class: 'samples-box' }, h('summary', null, 'PDF di prova (fittizi)'), samples),
+    h(
+      'div',
+      { class: 'empty-inner' },
+      h('img', { class: 'empty-logo', src: assetUrl('brand/logo-empty-384.png'), width: 160, height: 160, alt: 'GT-Pdf' }),
+      h(
+        'div',
+        { class: 'empty-body' },
+        h('p', { class: 'empty-title' }, 'Nessun documento aperto'),
+        emptyOpenBtn,
+        h('p', { class: 'hint' }, 'Il file resta su questo dispositivo: nulla viene inviato.'),
+        h('details', { class: 'samples-box' }, h('summary', null, 'PDF di prova (fittizi)'), samples),
+      ),
+    ),
   );
   void fetch(new URL('test-pdfs/index.json', document.baseURI))
     .then((r) => {

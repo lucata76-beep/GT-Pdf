@@ -503,19 +503,35 @@ body.app-mode {
   font: 500 11px var(--font-mono);
 }
 
+/* Pannello "Nessun documento aperto" (CP5e): non esce mai da .work. Scorre se e' piu' alto; il contenitore interno sta al centro con `margin: auto` (con spazio
+   avanzo lo divide, senza spazio non va in negativo e non taglia in alto), non con `justify-content: safe center`: `safe` e' in Safari dalla 17.6 (BCD,
+   css/properties/justify-content.json) e il build mira a safari16. */
 .empty-panel {
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--margin);
   padding: var(--margin);
+  overflow-y: auto;
   text-align: center;
 }
-.empty-panel > :not(.btn):not(.empty-logo) {
+.empty-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--margin);
   width: min(100%, 24rem);
+  margin: auto;
+}
+.empty-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--margin);
+  width: 100%;
+  min-width: 0;
+}
+.empty-body > :not(.btn) {
+  width: 100%;
 }
 .empty-title {
   margin: 0;
@@ -524,7 +540,7 @@ body.app-mode {
   font-weight: 600;
 }
 .btn.big {
-  min-height: 3rem;
+  min-height: max(3rem, var(--touch)); /* con A+ 14 px 3rem sono 42 px: sotto i 44 px del bersaglio di tocco (CP5e) */
   padding: 0 1.5rem;
   font-size: 1rem;
 }
@@ -547,6 +563,33 @@ body.app-mode {
   justify-content: center;
   gap: var(--gutter);
   padding-top: 0.25rem;
+}
+/* iPhone in orizzontale (touch, poca altezza): logo piu' piccolo accanto a titolo, pulsante, frase e PDF di prova; cosi' "Apri PDF…" e la frase sulla privacy
+   stanno nel visore anche con A+ normale. Con A+ grande il pannello scorre. */
+@media (pointer: coarse) and (max-height: 500px) {
+  .empty-inner {
+    flex-direction: row;
+    width: min(100%, 34rem);
+    gap: 1.25rem;
+    text-align: left;
+  }
+  .empty-logo {
+    flex: none;
+    width: 88px;
+    height: 88px;
+  }
+  .empty-body {
+    flex: 1 1 0;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .empty-body > .btn {
+    max-width: 100%;
+  }
+  .samples-box summary,
+  .samples {
+    justify-content: flex-start;
+  }
 }
 
 .float-zoom {
