@@ -181,6 +181,15 @@ async function pointerSuite(browser) {
   b = await view(page);
   check('due dita fanno pinch (lo zoom cresce) e la mappa si svuota', b.zoom > a.zoom * 2 && b.pointerIds.length === 0, `${a.zoom} -> ${b.zoom}`);
 
+  // il dito esce dal visore (basso: 94 px) mentre sposta: la cattura del puntatore lo fa continuare; anche partendo a 2 px dal bordo
+  a = await view(page);
+  await touch(cdp, 'touchStart', [[cx - 40, V.y + V.h - 2, 1]]);
+  for (let k = 1; k <= 8; k++) await touch(cdp, 'touchMove', [[cx - 40, V.y + V.h - 2 + (150 * k) / 8, 1]]);
+  await touch(cdp, 'touchEnd', []);
+  await page.waitForTimeout(80);
+  b = await view(page);
+  check('un dito che parte a 2 px dal bordo del visore ed esce (+150 px in basso, sulla barra di stato) continua a spostare la vista (cattura del puntatore)', Math.abs(b.ty - a.ty - 150) < 2 && b.zoom === a.zoom && b.pointerIds.length === 0, `ty ${a.ty.toFixed(1)} -> ${b.ty.toFixed(1)}, zoom ${a.zoom} -> ${b.zoom}`);
+
   // puntatore perso: il pointerup di un dito non arriva
   await touch(cdp, 'touchStart', [[cx - 40, cy, 1]]);
   const id1 = (await view(page)).pointerIds[0];
