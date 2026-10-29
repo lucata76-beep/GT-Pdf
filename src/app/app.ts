@@ -1,6 +1,7 @@
 // Guscio dell'app (CP4): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
 // Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella. Oggetti e scala sono in memoria
-// nella sessione (nessun salvataggio fino a CP5), nello spazio utente PDF. Ogni modifica passa da un comando (annulla/ripeti).
+// nella sessione, nello spazio utente PDF; si salvano in un file progetto (.json) con File > Salva con nome e si riaprono con File > Apri progetto.
+// Ogni modifica passa da un comando (annulla/ripeti).
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
@@ -36,13 +37,20 @@ import {
 import { type DrawItem, buildDrawItems, objectLayoutFor, sheetLine } from '../model/scene';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
-import { makePdfFile } from '../export/deliver';
-import { exportFileName } from '../export/fileName';
+import { makePdfFile, makeProjectFile } from '../export/deliver';
+import { exportFileName, projectFileName } from '../export/fileName';
 import { type OpenedPdf, type PageInfo, closePdf, openPdf } from '../pdf/loader';
 import { describeOpenError } from '../pdf/openError';
+import { LIMITS, type Project, parseProject, serializeProject, verifyProjectText } from '../project/format';
+import { sha256Hex } from '../project/hash';
+import { comparePageGeometry, decideOutcome } from '../project/match';
+import { SavedMark } from '../project/saved';
+import { applyProject, snapshotProject, summarize } from '../project/session';
 import { askRealDistance } from '../ui/calibrateDialog';
 import { showDialog } from '../ui/dialog';
 import { type ExportChoice, type ExportProgress, type ExportRunResult, showExportDialog } from '../ui/exportDialog';
+import { type CheckedPdf, showOpenProjectDialog } from '../ui/openProjectDialog';
+import { type SaveRunResult, showSaveDialog } from '../ui/saveDialog';
 import { JPEG_QUALITY, type RasterPage } from '../export/flatPlan';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
@@ -103,6 +111,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let pageNo = 1;
   const model = new DocumentModel();
   const history = new History<DocumentModel>(model);
+  /** Modifiche non salvate: il modello e' cambiato dopo l'ultimo salvataggio del progetto o dopo l'apertura (5c). */
+  const saved = new SavedMark(() => model.version);
   let tool: ToolId = 'pan';
   let uiSize = loadUiSize();
   let opening = false;
@@ -232,7 +242,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   const fileMenu = (): MenuEntry[] => [
     { label: 'Apri…', onSelect: () => void openFlow() },
-    { label: 'Salva con nome…', hint: '5c', disabled: true },
+    { label: 'Apri progetto…', onSelect: () => void openProjectFlow() },
+    { label: 'Salva con nome…', disabled: !pdf, onSelect: () => void saveFlow() },
     { label: 'Esporta PDF…', disabled: !pdf, onSelect: () => void exportFlow() },
     { label: 'Chiudi', disabled: !pdf, onSelect: () => void closeFlow() },
     'separator',
@@ -1077,6 +1088,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     pageNo = 1;
     history.clear();
     model.clear();
+    saved.reset();
     selectTool('pan');
     void viewer.setPage(null);
     updateChrome();
@@ -1094,14 +1106,19 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return parts.join(' e ');
   };
 
+  /**
+   * Avvisa solo se ci sono modifiche DALL'ULTIMO SALVATAGGIO del progetto o dall'apertura (5c): `saved.dirty`. Si considera salvato quando share() si risolve o
+   * parte lo Scarica (non c'e' modo di sapere se il file e' davvero arrivato: NON VERIFICATO su iPhone). Esporta PDF non conta come salvataggio.
+   * Nessun avviso alla chiusura della scheda o della pagina: su iPhone `beforeunload` non e' affidabile (NON VERIFICATO).
+   */
   const confirmDiscard = (what: string, action: () => void): void => {
-    if (!model.hasContent) {
+    if (!(saved.dirty && model.hasContent)) {
       action();
       return;
     }
     void showDialog({
       title: 'Modifiche non salvate',
-      message: `Ci sono ${contentSummary()} (il salvataggio del progetto arriva in 5c; Esporta PDF crea un nuovo file ma non salva il lavoro). ${what}`,
+      message: `Ci sono modifiche dall'ultimo salvataggio del progetto o dall'apertura (ora: ${contentSummary()}). Usa File > Salva con nome per tenerle; Esporta PDF crea un nuovo file ma non salva il progetto. ${what}`,
       confirmLabel: 'Procedi',
       cancelLabel: 'Annulla',
       onConfirm: action,
@@ -1114,6 +1131,164 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
   function closeFlow(): void {
     confirmDiscard('Chiudere il documento le scarta.', resetSession);
+  }
+
+  // ---------- Progetto (.json): Salva con nome e Apri progetto (5c) ----------
+  const hashAvailable = (): boolean => typeof globalThis.crypto?.subtle?.digest === 'function';
+
+  /**
+   * Salva con nome: "Salva" genera il file progetto SENZA chiamare share; Condividi e Scarica sono tocchi successivi (come Esporta PDF).
+   * Il lavoro non si tocca. Si considera salvato alla consegna (`saved.markSaved`), vedi `confirmDiscard`.
+   */
+  async function saveFlow(): Promise<void> {
+    const doc = pdf;
+    if (!doc) return;
+    if (entry) {
+      say('Conferma o annulla prima il testo o la quota in corso');
+      return;
+    }
+    cancelConstruction();
+    const outName = projectFileName(doc.name);
+    let pagesWithObjects = 0;
+    for (let n = 1; n <= doc.pages.length; n++) if (model.objects(n).length > 0) pagesWithObjects++;
+    await showSaveDialog({
+      pdfName: doc.name,
+      outName,
+      pageCount: doc.pages.length,
+      pagesWithObjects,
+      objectCount: model.objectCount(),
+      scaleCount: model.scaleCount(),
+      hashAvailable: hashAvailable(),
+      run: () => generateProject(doc, outName),
+      onDelivered: (version) => saved.markSaved(version),
+    });
+  }
+
+  /** Genera il file progetto: impronta del PDF originale, scrittura a lista bianca, rilettura con lo stesso codice della riapertura. */
+  async function generateProject(doc: OpenedPdf, outName: string): Promise<SaveRunResult> {
+    const t0 = performance.now();
+    const th0 = performance.now();
+    const sha256 = await sha256Hex(doc.bytes); // i byte che l'app ha aperto, mai modificati
+    const hashMs = sha256 === null ? null : performance.now() - th0;
+    const version = model.version;
+    const project = snapshotProject(model, doc.pages, __BUILD_ID__, { name: doc.name, size: doc.bytes.length, sha256 });
+    const sum = summarize(project);
+    const text = serializeProject(project);
+    const problem = verifyProjectText(text, { pages: sum.pages, objects: sum.objects, scales: sum.scales });
+    if (problem !== null) throw new Error(`Il file generato non supera la rilettura: ${problem}`);
+    return { file: makeProjectFile(text, outName), version, pages: sum.pages, pagesWithObjects: sum.pagesWithObjects, objects: sum.objects, scales: sum.scales, hashed: sha256 !== null, hashMs, ms: performance.now() - t0 };
+  }
+
+  // Gli input file del progetto si creano alla prima richiesta (non esistono a riposo: l'input dei PDF resta l'unico) e vivono nel DOM come quello dei PDF.
+  let projectInput: HTMLInputElement | null = null;
+  let projectPdfInput: HTMLInputElement | null = null;
+  let onProjectPdf: ((f: File) => void) | null = null;
+  /** Apre il selettore del .json. Da chiamare dal gestore del tocco (direttamente o dal "Procedi" della conferma). */
+  const pickProject = (): void => {
+    if (!projectInput) {
+      const input = h('input', {
+        type: 'file',
+        accept: '.json,application/json',
+        class: 'file-hidden project-file',
+        tabindex: -1,
+        'aria-hidden': 'true',
+        onchange: () => {
+          const f = input.files?.[0];
+          input.value = '';
+          if (f) void handleProjectFile(f);
+        },
+      });
+      app.append(input);
+      projectInput = input;
+    }
+    projectInput.click();
+  };
+  /** Apre il selettore del PDF del secondo passo. Da chiamare SOLO dal gestore di un tocco nuovo (il pulsante "Scegli il PDF…"). */
+  const pickProjectPdf = (onPick: (f: File) => void): void => {
+    onProjectPdf = onPick;
+    if (!projectPdfInput) {
+      const input = h('input', {
+        type: 'file',
+        accept: 'application/pdf,.pdf',
+        class: 'file-hidden project-pdf-file',
+        tabindex: -1,
+        'aria-hidden': 'true',
+        onchange: () => {
+          const f = input.files?.[0];
+          input.value = '';
+          if (f) onProjectPdf?.(f);
+        },
+      });
+      app.append(input);
+      projectPdfInput = input;
+    }
+    projectPdfInput.click();
+  };
+
+  /** Apri progetto: il documento attuale resta com'e' finche' progetto e PDF non sono stati letti, controllati e confermati. */
+  function openProjectFlow(): void {
+    confirmDiscard('Aprire un progetto sostituisce il documento attuale.', pickProject);
+  }
+
+  async function handleProjectFile(f: File): Promise<void> {
+    const untouched = 'Il documento aperto non è stato toccato.';
+    if (f.size > LIMITS.fileBytes) {
+      await showDialog({ title: 'Progetto non valido', message: `${f.name}: il file è troppo grande (oltre ${LIMITS.fileBytes / 1024 / 1024} MB): non è un progetto di GT-Pdf. ${untouched}` });
+      return;
+    }
+    let text: string;
+    try {
+      text = await f.text();
+    } catch (e) {
+      await showDialog({ title: 'Lettura non riuscita', message: `${f.name}: ${e instanceof Error ? e.message : String(e)}. ${untouched}` });
+      return;
+    }
+    const parsed = parseProject(text);
+    if (!parsed.ok) {
+      await showDialog({ title: 'Progetto non valido', message: `${f.name}: ${parsed.error} ${untouched}` });
+      return;
+    }
+    const project = parsed.project;
+    await showOpenProjectDialog({
+      fileName: f.name,
+      pdfName: project.pdf.name,
+      pdfSize: project.pdf.size,
+      hasHash: project.pdf.sha256 !== null,
+      summary: summarize(project),
+      pickPdf: pickProjectPdf,
+      check: (file) => checkProjectPdf(file, project),
+      onOpened: (message) => say(message),
+    });
+  }
+
+  /** Apre il PDF scelto (senza installarlo) e lo confronta col progetto: stesso file, stessa geometria o altro. */
+  async function checkProjectPdf(file: File, project: Project): Promise<CheckedPdf> {
+    if (/\.json$/i.test(file.name) || file.type === 'application/json') throw new Error(`${file.name} è un file progetto (.json), non un PDF: scegli il PDF.`);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let next: OpenedPdf;
+    try {
+      next = await openPdf(file.name, bytes);
+    } catch (e) {
+      const d = describeOpenError(file.name, e);
+      throw new Error(`${d.message} (${d.detail})`);
+    }
+    const openedSha256 = await sha256Hex(bytes);
+    const outcome = decideOutcome({ savedSha256: project.pdf.sha256, openedSha256, geometry: comparePageGeometry(project.pages, next.pages) });
+    return {
+      outcome,
+      name: file.name,
+      size: file.size,
+      commit: async () => {
+        if (opening) throw new Error('Un altro file è in apertura: riprova tra un momento.');
+        opening = true;
+        try {
+          await installPdf(next, project);
+        } finally {
+          opening = false;
+        }
+      },
+      discard: () => void closePdf(next).catch(() => undefined),
+    };
   }
 
   /**
@@ -1236,11 +1411,31 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
 
   async function loadFile(f: File): Promise<void> {
+    if (/\.json$/i.test(f.name) || f.type === 'application/json') {
+      await showDialog({ title: 'Questo è un progetto', message: `${f.name} è un file progetto (.json), non un PDF. Per aprirlo usa File > Apri progetto…` });
+      return;
+    }
     try {
       await loadBytes(f.name, new Uint8Array(await f.arrayBuffer()));
     } catch (e) {
       await showDialog({ title: 'Apertura non riuscita', message: `${f.name}: ${e instanceof Error ? e.message : String(e)}` });
     }
+  }
+
+  /** Installa un PDF gia' aperto come documento della sessione, con gli oggetti e le scale di un progetto (o vuoto). Da qui in poi niente e' "non salvato". */
+  async function installPdf(next: OpenedPdf, project: Project | null): Promise<void> {
+    const prev = pdf;
+    cancelEntry();
+    pdf = next;
+    pageNo = 1;
+    history.clear();
+    model.clear();
+    if (project) applyProject(model, project);
+    saved.reset();
+    construction.reset();
+    if (prev) void closePdf(prev).catch(() => undefined);
+    await goTo(1);
+    window.setTimeout(() => viewer.fit(), 0); // dopo il layout definitivo (barre, tastiera, rotazione)
   }
 
   async function loadBytes(name: string, bytes: Uint8Array): Promise<void> {
@@ -1249,17 +1444,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     say(`Apertura di ${name}…`);
     try {
       const next = await openPdf(name, bytes);
-      const prev = pdf;
-      cancelEntry();
-      pdf = next;
-      pageNo = 1;
-      history.clear();
-      model.clear();
-      construction.reset();
-      if (prev) void closePdf(prev).catch(() => undefined);
-      await goTo(1);
+      await installPdf(next, null);
       say(`${name}: ${next.pages.length} ${next.pages.length === 1 ? 'pagina' : 'pagine'}, aperto in ${fmt(next.openMs, 0)} ms`);
-      window.setTimeout(() => viewer.fit(), 0); // dopo il layout definitivo (barre, tastiera, rotazione)
     } catch (e) {
       say('');
       const d = describeOpenError(name, e);
@@ -1339,6 +1525,35 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       },
       zoomTo: (z: number) => viewer.zoomTo(z),
       fit: () => viewer.fit(),
+      /**
+       * Stato del lavoro per confrontarlo prima e dopo un salvataggio e una riapertura: oggetti (copie JSON), scale, testi che le quote e i testi mostrano
+       * (valori automatici compresi), etichetta della scala, modifiche non salvate e versione del modello.
+       */
+      state: () => ({
+        dirty: saved.dirty,
+        version: model.version,
+        pages: (pdf?.pages ?? []).map((info, i) => {
+          const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+          const sc = model.scale(i + 1);
+          return {
+            scale: sc ? { mmPerPt: sc.mmPerPt } : null,
+            scaleLabel: sc ? scaleLabel(sc) : null,
+            objects: model.objects(i + 1).map((o) => JSON.parse(JSON.stringify(o)) as unknown),
+            texts: model.objects(i + 1).flatMap((o) => (o.kind === 'text' || o.kind === 'dim' ? [objectLayoutFor(o, g, sc).texts.map((t) => t.text)] : [])),
+          };
+        }),
+      }),
+      /** Il progetto che si salverebbe adesso (testo JSON), senza dialogo: per le misure di prestazioni. */
+      projectText: async () => {
+        if (!pdf) throw new Error('nessun documento');
+        const t0 = performance.now();
+        const sha = await sha256Hex(pdf.bytes);
+        const t1 = performance.now();
+        const text = serializeProject(snapshotProject(model, pdf.pages, __BUILD_ID__, { name: pdf.name, size: pdf.bytes.length, sha256: sha }));
+        const t2 = performance.now();
+        const ok = parseProject(text).ok;
+        return { text, hashMs: t1 - t0, writeMs: t2 - t1, readMs: performance.now() - t2, ok, hashed: sha !== null };
+      },
     };
   }
 }
