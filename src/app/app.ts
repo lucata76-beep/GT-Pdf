@@ -1527,6 +1527,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         return btoa(s);
       },
       zoomTo: (z: number) => viewer.zoomTo(z),
+      /** Zoom, spostamento e puntatori nella mappa del visore (prove di CP5d). */
+      view: () => viewer.debugState,
       fit: () => viewer.fit(),
       /**
        * Stato del lavoro per confrontarlo prima e dopo un salvataggio e una riapertura: oggetti (copie JSON), scale, testi che le quote e i testi mostrano

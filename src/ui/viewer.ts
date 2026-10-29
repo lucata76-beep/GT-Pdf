@@ -15,6 +15,7 @@ import type { PDFPageProxy, RenderTask } from '../pdf/loader';
 import { h } from './dom';
 import { Lens } from './lens';
 import { PointerLog } from './pointerLog';
+import { type TrackedPointer, strayTouchIds } from './strayPointers';
 import { type Badge, type DrawItem, SceneOverlay } from './overlay';
 
 export type { SheetPoint, UserPoint };
@@ -32,6 +33,8 @@ export interface ViewerStats {
   pointerLog: readonly string[];
   maxPointers: number;
   gestureEvents: number;
+  /** Quanti puntatori fantasma (mai terminati) il visore ha scartato: se e' > 0 un pointerup o un pointercancel era andato perso. */
+  strayDropped: number;
   pageZoom: number | null; // window.visualViewport.scale: deve restare 1 durante il pinch
   error: string | null;
 }
@@ -105,6 +108,9 @@ export class PdfViewer {
 
   private readonly pointers = new Map<number, Pt>();
   private readonly ptrLog = new PointerLog();
+  /** Tipo e istante dell'ultimo evento di ogni puntatore nella mappa: serve a riconoscere un tocco rimasto senza pointerup (vedi strayPointers.ts). */
+  private readonly seen = new Map<number, TrackedPointer>();
+  private strayDropped = 0;
   private maxPointers = 0;
   private gestureEvents = 0;
   private pinch: { dist: number; zoom: number; midX: number; midY: number; tx: number; ty: number } | null = null;
@@ -171,6 +177,12 @@ export class PdfViewer {
       else this.applyTransform();
     }).observe(this.el);
     window.visualViewport?.addEventListener('resize', () => this.queueStats());
+    // Con la pagina in secondo piano nessun dito e' piu' sul visore: un pointerup che non arriva piu' non deve lasciare tocchi nella mappa.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.dropAllPointers('pagina in secondo piano');
+    });
+    window.addEventListener('pagehide', () => this.dropAllPointers('pagehide'));
+    window.addEventListener('blur', () => this.dropAllPointers('finestra senza fuoco'));
   }
 
   get hasPage(): boolean {
@@ -368,6 +380,11 @@ export class PdfViewer {
     return this.geom?.contains(s) ?? false;
   }
 
+  /** Stato interno di zoom, spostamento e puntatori (per il gancio di prova e per le misure; non serve all'app). */
+  get debugState(): { zoom: number; tx: number; ty: number; atFit: boolean; pointerIds: number[]; pinching: boolean; mode: ViewerMode } {
+    return { zoom: this.zoom, tx: this.tx, ty: this.ty, atFit: this.atFit, pointerIds: [...this.pointers.keys()], pinching: this.pinch !== null, mode: this.mode };
+  }
+
   /** Geometria della pagina mostrata (spazio utente <-> foglio); null senza documento. */
   get geometry(): PageGeometry | null {
     return this.geom;
@@ -403,7 +420,10 @@ export class PdfViewer {
       /* puntatore gia' terminato: si prosegue senza cattura */
     }
     const pos = this.local(e);
+    // Un tocco primario non puo' coesistere con altri tocchi attivi: quelli ancora nella mappa e fermi da tempo hanno perso il loro pointerup.
+    for (const id of strayTouchIds(this.seen, e, performance.now())) this.forgetPointer(id, 'fantasma scartato');
     this.pointers.set(e.pointerId, pos);
+    this.seen.set(e.pointerId, { type: e.pointerType, lastSeen: performance.now() });
     this.logPointer('down', e);
     this.maxPointers = Math.max(this.maxPointers, this.pointers.size);
     const primary = !mousePan && this.pointers.size === 1;
@@ -442,6 +462,8 @@ export class PdfViewer {
       return;
     }
     this.pointers.set(e.pointerId, cur);
+    const tracked = this.seen.get(e.pointerId);
+    if (tracked) tracked.lastSeen = performance.now();
     this.reportCursor(cur);
     if (this.aim && this.aim.id === e.pointerId) {
       this.aim.pos = cur;
@@ -493,6 +515,7 @@ export class PdfViewer {
 
   private readonly onUp = (e: PointerEvent): void => {
     const known = this.pointers.delete(e.pointerId);
+    this.seen.delete(e.pointerId);
     this.logPointer(e.type === 'pointerup' ? 'up' : 'cancel', e, known ? '' : 'sconosciuto');
     if (!known) return;
     const aim = this.aim;
@@ -519,6 +542,26 @@ export class PdfViewer {
     this.scheduleRender();
     this.queueStats();
   };
+
+  /** Toglie dalla mappa un tocco che non ha mai ricevuto il suo pointerup o pointercancel, e interrompe quello che stava facendo (mira, cancella, trascinamento). */
+  private forgetPointer(id: number, why: string): void {
+    const idle = Math.round(performance.now() - (this.seen.get(id)?.lastSeen ?? performance.now()));
+    this.pointers.delete(id);
+    this.seen.delete(id);
+    this.strayDropped++;
+    this.ptrLog.mark(`${why} id=${id} (fermo da ${idle} ms, mappa ora [${[...this.pointers.keys()].join(',')}])`);
+    if (this.aim?.id === id) this.cancelAim();
+    if (this.tap?.id === id) this.clearTap();
+    if (this.sel?.id === id) this.cancelSelect();
+    this.resetBaseline();
+    this.queueStats();
+  }
+
+  /** Svuota la mappa (pagina in secondo piano, finestra senza fuoco): niente dita sul visore. */
+  private dropAllPointers(why: string): void {
+    if (this.pointers.size === 0) return;
+    for (const id of [...this.pointers.keys()]) this.forgetPointer(id, why);
+  }
 
   /** Registra l'evento con la dimensione della mappa dopo l'evento e gli id presenti (solo per la diagnostica: non cambia nulla). */
   private logPointer(kind: string, e: PointerEvent, extra = ''): void {
@@ -710,6 +753,7 @@ export class PdfViewer {
         pointerLog: this.ptrLog.entries,
         maxPointers: this.maxPointers,
         gestureEvents: this.gestureEvents,
+        strayDropped: this.strayDropped,
         pageZoom: window.visualViewport?.scale ?? null,
         error: this.lastError,
       });
