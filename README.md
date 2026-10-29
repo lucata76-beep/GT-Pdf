@@ -2,7 +2,7 @@
 
 Editor PDF con quote (nome provvisorio): web app statica, senza backend. Apre PDF vettoriali e scansioni, li annota e li quota in unità reali **senza mai alterare l'originale**; l'esportazione produce un nuovo file. I file restano sul dispositivo (locale o iCloud, tramite il selettore di sistema). Funziona su iPhone (Safari) e su desktop.
 
-**Stato: V1 completa nel codice (CP5c, 29/10/2026).** Provata su Chromium desktop e con tocco emulato; su iPhone reale le prove sono state fatte dall'utente solo in parte (5a e 5b) e per 5c vanno ancora fatte: vedere "Provare CP5c su iPhone". Piano, decisioni, "Stato V1" (che cosa è fatto, che cosa è parziale, V2 e V3) e punti NON VERIFICATI: [`docs/PIANO.md`](docs/PIANO.md). Design: [`design/DESIGN.md`](design/DESIGN.md).
+**Stato: V1 completa nel codice (CP5c, 29/10/2026); CP5d: strumenti di lettura e una difesa del visore dopo le prove su iPhone.** Provata su Chromium desktop e con tocco emulato; su iPhone reale le prove sono state fatte dall'utente solo in parte (5a e 5b) e per 5c vanno ancora fatte: vedere "Provare CP5c su iPhone". Piano, decisioni, "Stato V1" (che cosa è fatto, che cosa è parziale, V2 e V3) e punti NON VERIFICATI: [`docs/PIANO.md`](docs/PIANO.md). Design: [`design/DESIGN.md`](design/DESIGN.md).
 
 ## Che cos'è
 
@@ -34,6 +34,7 @@ Un editor PDF con quote, per disegni tecnici (CAD esportati in PDF, scansioni): 
 - **Testi:** solo caratteri ASCII e Latin-1 (font Helvetica standard).
 - **Non ci sono ancora** (V2): cerchio, arco, raccordo, snap sugli oggetti, copia/duplica, griglia. Snap sulla geometria interna del PDF: V3. Nessun uso offline (nessun service worker).
 - **iPhone.** Tutte le funzioni sono state provate su Chromium desktop e con tocco emulato; su Safari/iPhone reale molte sono **NON VERIFICATE**: l'elenco è in `docs/PIANO.md` ("NON VERIFICATO") e le prove da fare sono nelle sezioni "Provare CPn su iPhone".
+- **iPhone in orizzontale: poco spazio per il documento.** Con A+ alto e la barra di Quota o Copertura il visore puo' ridursi a circa 100 px (misura in Chromium a 932 x 430; con la finestra piu' bassa per le barre di Safari anche meno), e i pulsanti sul foglio ne coprono un quarto. Per lavorare con le quote in orizzontale conviene A+ normale. Sono in valutazione opzioni per dare piu' spazio (decisione 38 in `docs/PIANO.md`).
 - **PDF reali.** Nessun PDF reale è stato usato nelle prove (il repository è pubblico): con PDF reali strutture insolite possono comportarsi diversamente; in quel caso l'esportazione si ferma con un messaggio e il lavoro non si perde.
 
 ## Privacy
@@ -46,6 +47,26 @@ L'app non invia nulla in rete e non usa CDN: font, icone e componenti sono inclu
 - In locale: `npm ci`, poi `npm run dev` (oppure `npm run build && npm run preview`). Richiede Node 22.12 o successivo.
 
 Comandi: `npm run typecheck`, `npm test`, `npm run build`. `npm run test-pdfs` rigenera i PDF di prova, `npm run icons` le icone, `npm run helvetica-widths` la tabella delle larghezze di Helvetica. Prove su Chromium (mouse e touch iPhone emulato): `node scripts/e2e-cp5c.cjs [cartella]` (Annulla in Appiattito, Salva con nome, Apri progetto, modifiche non salvate; costruisce da solo un build di prova con il gancio `window.__gtpdf`), `node scripts/perf-cp5c.cjs [cartella]` (tempo del progetto su un PDF sintetico a 124 pagine che genera da sé), `node scripts/e2e-cp5b.cjs` (esportazione Appiattito; costruisce da solo un build di prova) e `node scripts/e2e-cp5a.cjs` (Copertura semplice, Condividi/Scarica), `node scripts/measure-cp5b.cjs` (misure di 5b), `npm run build && node scripts/e2e-cp4.cjs` (coperture, seleziona, sposta), `node scripts/e2e-cp3.cjs` (testo, quote, tastierino) e `node scripts/e2e-cp2.cjs` (disegno, scala); richiedono Playwright con Chromium installati (non sono una dipendenza del progetto). Esportazione (CP5a): `node scripts/e2e-cp5a.cjs [cartella]` costruisce da solo un build di prova con il gancio `window.__gtpdf` (`GTPDF_TEST=1`, fuori dal repository: il build pubblicato non lo contiene), esporta e confronta l'app con il PDF esportato reso da PDF.js, salvando le immagini nella cartella indicata (fuori dal repository); `node scripts/perf-cp5a.cjs [cartella]` misura tempo e memoria su un PDF sintetico a 124 pagine che genera da sé. Su Linux con locale POSIX lanciare con `LC_ALL=C.UTF-8` (Chromium sostituisce i nomi di file con caratteri non ASCII con "download"; lo script lo imposta da solo).
+
+## Provare CP5d su iPhone
+
+Aprire l'indirizzo in Safari e controllare la versione (pannello in alto a destra, in fondo "App · Versione" = commit pubblicato). Dopo le prove di CP5c sono stati aggiunti **strumenti di lettura**: il menu dell'editor **non** e' stato cambiato (in Chromium il difetto non si riproduce) e l'unica modifica di comportamento e' la difesa del visore contro i "puntatori fantasma". Servono per leggere sul telefono i numeri che il computer non puo' dare. Per ogni punto: risposta tra parentesi quadre (o scrivere cosa succede) e, dove indicato, **Copia** e incollare il testo.
+
+**A. Menu in orizzontale: "Prova menu"** (File > Diagnostica, scheda "Prova menu")
+1. iPhone in **orizzontale**, A+ normale. Toccare **Avvia la prova del menu** e poi **Prova menu** (in alto a sinistra). Il menu si apre? [si / no]
+2. Scorrerlo con un dito fino in fondo. "Voce 12" si vede intera? [si / no]. Il menu si chiude da solo mentre scorri? [no / si, dopo circa N secondi]. Qualcosa dietro il menu si muove (pagina, barra di Safari)? [no / si: cosa]. Il fondo del menu e' coperto dalla barra di Safari o dall'indicatore Home? [no / si]
+3. Toccare **Copia** e incollare il testo (finestra, margini di sicurezza, `vh`/`dvh`, altezza delle voci, motivo dell'ultima chiusura, contatori di `resize` e tocchi fuori).
+4. Togliere la spunta "Chiudi il menu quando la finestra cambia dimensione" e ripetere 1 e 2: ora il menu resta aperto mentre scorri? [si / no]
+5. Ripetere in **verticale** con A+ normale e poi con A+ al massimo: "Voce 12" raggiungibile? [si / no]. Con A+ al massimo il menu scorre (e' previsto: non entra). Scrivere l'A+ usato.
+
+**B. Zoom e spostamento** (editor)
+6. Aprire **A4 vettoriale** da "PDF di prova". Aprire il riquadro **Diagnostica tocco e schermo** nel pannello App (in orizzontale a 932 px il pannello e' la colonna a destra, in fondo; in verticale si apre con l'icona del pannello in alto a destra). Strumento "Sposta vista".
+7. Un dito sul visore, **lontano dai pulsanti + / − / adatta / Distanza**: sposta la pagina? [si / no]. Due dita (pinch) sempre lontano dai pulsanti: lo zoom cambia? [si / no / poco]
+8. A dita sollevate leggere nel riquadro: "puntatori nella mappa" (atteso `0 []`), "puntatori fantasma scartati" (un numero), "zoom della pagina intera" (atteso 1.00), l'altezza del "visore" in px e "ultimi tocchi". **Copia** e incollare.
+9. Se UN dito cambia lo zoom: leggere "ultimi tocchi": su che cosa e' caduto? [visore / pulsanti sul foglio · Aumenta zoom / altro]
+10. Scrivere: A+ (normale / massimo), strumento attivo, altezza del visore letta.
+
+Atteso in Chromium (non e' una prova su iPhone): con un visore di 94 px (932 x 430, A+ massimo, strumento Quota o Copertura attivo: 99 px) un dito sposta e due dita fanno pinch; i pulsanti sul foglio coprono il 28 % del visore e un dito che parte su un pulsante non sposta la pagina.
 
 ## Provare CP5c su iPhone
 
