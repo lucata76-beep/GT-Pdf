@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Download, RELEASE_DELAY_MS, makePdfFile, shareAvailability, shareFile } from './deliver';
+import { Download, RELEASE_DELAY_MS, makePdfFile, makeProjectFile, shareAvailability, shareFile } from './deliver';
 
 const file = makePdfFile(new Uint8Array([37, 80, 68, 70, 45]), 'prova-quotato.pdf');
 const domErr = (name: string, msg = 'x'): Error => Object.assign(new Error(msg), { name });
@@ -9,6 +9,50 @@ describe('makePdfFile', () => {
     expect(file.type).toBe('application/pdf');
     expect(file.name).toBe('prova-quotato.pdf');
     expect(file.size).toBe(5);
+  });
+});
+
+describe('makeProjectFile (file progetto .json, 5c)', () => {
+  const project = makeProjectFile('{"format":"gt-pdf-project"}', 'prova.json');
+  const nav = (canShare: boolean, share: (d: ShareData) => Promise<void> = async () => undefined) => ({ share, canShare: () => canShare }) as never;
+
+  it('File application/json con nome e contenuto (UTF-8)', async () => {
+    expect(project.type).toBe('application/json');
+    expect(project.name).toBe('prova.json');
+    expect(await project.text()).toBe('{"format":"gt-pdf-project"}');
+  });
+
+  it('Condividi: share() riceve UN File application/json, chiamata in modo sincrono', () => {
+    let called: ShareData | null = null;
+    const p = shareFile(project, nav(true, async (d) => { called = d; }), 'un file .json');
+    expect(called).not.toBeNull();
+    expect((called as unknown as ShareData).files).toHaveLength(1);
+    expect((called as unknown as ShareData).files?.[0]?.type).toBe('application/json');
+    return p.then((o) => expect(o.status).toBe('shared'));
+  });
+
+  it('canShare falso: lo dice nominando il file .json, non chiama share', async () => {
+    let called = false;
+    const a = shareAvailability(project, nav(false), 'un file .json');
+    expect(a.ok).toBe(false);
+    expect(!a.ok && a.reason).toContain('un file .json');
+    expect(!a.ok && a.reason).not.toContain('PDF');
+    const o = await shareFile(project, nav(false, async () => { called = true; }), 'un file .json');
+    expect(o.status).toBe('unavailable');
+    expect(called).toBe(false);
+  });
+
+  it('Scarica: blob application/octet-stream col nome .json', () => {
+    const log: string[] = [];
+    const d = new Download(project, {
+      createObjectURL: (b) => { log.push(`create(${b.type},${b.size})`); return 'blob:p/1'; },
+      revokeObjectURL: (u) => log.push(`revoke(${u})`),
+      click: (u, n) => log.push(`click(${u},${n})`),
+      setTimeout: () => 0,
+      now: () => 1000,
+    });
+    d.start();
+    expect(log).toEqual([`create(application/octet-stream,${project.size})`, 'click(blob:p/1,prova.json)']);
   });
 });
 
