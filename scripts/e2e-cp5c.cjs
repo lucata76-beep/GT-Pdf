@@ -7,7 +7,8 @@ const { createE2E } = require('./e2e-lib.cjs');
 const { fullSpecs } = require('./export-specs.cjs');
 
 const lib = createE2E({ name: 'e2e-cp5c', out: process.argv[2], port: 4193, hport: 4194, zoom: 2 });
-const { check, info, setSection, sha, newApp, openSample } = lib;
+const { check, info, setSection, sha, newApp, openSample, OUT, HPORT, b64, URL } = lib;
+const fx = () => import('./export-fixtures.mjs');
 
 const dlg = (page) => page.locator('.export-dialog');
 const text = (loc) => loc.innerText().then((s) => s.replace(/\s+/g, ' ').trim());
@@ -164,9 +165,11 @@ async function main() {
   setSection('preparazione');
   const servers = await lib.startAll(chromium);
   const { browser, harness } = servers;
+  const F = await fx();
   try {
     await annullaSuite(browser);
     await casellaSuite(browser, harness);
+    await require('./e2e-cp5c-project.cjs')({ browser, harness, F, newApp, openSample, check, info, setSection, sha, OUT, HPORT, b64, URL });
   } finally {
     await lib.stopAll(servers);
   }
