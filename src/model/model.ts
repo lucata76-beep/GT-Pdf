@@ -1,4 +1,4 @@
-// Oggetti e scala della sessione, in memoria (nessun localStorage/IndexedDB: il salvataggio .json arriva in CP5).
+// Oggetti e scala della sessione, in memoria (nessun localStorage/IndexedDB: il lavoro si salva con File > Salva con nome, in un file .json).
 // Coordinate nello spazio utente PDF (pt), indipendenti dallo zoom. Si modifica solo tramite comandi (History).
 import { type CoverDef, coverInfo } from '../geometry/cover';
 import { type DimensionDef, dimInfo } from '../geometry/dimension';
@@ -169,6 +169,15 @@ export class DocumentModel {
   private pages = new Map<number, PageData>();
   private nextId = 1;
   private listeners = new Set<() => void>();
+  private revision = 0;
+
+  /**
+   * Numero di cambiamenti dall'inizio della sessione: sale a ogni modifica (anche annulla/ripeti). Serve a dire se ci sono modifiche dall'ultimo
+   * salvataggio del progetto (5c): si confronta con il valore memorizzato al salvataggio o all'apertura.
+   */
+  get version(): number {
+    return this.revision;
+  }
 
   private data(page: number): PageData {
     let d = this.pages.get(page);
@@ -244,11 +253,28 @@ export class DocumentModel {
     this.emit();
   }
 
+  /**
+   * Sostituisce tutto il contenuto con quello di un progetto letto da file (gia' validato). Un solo cambiamento. Il prossimo id diventa maggiore
+   * del massimo letto (e mai minore di quello in uso: gli id non si riusano in una sessione).
+   */
+  restore(pages: ReadonlyArray<{ page: number; scale: PageScale | null; objects: readonly PageObject[] }>): void {
+    this.pages.clear();
+    let maxId = 0;
+    for (const p of pages) {
+      if (p.objects.length === 0 && p.scale === null) continue;
+      this.pages.set(p.page, { objects: [...p.objects], scale: p.scale ? { ...p.scale } : null });
+      for (const o of p.objects) if (o.id > maxId) maxId = o.id;
+    }
+    this.nextId = Math.max(this.nextId, maxId + 1);
+    this.emit();
+  }
+
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
   private emit(): void {
+    this.revision++;
     for (const fn of this.listeners) fn();
   }
 }
