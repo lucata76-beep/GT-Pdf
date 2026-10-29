@@ -1,6 +1,6 @@
 // Misure di CP5e (altezza di intestazione e barra di stato che non dipende dalla larghezza, pannello "Nessun documento" nel visore) su Chromium con tocco emulato.
 // Stampa numeri, non fa controlli (i controlli sono in e2e-cp5e.cjs). NON e' una dipendenza del progetto: richiede Playwright con Chromium (require('playwright')).
-// Uso: node scripts/probe-cp5e.cjs <width|fit|need> <indirizzo-del-build>   oppure   table <indirizzo-prima> <indirizzo-dopo>   (il build di prova, GTPDF_TEST=1, deve essere gia' servito, per esempio
+// Uso: node scripts/probe-cp5e.cjs <width|fit|need> <indirizzo-del-build>   oppure   <table|empty> <indirizzo-prima> <indirizzo-dopo>   (il build di prova, GTPDF_TEST=1, deve essere gia' servito, per esempio
 //   con `npx vite preview --outDir <cartella> --port 4301`: cosi' si confronta lo stesso script tra due commit senza ricostruire).
 // Chromium NON e' Safari: nulla di quanto segue prova il comportamento sul telefono. Margini di sicurezza emulati (0/59/21/59 in orizzontale) con
 // Emulation.setSafeAreaInsetsOverride: valori consueti dell'iPhone 14 Pro Max, NON letti dal telefono.
@@ -187,10 +187,39 @@ async function tableMode(browser) {
   }
 }
 
+/** Pannello "Nessun documento aperto" prima/dopo, in righe Markdown: <indirizzo prima> <indirizzo dopo>. Posizioni in px dal bordo alto del visore (.work). */
+async function emptyMode(browser) {
+  const before = process.argv[3];
+  const after = process.argv[4];
+  if (!before || !after) throw new Error('uso: empty <indirizzo-prima> <indirizzo-dopo>');
+  const read = (page) =>
+    page.evaluate(() => {
+      const wk = document.querySelector('.work').getBoundingClientRect();
+      const ep = document.querySelector('.empty-panel');
+      const y = (q, k) => Math.round((document.querySelector(q).getBoundingClientRect()[k] - wk.top) * 10) / 10;
+      return { work: Math.round(wk.height * 10) / 10, content: ep.scrollHeight, logoTop: y('.empty-logo', 'top'), apri: [y('.empty-panel .btn.big', 'top'), y('.empty-panel .btn.big', 'bottom')], fraseBottom: y('.empty-panel .hint', 'bottom'), provaBottom: y('.samples-box summary', 'bottom') };
+    });
+  console.log('| Finestra | A+ | Visore | Prima: pannello alto, logo parte da, "Apri PDF…", frase, "PDF di prova" (fondo) | Dopo: pannello alto, logo parte da, "Apri PDF…", frase, "PDF di prova" (fondo) |');
+  console.log('|---|---|---|---|---|');
+  for (const [w, h] of [[932, 320], [932, 430], [844, 280], [844, 390]]) {
+    for (let idx = 0; idx < UI_PX.length; idx++) {
+      const out = [];
+      for (const url of [before, after]) {
+        const e = await phone(browser, w, h, idx, false, url);
+        out.push(await read(e.page));
+        await e.ctx.close();
+      }
+      const f = (r) => `${r.content}, ${r.logoTop}, ${r.apri[0]}-${r.apri[1]}, ${r.fraseBottom}, ${r.provaBottom}`;
+      console.log(`| ${w}x${h} | ${UI_PX[idx]} | ${out[1].work === out[0].work ? out[0].work : `${out[0].work}>${out[1].work}`} | ${f(out[0])} | ${f(out[1])} |`);
+    }
+  }
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
-    if (MODE === 'table') await tableMode(browser);
+    if (MODE === 'empty') await emptyMode(browser);
+    else if (MODE === 'table') await tableMode(browser);
     else if (MODE === 'need') await needMode(browser);
     else if (MODE === 'width') await widthMode(browser);
     else if (MODE === 'fit') await fitMode(browser);
