@@ -41,12 +41,13 @@ module.exports = async (t) => {
     const items = async () => page.$$eval('.menu-item', (els) => els.map((e) => ({ t: e.innerText.replace(/\s+/g, ' ').trim(), off: e.disabled })));
     let it = await items();
     check('senza PDF: "Esporta PDF…" disattivato', it.find((i) => i.t.startsWith('Esporta PDF'))?.off === true, JSON.stringify(it));
-    check('"Salva con nome…" disattivato con l\'etichetta 5c', it.find((i) => i.t.startsWith('Salva con nome'))?.off === true && it.find((i) => i.t.startsWith('Salva con nome'))?.t.includes('5c'), JSON.stringify(it));
+    // 5c: "Salva con nome…" ha la stessa regola di "Esporta PDF…" (serve un PDF aperto), senza etichetta di tappa; "Apri progetto…" e' sempre attivo.
+    check('senza PDF: "Salva con nome…" disattivato e senza etichetta di tappa, "Apri progetto…" attivo', it.find((i) => i.t.startsWith('Salva con nome'))?.off === true && !it.find((i) => i.t.startsWith('Salva con nome'))?.t.includes('5c') && it.find((i) => i.t.startsWith('Apri progetto'))?.off === false, JSON.stringify(it));
     await page.keyboard.press('Escape');
     await openSample(page, 'A4 vettoriale');
     await page.locator('.menu-btn', { hasText: 'File' }).click();
     it = await items();
-    check('con un PDF aperto: "Esporta PDF…" attivo, "Salva con nome…" ancora disattivato (5c)', it.find((i) => i.t.startsWith('Esporta PDF'))?.off === false && it.find((i) => i.t.startsWith('Salva con nome'))?.off === true, JSON.stringify(it));
+    check('con un PDF aperto: "Esporta PDF…" e "Salva con nome…" attivi (dalla tappa 5c)', it.find((i) => i.t.startsWith('Esporta PDF'))?.off === false && it.find((i) => i.t.startsWith('Salva con nome'))?.off === false, JSON.stringify(it));
     await page.keyboard.press('Escape');
 
     await page.evaluate(() => window.__gtpdf.addSpecs(1, [{ k: 'segment', pts: [[0.1, 0.1], [0.5, 0.3]] }, { k: 'text', at: [0.1, 0.5], text: 'PROVA' }]));
