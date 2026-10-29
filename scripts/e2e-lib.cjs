@@ -12,7 +12,8 @@ const ROOT = resolve(__dirname, '..');
 /** opts: { name, out?, port, hport, zoom } */
 function createE2E(opts) {
   const OUT = opts.out || join(os.tmpdir(), `gtpdf-${opts.name}`);
-  const DIST = join(OUT, 'dist-test');
+  // E2E_DIST: cartella di un build di prova (GTPDF_TEST=1) gia' fatto, per provare un commit diverso (per esempio quello di prima di una correzione) senza ricostruire.
+  const DIST = process.env.E2E_DIST || join(OUT, 'dist-test');
   mkdirSync(OUT, { recursive: true });
   const PORT = opts.port;
   const HPORT = opts.hport;
@@ -279,7 +280,7 @@ const b64 = (buf) => Buffer.from(buf).toString('base64');
   /** Costruisce il build di prova (GTPDF_TEST=1) fuori dal repository e avvia anteprima e harness. Restituisce i server. */
   async function startAll(chromium) {
     execFileSync('node', ['scripts/copy-pdfjs-assets.mjs'], { cwd: ROOT, stdio: 'inherit' });
-    execFileSync('npx', ['vite', 'build', '--outDir', DIST, '--emptyOutDir'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, GTPDF_TEST: '1' } });
+    if (!process.env.E2E_DIST) execFileSync('npx', ['vite', 'build', '--outDir', DIST, '--emptyOutDir'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, GTPDF_TEST: '1' } });
     const preview = await startPreview();
     const harnessSrv = await startHarness();
     // Con la locale POSIX (tipica dei contenitori Linux) Chromium sostituisce con "download" i nomi di file con caratteri non ASCII: serve UTF-8.
