@@ -110,12 +110,63 @@ async function annullaSuite(browser) {
   }
 }
 
+// La casella spuntata del PDF di prova "A4 con annotazioni" (5c, correzione): PDF.js la deve disegnare spuntata, nell'app e in "Appiattito".
+async function casellaSuite(browser, harness) {
+  setSection('casella spuntata');
+  const L = await import('@cantoo/pdf-lib');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sample = fs.readFileSync(path.join(__dirname, '..', 'public', 'test-pdfs', 'a4-annotazioni.pdf'));
+  // casella: x 270..294, y 700..724 (spazio utente, origine in basso a sinistra); a 2 px/pt e dall'alto: x 540..588, y 235.8..283.8; si guarda l'interno (6 px dal bordo)
+  const R = [548, 244, 580, 276];
+  const THR = 128;
+  const dark = (hp, url) => hp.evaluate(([u, r, t]) => window.darkCount(u, r[0], r[1], r[2], r[3], t), [url, R, THR]);
+  const doc = await L.PDFDocument.load(sample);
+  const field = doc.getForm().getCheckBox('casella-prova');
+  const w = field.acroField.getWidgets()[0];
+  check('il file di prova: il campo e\' spuntato e il widget ha /AS = /Yes (non /Off)', field.isChecked() && String(w.dict.get(L.PDFName.of('AS'))) === '/Yes', `${field.isChecked()} ${String(w.dict.get(L.PDFName.of('AS')))}`);
+  const hp = await harness.newPage();
+  await hp.goto(`http://localhost:${lib.HPORT}/`);
+  await hp.waitForFunction(() => window.harnessReady === true);
+  // controllo: la stessa pagina con la casella tolta (/AS /Off) NON deve avere pixel scuri dentro: la misura distingue
+  field.uncheck();
+  const unchecked = Buffer.from(await doc.save({ useObjectStreams: false }));
+  const dOff = await dark(hp, await hp.evaluate(([d, s]) => window.renderPage(d, 1, s), [lib.b64(unchecked), 2]));
+  const dOn = await dark(hp, await hp.evaluate(([d, s]) => window.renderPage(d, 1, s), [lib.b64(sample), 2]));
+  info(`pixel scuri nell'interno della casella (PDF.js, 2 px/pt): spuntata ${dOn}, non spuntata (controllo) ${dOff}`);
+  check('PDF.js disegna la casella spuntata (segno dentro) e vuota quella con /AS /Off: la misura distingue', dOn >= 30 && dOff === 0, `${dOn} / ${dOff}`);
+
+  const { ctx, page } = await newApp(browser); // viewport predefinito (2800 x 2000): il canvas a 2 px/pt deve stare per intero, altrimenti lo screenshot si taglia
+  try {
+    await openSample(page, 'A4 con annotazioni');
+    await lib.showPage(page, 1);
+    const appShot = (await lib.shot(page)).buf;
+    const dApp = await dark(hp, `data:image/png;base64,${lib.b64(appShot)}`);
+    check('nell\'app la casella e\' spuntata (segno dentro)', dApp >= 30, String(dApp));
+    // un oggetto lontano dalla casella, poi Appiattito (150 dpi PNG) dall'interfaccia
+    await page.evaluate(() => window.__gtpdf.addSpecs(1, [{ k: 'segment', pts: [[0.1, 0.2], [0.4, 0.22]] }]));
+    await openExportDialog(page);
+    await pickFlat(page, '150', 'png');
+    await dlg(page).locator('.btn.primary', { hasText: 'Esporta' }).click();
+    await dlg(page).locator('.exp-done-actions').waitFor({ timeout: 120000 });
+    const [dl] = await Promise.all([page.waitForEvent('download'), dlg(page).locator('.btn', { hasText: 'Scarica' }).click()]);
+    const out = fs.readFileSync(await dl.path());
+    const dFlat = await dark(hp, await hp.evaluate(([d, s]) => window.renderPage(d, 1, s), [lib.b64(out), 2]));
+    check('nel PDF appiattito la casella e\' spuntata (segno dentro)', dFlat >= 30, String(dFlat));
+    info(`pixel scuri nell'interno della casella: app ${dApp}, appiattito ${dFlat}`);
+  } finally {
+    await hp.close();
+    await ctx.close();
+  }
+}
+
 async function main() {
   setSection('preparazione');
   const servers = await lib.startAll(chromium);
-  const { browser } = servers;
+  const { browser, harness } = servers;
   try {
     await annullaSuite(browser);
+    await casellaSuite(browser, harness);
   } finally {
     await lib.stopAll(servers);
   }

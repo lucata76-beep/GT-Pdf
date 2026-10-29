@@ -182,6 +182,9 @@ window.envelope = async (a0u, au, bu, o) => {
   return s;
 };
 
+// Pixel "scuri" (massimo dei canali sotto thr) nel rettangolo [x0, x1) x [y0, y1) di un'immagine.
+window.darkCount = async (u, x0, y0, x1, y1, thr) => { const a = await decode(u); let n = 0; for (let y = Math.max(0, y0); y < Math.min(a.h, y1); y++) for (let x = Math.max(0, x0); x < Math.min(a.w, x1); x++) { const i = (y * a.w + x) * 4; if (Math.max(a.d[i], a.d[i + 1], a.d[i + 2]) < thr) n++; } return n; };
+
 window.harnessReady = true;
 </script></body>`;
 

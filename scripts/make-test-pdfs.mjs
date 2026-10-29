@@ -213,8 +213,8 @@ await scan();
   field.setText('Campo compilato (fittizio)');
   field.addToPage(page, { x: 28, y: 700, width: 220, height: 24, font });
   const box = form.createCheckBox('casella-prova');
-  box.check();
   box.addToPage(page, { x: 270, y: 700, width: 24, height: 24 });
+  box.check(); // DOPO addToPage: `check()` imposta /AS dei widget che esistono gia'; prima, il widget nasceva con /AS /Off e la casella si vedeva vuota
   writeFileSync(join(out, 'a4-annotazioni.pdf'), await doc.save({ useObjectStreams: false }));
 }
 
