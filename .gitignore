@@ -2,8 +2,9 @@
 node_modules/
 dist/
 
-# Generati da scripts/copy-pdfjs-assets.mjs (copia da pdfjs-dist)
+# Generati da scripts/copy-pdfjs-assets.mjs (copia da pdfjs-dist) e da scripts/copy-licenses.mjs (LICENSES/ e THIRD_PARTY.md)
 public/pdfjs/
+public/licenses/
 
 # Il repository e' PUBBLICO: nessun PDF o disegno reale.
 # Unica eccezione: i PDF di prova FITTIZI generati da scripts/make-test-pdfs.mjs.

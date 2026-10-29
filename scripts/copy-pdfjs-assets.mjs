@@ -2,6 +2,8 @@
 // Servono per scansioni JBIG2/JPEG2000 e per i PDF con font non incorporati.
 // I file LICENSE_* delle librerie incluse restano accanto agli asset.
 // Esclusi: cmaps/ (CJK). Aggiungerli solo se un PDF lo richiede.
+// Esclusi anche wasm/quickjs-eval.js e quickjs-eval.wasm: servono solo al JavaScript dentro i PDF (`enableScripting`, che l'app non attiva) e il pacchetto
+// non include la licenza di QuickJS accanto ai file: non si distribuisce cio' che non si usa e di cui non si ha il testo di licenza.
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +21,7 @@ for (const dir of ['wasm', 'standard_fonts', 'iccs']) {
     console.error(`Manca ${from}: eseguire npm ci`);
     process.exit(1);
   }
-  cpSync(from, join(dst, dir), { recursive: true });
+  cpSync(from, join(dst, dir), { recursive: true, filter: (p) => !/quickjs-eval\.(js|wasm)$/.test(p) });
 }
 cpSync(join(src, 'LICENSE'), join(dst, 'LICENSE'));
 console.log('Asset PDF.js copiati in public/pdfjs/');

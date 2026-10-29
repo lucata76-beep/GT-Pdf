@@ -8,9 +8,9 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "node scripts/copy-pdfjs-assets.mjs && node scripts/copy-licenses.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs && node scripts/copy-licenses.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",

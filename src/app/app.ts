@@ -473,7 +473,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         inspectorStyle.el,
       ),
     );
-    secs.push(section('App', kv('Versione', __BUILD_ID__)));
+    secs.push(section('App', kv('Versione', __BUILD_ID__), h('a', { class: 'hint licenses-link', href: assetUrl('licenses/index.html'), target: '_blank', rel: 'noopener' }, 'Licenze e componenti di terze parti')));
     inspector.replaceChildren(...secs);
   };
   function toggleInspector(): void {
