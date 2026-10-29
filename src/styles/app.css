@@ -504,7 +504,7 @@ body.app-mode {
 }
 
 /* Pannello "Nessun documento aperto" (CP5e): non esce mai da .work. Scorre se e' piu' alto; il contenitore interno sta al centro con `margin: auto` (con spazio
-   avanzo lo divide, senza spazio non va in negativo e non taglia in alto), non con `justify-content: safe center`: `safe` e' in Safari dalla 17.6 (BCD,
+   in piu' lo divide, senza spazio non va in negativo e non taglia in alto), non con `justify-content: safe center`: `safe` e' in Safari dalla 17.6 (BCD,
    css/properties/justify-content.json) e il build mira a safari16. */
 .empty-panel {
   position: absolute;
