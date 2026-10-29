@@ -57,6 +57,7 @@ import { type IconName, icon } from '../ui/icons';
 import { Keypad } from '../ui/keypad';
 import { type MenuEntry, menuButton } from '../ui/menu';
 import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
+import { TouchReadout } from '../ui/touchReadout';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
 import { Construction, type ConstructionTool } from './construction';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
@@ -136,8 +137,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const say = (text: string): void => {
     statusMsg.textContent = text;
   };
+  // Lettura di schermo, zoom e puntatori nel pannello App (CP5d): si aggiorna solo se il riquadro e' aperto.
+  const touchReadout = new TouchReadout();
   const viewer = new PdfViewer(
-    () => undefined,
+    (s) => touchReadout.setStats(s),
     (msg, level) => {
       if (level === 'err') say(msg);
     },
@@ -473,7 +476,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         inspectorStyle.el,
       ),
     );
-    secs.push(section('App', kv('Versione', __BUILD_ID__), h('a', { class: 'hint licenses-link', href: assetUrl('licenses/index.html'), target: '_blank', rel: 'noopener' }, 'Licenze e componenti di terze parti')));
+    secs.push(section('App', kv('Versione', __BUILD_ID__), touchReadout.el, h('a', { class: 'hint licenses-link', href: assetUrl('licenses/index.html'), target: '_blank', rel: 'noopener' }, 'Licenze e componenti di terze parti')));
     inspector.replaceChildren(...secs);
   };
   function toggleInspector(): void {

@@ -680,6 +680,46 @@ body.app-mode {
   color: var(--cad-text-secondary);
 }
 
+/* ---- Lettura di schermo e puntatori (CP5d): riquadro richiudibile nel pannello App e in Diagnostica ---- */
+.touch-diag > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--hit);
+  cursor: pointer;
+  font: 600 0.75rem/1rem var(--font-ui);
+}
+.touch-diag .stats.touch-readout {
+  max-height: 45vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ---- Prova menu (Diagnostica, CP5d): schermata intera come l'editor ---- */
+.menu-test {
+  z-index: 50;
+  background: var(--cad-canvas);
+}
+.menu-test-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.menu-test .menu-readout {
+  flex: 1 1 auto;
+  max-height: none;
+  margin: 0 0 0 14rem; /* il pannello del menu occupa la sinistra: i numeri restano leggibili anche a menu aperto */
+  border-radius: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* ---- Barra di stato ---- */
 .statusbar {
   display: flex;

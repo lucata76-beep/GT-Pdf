@@ -4,11 +4,13 @@ import { PIXEL_BUDGET, SCREEN_PIXEL_BUDGET, ptToMm } from '../geometry/pixels';
 import { type OpenedPdf, closePdf, openPdf } from '../pdf/loader';
 import { type Child, h } from '../ui/dom';
 import { icon } from '../ui/icons';
+import { TouchReadout } from '../ui/touchReadout';
 import { PdfViewer, type ViewerStats } from '../ui/viewer';
 import { type ProbeResult, type Tier, probeTier, savedResults, takeInterrupted, tiers } from './canvasProbe';
 import { type Row, environmentRows, featureRows } from './env';
 import { clearLog, errText, log, logText, onLog } from './log';
 import { PDF_NAME, copyText, downloadFile, openBlob, shareFile, sleep } from './share';
+import { menuTestCard } from './menuTest';
 import { makeDiagPdf } from './testPdf';
 
 const nf = (n: number, d = 2): string => fmt(n, d); // numeri sempre con "." (decisione DECIMALE)
@@ -53,7 +55,10 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
   let pageNo = 1;
 
   const statsEl = h('pre', { class: 'stats mono' }, 'Nessun documento.');
+  // Schermo, zoom della pagina intera e ultimi eventi puntatore (CP5d): la stessa lettura del pannello App dell'editor.
+  const touchReadout = new TouchReadout('Tocco e schermo (dettaglio, copiabile)');
   const showStats = (s: ViewerStats): void => {
+    touchReadout.setStats(s);
     const lines: string[] = [];
     lines.push(`zoom: ${nf(s.zoom, 3)} px/pt (${nf(s.zoomOfFit * 100, 0)} % dell'adattamento) · DPR ${nf(s.dpr, 1)}`);
     if (s.render) {
@@ -62,7 +67,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
       if (r.clamped) lines.push(`ATTENZIONE: tetto a schermo di ${SCREEN_PIXEL_BUDGET} px raggiunto, l'immagine è sfocata a questo zoom.`);
     } else lines.push('render: in corso o nessuno');
     if (s.error) lines.push(`ERRORE render: ${s.error}`);
-    lines.push(`puntatori: ${s.pointers} (max ${s.maxPointers}) · eventi gesto Safari: ${s.gestureEvents} · zoom pagina: ${s.pageZoom === null ? 'n/d' : nf(s.pageZoom, 2)}`);
+    lines.push(`puntatori: ${s.pointers} [${s.pointerIds.join(',')}] (max ${s.maxPointers}) · eventi gesto Safari: ${s.gestureEvents} · zoom pagina: ${s.pageZoom === null ? 'n/d' : nf(s.pageZoom, 2)}`);
     statsEl.textContent = lines.join('\n');
   };
   const viewer = new PdfViewer(showStats, log);
@@ -175,6 +180,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
     h('div', { class: 'row' }, prevBtn, pageLabel, nextBtn, zoomOut, zoomIn, fitBtn),
     viewer.el,
     statsEl,
+    touchReadout.el,
     h('p', { class: 'hint' }, 'Un dito sposta, due dita fanno pinch. Durante il pinch "zoom pagina" deve restare 1,00 e la pagina non deve ingrandirsi.'),
   );
 
@@ -359,7 +365,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
     logEl,
   );
 
-  root.replaceChildren(topbar, h('main', null, pdfCard, canvasCard, shareCard, envCard, logCard));
+  root.replaceChildren(topbar, h('main', null, pdfCard, menuTestCard(card), canvasCard, shareCard, envCard, logCard));
   log(`Avvio GT-Pdf ${__BUILD_ID__} (diagnostica)`);
   log(`User agent: ${navigator.userAgent}`);
   log(`DPR ${window.devicePixelRatio}, schermo ${screen.width}x${screen.height}, finestra ${window.innerWidth}x${window.innerHeight}`);

@@ -14,6 +14,7 @@ import type { Stroke } from '../model/stroke';
 import type { PDFPageProxy, RenderTask } from '../pdf/loader';
 import { h } from './dom';
 import { Lens } from './lens';
+import { PointerLog } from './pointerLog';
 import { type Badge, type DrawItem, SceneOverlay } from './overlay';
 
 export type { SheetPoint, UserPoint };
@@ -25,6 +26,10 @@ export interface ViewerStats {
   dpr: number;
   render: { w: number; h: number; scale: number; clamped: boolean; ms: number } | null;
   pointers: number;
+  /** Id dei puntatori nella mappa in questo momento (con le dita sollevate deve essere vuota). */
+  pointerIds: number[];
+  /** Ultimi eventi puntatore (down, up, cancel, lostcapture...), i piu' vecchi per primi. */
+  pointerLog: readonly string[];
   maxPointers: number;
   gestureEvents: number;
   pageZoom: number | null; // window.visualViewport.scale: deve restare 1 durante il pinch
@@ -99,6 +104,7 @@ export class PdfViewer {
   private renderZoom = 1; // px CSS per pt del canvas attualmente mostrato
 
   private readonly pointers = new Map<number, Pt>();
+  private readonly ptrLog = new PointerLog();
   private maxPointers = 0;
   private gestureEvents = 0;
   private pinch: { dist: number; zoom: number; midX: number; midY: number; tx: number; ty: number } | null = null;
@@ -138,6 +144,8 @@ export class PdfViewer {
     this.el.addEventListener('pointermove', this.onMove);
     this.el.addEventListener('pointerup', this.onUp);
     this.el.addEventListener('pointercancel', this.onUp);
+    this.el.addEventListener('gotpointercapture', (e) => this.logPointer('gotcapture', e));
+    this.el.addEventListener('lostpointercapture', (e) => this.logPointer('lostcapture', e));
     this.el.addEventListener('pointerleave', (e) => {
       if (e.pointerType !== 'mouse') return;
       this.hooks.onCursor?.(null);
@@ -396,6 +404,7 @@ export class PdfViewer {
     }
     const pos = this.local(e);
     this.pointers.set(e.pointerId, pos);
+    this.logPointer('down', e);
     this.maxPointers = Math.max(this.maxPointers, this.pointers.size);
     const primary = !mousePan && this.pointers.size === 1;
     const touch = e.pointerType !== 'mouse';
@@ -483,7 +492,9 @@ export class PdfViewer {
   };
 
   private readonly onUp = (e: PointerEvent): void => {
-    if (!this.pointers.delete(e.pointerId)) return;
+    const known = this.pointers.delete(e.pointerId);
+    this.logPointer(e.type === 'pointerup' ? 'up' : 'cancel', e, known ? '' : 'sconosciuto');
+    if (!known) return;
     const aim = this.aim;
     if (aim && aim.id === e.pointerId) {
       const pos = this.local(e);
@@ -508,6 +519,12 @@ export class PdfViewer {
     this.scheduleRender();
     this.queueStats();
   };
+
+  /** Registra l'evento con la dimensione della mappa dopo l'evento e gli id presenti (solo per la diagnostica: non cambia nulla). */
+  private logPointer(kind: string, e: PointerEvent, extra = ''): void {
+    this.ptrLog.note(kind, e, this.pointers.size, [...this.pointers.keys()], extra);
+    this.queueStats();
+  }
 
   private place(pos: Pt): void {
     const geom = this.geom;
@@ -689,6 +706,8 @@ export class PdfViewer {
         dpr: Math.min(window.devicePixelRatio || 1, 3),
         render: this.lastRender,
         pointers: this.pointers.size,
+        pointerIds: [...this.pointers.keys()],
+        pointerLog: this.ptrLog.entries,
         maxPointers: this.maxPointers,
         gestureEvents: this.gestureEvents,
         pageZoom: window.visualViewport?.scale ?? null,
