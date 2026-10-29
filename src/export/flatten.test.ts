@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PageGeometry, type PageSpec, type SheetPoint } from '../geometry/page';
 import type { LineObject, PageObject } from '../model/model';
 import type { ExportPage } from './coverSimple';
-import { ExportError } from './errors';
+import { ExportCancelled, ExportError } from './errors';
 import { exportFlattened, flatImageMatrix } from './flatten';
 import type { RasterResult } from './rasterize';
 import { fakeJpeg, makePng } from './testImages';
@@ -173,6 +173,55 @@ describe('exportFlattened: pagine con oggetti sostituite, le altre intatte', () 
     const after = text(r.bytes).toLowerCase();
     for (const value of ['Mario Rossi', 'campo2']) expect(after, value).not.toContain(hex(value));
     expect(after).toContain(hex('Luigi Verdi')); // il campo della pagina 1 e' raggiunto dalla sua pagina
+  });
+
+  describe('Annulla (5c): ci si ferma tra una pagina e l\'altra', () => {
+    it('premuto durante la pagina 2 di 3: la pagina 2 finisce, la 3 non parte, si lancia ExportCancelled e l\'originale non cambia', async () => {
+      const original = await buildDoc();
+      const copy = original.slice();
+      const ctl = new AbortController();
+      const calls: number[] = [];
+      const raster = async (i: number): Promise<RasterResult> => {
+        calls.push(i);
+        if (calls.length === 2) ctl.abort(); // l'utente preme Annulla mentre si rasterizza la seconda pagina da appiattire
+        return jpegRaster()();
+      };
+      await expect(exportFlattened(original, exportPages([1, 1, 1]), raster, { signal: ctl.signal })).rejects.toBeInstanceOf(ExportCancelled);
+      expect(calls).toEqual([0, 1]); // la seconda e' finita, la terza non e' partita
+      expect(Array.from(original)).toEqual(Array.from(copy)); // byte di partenza intatti
+    });
+    it('il numero di pagine finite e\' nell\'eccezione; gia\' annullato prima di cominciare: nessuna pagina', async () => {
+      const original = await buildDoc();
+      const ctl = new AbortController();
+      let n = 0;
+      const raster = async (): Promise<RasterResult> => {
+        if (++n === 1) ctl.abort();
+        return jpegRaster()();
+      };
+      const e1 = await exportFlattened(original, exportPages([1, 1, 1]), raster, { signal: ctl.signal }).catch((e: unknown) => e);
+      expect(e1).toBeInstanceOf(ExportCancelled);
+      expect((e1 as ExportCancelled).pagesDone).toBe(1);
+      const done = new AbortController();
+      done.abort();
+      let calls = 0;
+      const e2 = await exportFlattened(original, exportPages([1, 1, 1]), async () => (calls++, jpegRaster()()), { signal: done.signal }).catch((e: unknown) => e);
+      expect(e2).toBeInstanceOf(ExportCancelled);
+      expect(calls).toBe(0);
+    });
+    it('premuto durante l\'ultima pagina: ci si ferma lo stesso, prima della pulizia e del salvataggio', async () => {
+      const original = await buildDoc();
+      const ctl = new AbortController();
+      const raster = async (): Promise<RasterResult> => {
+        ctl.abort();
+        return jpegRaster()();
+      };
+      await expect(exportFlattened(original, exportPages([0, 1, 0]), raster, { signal: ctl.signal })).rejects.toBeInstanceOf(ExportCancelled);
+    });
+    it('senza segnale (o non abortito) l\'esportazione finisce come prima', async () => {
+      const original = await buildDoc();
+      const r = await exportFlattened(original, exportPages([1, 1, 1]), jpegRaster(), { signal: new AbortController().signal });
+      expect(r.flattenedPages).toBe(3);
+    });
   });
 
   it('pagine senza oggetti: operatori e testi identici a quelli dell\'originale (anche se condividono font e immagine con la pagina appiattita)', async () => {

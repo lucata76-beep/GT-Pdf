@@ -4,7 +4,7 @@
 // subito dopo il gesto (CP0: dopo 6 s NotAllowedError). Alla chiusura si rilasciano il File e l'indirizzo del blob.
 // Nessuna stima di byte o di tempo: nel dialogo ci sono solo pixel (che si calcolano) e, a file generato, valori misurati.
 import { Download, type ShareOutcome, shareAvailability, shareFile } from '../export/deliver';
-import { describeExportError } from '../export/errors';
+import { ExportCancelled, describeExportError } from '../export/errors';
 import type { ExportWarning } from '../export/coverSimple';
 import { type Dpi, type ImageFormat, JPEG_QUALITY, type RasterPage, defaultDpi, fmtInt, pageLabel, planDpi } from '../export/flatPlan';
 import { fmt } from '../geometry/numbers';
@@ -53,8 +53,11 @@ export interface ExportDialogInput {
   pagesWithObjects: number;
   /** Le pagine con oggetti (le sole che "Appiattito" rasterizza) con le dimensioni reali del foglio mostrato. */
   rasterPages: readonly RasterPage[];
-  /** Genera il PDF. Puo' lanciare (ExportError o altro): il dialogo mostra il messaggio e il lavoro resta intatto. */
-  run(choice: ExportChoice, onProgress: (p: ExportProgress) => void): Promise<ExportRunResult>;
+  /**
+   * Genera il PDF. Puo' lanciare (ExportError o altro): il dialogo mostra il messaggio e il lavoro resta intatto. In "Appiattito" `signal` si abortisce
+   * con "Annulla" e `run` lancia `ExportCancelled` dopo aver finito la pagina in corso ("Copertura semplice" non si annulla: dura meno di 1.1 s).
+   */
+  run(choice: ExportChoice, onProgress: (p: ExportProgress) => void, signal: AbortSignal): Promise<ExportRunResult>;
 }
 
 export const fmtSize = (bytes: number): string => (bytes >= 1024 * 1024 ? `${fmt(bytes / (1024 * 1024), 2)} MB` : `${fmt(bytes / 1024, 1)} kB`);
@@ -105,7 +108,7 @@ export function showExportDialog(input: ExportDialogInput): Promise<void> {
     const kv = (k: string, v: string): HTMLElement => h('div', { class: 'kv' }, h('span', { class: 'k' }, k), h('span', { class: 'v num exp-v' }, v));
 
     // ---- 1) scelta ----
-    function renderChoose(): void {
+    function renderChoose(notice: string | null = null): void {
       const radio = (name: string, value: string, label: string, desc: string | null, opts: { checked: boolean; disabled?: boolean; reason?: string | null; onPick: () => void; cls?: string }): HTMLElement => {
         const el = h('input', { type: 'radio', name, value, checked: opts.checked, disabled: opts.disabled === true });
         el.addEventListener('change', () => {
@@ -172,6 +175,7 @@ export function showExportDialog(input: ExportDialogInput): Promise<void> {
         modeCards,
         flatOpts,
         summary,
+        notice === null ? null : h('p', { class: 'exp-cancelled', role: 'status' }, notice),
         note,
         warnings,
         input.objectCount === 0 ? h('p', { class: 'hint' }, 'Non hai ancora disegnato nulla: il nuovo file avrà le stesse pagine dell’originale, senza aggiunte.') : null,
@@ -188,15 +192,25 @@ export function showExportDialog(input: ExportDialogInput): Promise<void> {
       const bar = h('progress', { class: 'exp-progress', max: 100, 'aria-label': 'Avanzamento' });
       const line = h('p', { class: 'dialog-msg', role: 'status', 'aria-live': 'polite' }, 'Preparazione del PDF…');
       const detail = h('p', { class: 'hint exp-progress-detail num' });
+      // "Annulla" solo in "Appiattito" (5c): ferma tra una pagina e l'altra, la pagina in corso finisce. "Copertura semplice" dura meno di 1.1 s: non si annulla.
+      const ctl = new AbortController();
+      const cancelBtn = h('button', { class: 'btn', type: 'button', disabled: !flat }, 'Annulla');
+      cancelBtn.addEventListener('click', () => {
+        if (ctl.signal.aborted) return;
+        cancelBtn.disabled = true;
+        line.textContent = 'Annullamento: finisco la pagina in corso…';
+        ctl.abort();
+      });
       show(
         h('h2', { id: 'exp-title', class: 'dialog-title' }, 'Esporta PDF'),
         line,
         detail,
         bar,
-        h('div', { class: 'dialog-actions' }, h('button', { class: 'btn', type: 'button', disabled: true }, 'Annulla'), h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Esporta')),
+        h('div', { class: 'dialog-actions' }, cancelBtn, h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Esporta')),
       );
       try {
         const r = await input.run(flat ? { mode: 'flat', dpi: choice.dpi, format: choice.format } : { mode: 'simple' }, (p) => {
+          if (ctl.signal.aborted) return; // dopo "Annulla" la riga resta quella dell'annullamento
           if (flat) {
             line.textContent = `Pagina ${p.done} di ${p.total}`;
             detail.textContent = `Pagina ${p.page ?? '?'} del PDF · ${choice.dpi} dpi · ${FORMAT_NAME[choice.format]} · immagini finora ${fmtSize(p.imageBytes ?? 0)}`;
@@ -205,13 +219,14 @@ export function showExportDialog(input: ExportDialogInput): Promise<void> {
             line.textContent = `Scrittura delle pagine con oggetti: ${p.done} di ${p.total}…`;
             bar.value = p.total > 0 ? (p.done / p.total) * 100 : 100;
           }
-        });
+        }, ctl.signal);
         busy = false;
         download = new Download(r.file);
         renderDone(r);
       } catch (e) {
         busy = false;
-        renderError(e);
+        if (e instanceof ExportCancelled) renderChoose('Esportazione annullata. Nulla è stato scritto.');
+        else renderError(e);
       }
     }
 

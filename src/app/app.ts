@@ -1143,7 +1143,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       objectCount: model.objectCount(),
       pagesWithObjects: rasterPages.length,
       rasterPages,
-      run: (choice, onProgress) => generatePdf(doc, outName, choice, onProgress),
+      run: (choice, onProgress, signal) => generatePdf(doc, outName, choice, onProgress, { signal }),
     });
   }
 
@@ -1154,6 +1154,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     pngDirect?: boolean;
     /** Solo "Appiattito": qualita' JPEG da 0 a 1 (predefinita `JPEG_QUALITY`). */
     jpegQuality?: number;
+    /** Solo "Appiattito": Annulla (si ferma tra una pagina e l'altra, lancia `ExportCancelled`). */
+    signal?: AbortSignal;
   }
   type GenerateTiming = Record<string, number>;
   /** Genera il PDF esportato (scrittura + controllo). Usata dal dialogo e, nel build di prova, dal gancio `runExport` delle misure. */
@@ -1207,7 +1209,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
             page.cleanup();
           }
         },
-        { onProgress: (p) => onProgress({ done: p.current, total: p.total, page: p.page, imageBytes: p.imageBytes }), objectsPerTick: options.objectsPerTick, pngDirect: options.pngDirect },
+        { onProgress: (p) => onProgress({ done: p.current, total: p.total, page: p.page, imageBytes: p.imageBytes }), objectsPerTick: options.objectsPerTick, pngDirect: options.pngDirect, signal: options.signal },
       );
     } finally {
       void doc.doc.cleanup(); // libera le cache di immagini e font di PDF.js usate dalla rasterizzazione

@@ -17,6 +17,20 @@ export type ExportErrorCode =
   /** "Appiattito": il dispositivo non riesce a creare o codificare il canvas di una pagina (ultimo pixel non confermato, immagine nulla). */
   | 'canvas';
 
+/**
+ * L'utente ha premuto "Annulla" durante "Appiattito" (5c): l'esportazione si ferma TRA UNA PAGINA E L'ALTRA (la pagina in corso finisce: dentro una
+ * pagina PDF.js, il canvas e `toBlob` non si interrompono). Non e' un errore e non ha un messaggio tecnico: nulla e' stato scritto fuori dalla memoria.
+ */
+export class ExportCancelled extends Error {
+  /** Pagine appiattite (finite) prima dell'annullamento. */
+  readonly pagesDone: number;
+  constructor(pagesDone = 0) {
+    super('Esportazione annullata');
+    this.name = 'ExportCancelled';
+    this.pagesDone = pagesDone;
+  }
+}
+
 export class ExportError extends Error {
   readonly code: ExportErrorCode;
   /** Pagina (da 1) a cui si riferisce l'errore, se e' di una pagina. */

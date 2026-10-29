@@ -12,7 +12,7 @@
 import { PDFDocument, PDFName, type PDFObject, type PDFPage, type PDFRef } from '@cantoo/pdf-lib';
 import { PageGeometry, type PageSpec } from '../geometry/page';
 import { type ExportPage, type ExportWarning, checkSamePage } from './coverSimple';
-import { ExportError, toExportError } from './errors';
+import { ExportCancelled, ExportError, toExportError } from './errors';
 import { type EmbedVia, embedFlatImage } from './flatImage';
 import { PAGE_KEEP_KEYS, annotationParentRefs, annotationRefs, pageGarbageCandidates, pruneOrphans, removeFormFields } from './prune';
 import type { RasterResult } from './rasterize';
@@ -57,6 +57,11 @@ export interface FlatOptions {
   pngDirect?: boolean;
   /** Oggetti PDF per giro del salvataggio prima di cedere il controllo (predefinito di pdf-lib: 50). */
   objectsPerTick?: number;
+  /**
+   * Annulla (5c). Si controlla prima di ogni pagina e dopo l'ultima (prima della pulizia e del salvataggio): la pagina in corso finisce sempre,
+   * poi `exportFlattened` lancia `ExportCancelled` e il lavoro fatto (immagini in memoria) si abbandona. Nulla e' stato scritto fuori dalla memoria.
+   */
+  signal?: AbortSignal;
 }
 
 export interface FlatResult {
@@ -118,9 +123,11 @@ export async function exportFlattened(
   try {
     let done = 0;
     for (const i of targets) {
+      if (options.signal?.aborted) throw new ExportCancelled(done);
       const input = pages[i] as ExportPage;
       const no = i + 1;
-      options.onProgress?.({ current: ++done, total: targets.length, page: no, imageBytes });
+      done++; // fuori dalla chiamata: con `?.` e nessun ascoltatore l'incremento non verrebbe valutato
+      options.onProgress?.({ current: done, total: targets.length, page: no, imageBytes });
       let node: PDFPage['node'];
       try {
         const page = doc.getPage(i);
@@ -162,7 +169,9 @@ export async function exportFlattened(
       tEmbed += now() - te0;
       await yieldToUi();
     }
+    if (options.signal?.aborted) throw new ExportCancelled(done); // premuto durante l'ultima pagina: ci si ferma prima della pulizia e del salvataggio
   } catch (e) {
+    if (e instanceof ExportCancelled) throw e;
     throw toExportError(e, 'write');
   }
 
