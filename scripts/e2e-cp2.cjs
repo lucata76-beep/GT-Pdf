@@ -218,8 +218,8 @@ async function mouseSuite(browser) {
 
   // --- Ortogonale ---
   await tool(page, 'Retta');
-  await page.locator('.st-toggle').click();
-  check('ORTO: attivo', (await page.locator('.st-toggle').getAttribute('aria-pressed')) === 'true');
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
+  check('ORTO: attivo', (await page.locator('.st-toggle[data-toggle="ortho"]').getAttribute('aria-pressed')) === 'true');
   const o1 = await toClient(page, sample, { x: 200, y: 100 });
   const o2 = await toClient(page, sample, { x: 330, y: 112 }); // quasi orizzontale
   await clickAt(page, o1);
@@ -237,8 +237,8 @@ async function mouseSuite(browser) {
   objs = await objects(page);
   const ov = objs[objs.length - 1];
   check('ORTO: retta quasi verticale diventa verticale (x uguali)', near(ov.pts[0].x, ov.pts[1].x, 1e-6) && near(ov.pts[1].y, 250, 1.5), JSON.stringify(ov.pts));
-  await page.locator('.st-toggle').click();
-  check('ORTO: si disattiva', (await page.locator('.st-toggle').getAttribute('aria-pressed')) === 'false');
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
+  check('ORTO: si disattiva', (await page.locator('.st-toggle[data-toggle="ortho"]').getAttribute('aria-pressed')) === 'false');
   await clickAt(page, await toClient(page, sample, { x: 450, y: 100 }));
   await clickAt(page, await toClient(page, sample, { x: 520, y: 140 }));
   objs = await objects(page);
@@ -355,7 +355,7 @@ async function rotateCropSuite(browser) {
     const objs = await objects(page);
     check(`${title}: la retta disegnata coincide con il riferimento (1.5 pt)`, objs.length === 1 && near(objs[0].pts[0].x, sample.ref[0].x, 1.5) && near(objs[0].pts[0].y, sample.ref[0].y, 1.5) && near(objs[0].pts[1].x, sample.ref[1].x, 1.5) && near(objs[0].pts[1].y, sample.ref[1].y, 1.5), JSON.stringify(objs[0]?.pts));
     // 4. ortogonale come appare sullo schermo
-    await page.locator('.st-toggle').click();
+    await page.locator('.st-toggle[data-toggle="ortho"]').click();
     await clickAt(page, await toClient(page, sample, { x: 120, y: 120 }));
     await clickAt(page, await toClient(page, sample, { x: 250, y: 131 }));
     const all = await objects(page);
@@ -367,7 +367,7 @@ async function rotateCropSuite(browser) {
     const v = all2[all2.length - 1];
     check(`${title}: ORTO verticale sullo schermo (x uguali nel foglio)`, near(v.pts[0].x, v.pts[1].x, 1e-6) && near(v.pts[1].y, 300, 1.5), JSON.stringify(v.pts));
     // 5. Distanza: 50 mm sullo schermo, in orizzontale e in verticale
-    await page.locator('.st-toggle').click();
+    await page.locator('.st-toggle[data-toggle="ortho"]').click();
     await tool(page, 'Distanza');
     await clickAt(page, await toClient(page, sample, { x: 100, y: 100 }));
     await clickAt(page, await toClient(page, sample, { x: 100 + 50 * MM, y: 100 }));
@@ -440,8 +440,8 @@ async function touchSuite(browser) {
   check('Retta con il dito: oggetto creato nel punto toccato (tolleranza 2.5 pt: 1 px CSS ~ 1.4 pt)', objs.length === 1 && near(objs[0].pts[0].x, 150, 2.5) && near(objs[0].pts[1].y, 250, 2.5), JSON.stringify(objs[0]?.pts));
 
   // --- Ortogonale con il dito: la lente mostra il punto vincolato ---
-  await page.locator('.st-toggle').click();
-  check('ORTO acceso dal tocco', (await page.locator('.st-toggle').getAttribute('aria-pressed')) === 'true');
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
+  check('ORTO acceso dal tocco', (await page.locator('.st-toggle[data-toggle="ortho"]').getAttribute('aria-pressed')) === 'true');
   const u1 = await toClient(page, sample, { x: 150, y: 400 });
   const u2 = await toClient(page, sample, { x: 360, y: 412 });
   await aimTap(u1);
@@ -453,7 +453,7 @@ async function touchSuite(browser) {
   objs = await objects(page);
   const ho = objs[objs.length - 1];
   check('ORTO con il dito: retta orizzontale', objs.length === 2 && near(ho.pts[0].y, ho.pts[1].y, 1e-6));
-  await page.locator('.st-toggle').click();
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
 
   // --- Due dita non inseriscono punti (pinch) ---
   await tool(page, 'Linea');

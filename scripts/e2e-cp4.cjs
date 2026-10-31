@@ -319,14 +319,14 @@ async function mouseSuite(browser, decoder) {
   const ci = (await covers(page)).at(-1);
   check('Cerchio creato: centro nel primo punto, raggio = distanza dal punto sul bordo', ci.tag === 'circle' && near(ci.cx, 500, 0.8) && near(ci.cy, 420, 0.8) && near(ci.r, 60, 0.8), JSON.stringify(ci));
   // ORTO non vincola le coperture: con ORTO attivo un rettangolo con angoli in diagonale si crea normalmente
-  await page.locator('.st-toggle').click();
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
   await tool(page, 'Copertura');
   await page.locator('.ctx-covers button', { hasText: 'Rettangolo' }).click();
   await tapSheet({ x: 400, y: 100 });
   await tapSheet({ x: 480, y: 160 });
   const ortho = (await covers(page)).at(-1);
   check('ORTO attivo: la copertura non e\' vincolata (rettangolo 80 x 60, non appiattito)', near(ortho.w, 80, 1) && near(ortho.h, 60, 1), JSON.stringify(ortho));
-  await page.locator('.st-toggle').click();
+  await page.locator('.st-toggle[data-toggle="ortho"]').click();
 
   // --- Rette per le prove di selezione ---
   await tool(page, 'Retta');

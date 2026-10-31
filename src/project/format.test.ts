@@ -104,6 +104,15 @@ describe('formato del progetto: scrittura e lettura', () => {
     for (const w of ['history', 'undo', 'redo', 'select', 'tool', 'zoom', 'uisize', 'ortho', 'orto']) expect(text, w).not.toContain(w);
   });
 
+  it('non si salvano gli interruttori di snap (Estremo, Punto medio) e la griglia (visibilita\' e passo): stato della sessione; le chiavi del file sono quelle della versione 1', () => {
+    const text = serializeProject(sampleProject());
+    for (const w of ['snap', 'estremo', 'punto medio', 'griglia', 'grid', 'passo', 'step']) expect(text.toLowerCase(), w).not.toContain(w);
+    const j = asJson();
+    expect(Object.keys(j).sort()).toEqual(['app', 'format', 'pages', 'pdf', 'version']);
+    expect(Object.keys(j.pages[0]).sort()).toEqual(['number', 'objects', 'rotate', 'scale', 'userUnit', 'view']);
+    expect(j.version).toBe(1);
+  });
+
   it('i campi sconosciuti si ignorano senza copiarli; __proto__ e constructor non arrivano mai sugli oggetti ne\' inquinano i prototipi', () => {
     const j = asJson();
     j.extra = { a: 1 };
