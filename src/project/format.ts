@@ -9,7 +9,7 @@
 //  - Coordinate nello spazio utente PDF (pt), mai pixel di schermo; la scala e' `mmPerPt` a precisione piena (N e l'etichetta si ricavano).
 //  - Numeri: `JSON.stringify` scrive il numero piu' breve che si rilegge identico (round-trip esatto dei double).
 //  - Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell'interfaccia, ORTO e interruttori di snap Estremo e Punto medio
-//    (CP6a: stato della sessione, non del lavoro; il formato e la versione non cambiano).
+//    e la griglia (accesa e passo) (CP6a: stato della sessione, non del lavoro; il formato e la versione non cambiano).
 import { COVER_TYPES, type CoverKind } from '../geometry/cover';
 import { type DimType, DIM_TYPES } from '../geometry/dimension';
 import type { UserPoint } from '../geometry/page';

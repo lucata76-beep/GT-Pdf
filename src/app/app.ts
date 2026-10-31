@@ -200,7 +200,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   /** "10 mm reali = 28.35 pt sul foglio" / "10 mm del foglio = 28.35 pt sul foglio". */
   const gridStepText = (): string => `${fmtTrim(gridMm, 3)} mm ${model.scale(pageNo) ? 'reali' : 'del foglio'} = ${fmt(gridStepNow())} pt sul foglio`;
   /** Avviso quando la griglia e' accesa ma a questo zoom e' troppo fitta: non si vede e non arrotonda. */
-  const gridHiddenNote = (): string => (gridOn && pdf && !gridVisible(gridStepNow(), viewer.zoomValue) ? ` Ma a questo zoom il passo e' sotto ${GRID_MIN_SCREEN_PX} px: la griglia non si vede e non arrotonda.` : '');
+  const gridHiddenNote = (): string => (gridOn && pdf && !gridVisible(gridStepNow(), viewer.zoomValue) ? ` Ma a questo zoom il passo è sotto ${GRID_MIN_SCREEN_PX} px: la griglia non si vede e non arrotonda.` : '');
   /** Rimanda al visore il passo della pagina corrente e rilegge il controllo del pannello. */
   function refreshGrid(): void {
     viewer.setGrid(gridOn && pdf ? gridStepNow() : null);
@@ -526,13 +526,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       gridMm = mm;
       gridReportedPt = gridOn ? gridStepNow() : 0;
       refreshGrid();
-      say(`Passo della griglia: ${gridStepText()}.${gridOn ? gridHiddenNote() : ' La griglia e\' spenta: accendila dalla barra di stato.'}`);
+      say(`Passo della griglia: ${gridStepText()}.${gridOn ? gridHiddenNote() : ' La griglia è spenta: accendila dalla barra di stato.'}`);
       viewer.refreshAim();
     },
     note: () => {
-      if (!pdf) return 'Il passo e\' in mm del foglio finche\' la pagina non e\' calibrata, poi in mm reali.';
+      if (!pdf) return 'Il passo è in mm del foglio finché la pagina non è calibrata, poi in mm reali.';
       const s = model.scale(pageNo);
-      return s ? `Pagina calibrata (${scaleLabel(s)}): il passo e' in mm REALI, ora ${fmt(gridStepNow())} pt sul foglio.` : `Pagina non calibrata: il passo e' in mm del FOGLIO (${fmt(gridStepNow())} pt). Dopo la calibrazione sara' in mm reali.`;
+      return s ? `Pagina calibrata (${scaleLabel(s)}): il passo è in mm REALI, ora ${fmt(gridStepNow())} pt sul foglio.` : `Pagina non calibrata: il passo è in mm del FOGLIO (${fmt(gridStepNow())} pt). Dopo la calibrazione sarà in mm reali.`;
     },
   });
   const snapPanelToggles = h(
@@ -1069,7 +1069,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       const vis = gridVisible(gridStepNow(), zoom);
       if (vis !== gridWasVisible) {
         gridWasVisible = vis;
-        say(vis ? `Griglia visibile: passo ${gridStepText()}.` : `Griglia nascosta: a questo zoom il passo e' sotto ${GRID_MIN_SCREEN_PX} px (non si vede e non arrotonda).`);
+        say(vis ? `Griglia visibile: passo ${gridStepText()}.` : `Griglia nascosta: a questo zoom il passo è sotto ${GRID_MIN_SCREEN_PX} px (non si vede e non arrotonda).`);
       }
     }
   };
