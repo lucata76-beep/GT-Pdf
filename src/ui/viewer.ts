@@ -126,6 +126,8 @@ export class PdfViewer {
   private sel: { id: number; start: Pt; moved: boolean; grab: boolean; touch: boolean } | null = null;
   /** Ultima posizione del mouse senza tasti (per rifare l'anteprima). */
   private lastHover: Pt | null = null;
+  /** Passo della griglia in pt del foglio, o null se spenta: si riapplica a ogni pagina (le dimensioni cambiano). */
+  private gridStep: number | null = null;
 
   private renderTimer = 0;
   private renderToken = 0;
@@ -205,6 +207,7 @@ export class PdfViewer {
     this.logNext = page !== null;
     this.clearScene();
     if (!page) {
+      this.overlay.setGrid(null);
       this.geom = null;
       this.stage.replaceChildren();
       if (this.canvas) release(this.canvas);
@@ -218,6 +221,7 @@ export class PdfViewer {
     this.geom = new PageGeometry({ view: page.view as [number, number, number, number], rotate: page.rotate, userUnit: page.userUnit });
     this.pageW = this.geom.width;
     this.pageH = this.geom.height;
+    this.overlay.setGrid(this.gridStep !== null ? { stepPt: this.gridStep, w: this.pageW, h: this.pageH } : null);
     this.fit();
     await this.renderNow();
   }
@@ -266,6 +270,11 @@ export class PdfViewer {
     const g = this.geom;
     const badge: Badge | null = b && g ? { at: g.userToSheet(b.at), lines: b.lines } : null;
     this.overlay.setBadge(badge);
+  }
+  /** Griglia: passo in pt del foglio della pagina mostrata (null = spenta). La disegna solo se il passo a schermo e' abbastanza grande (vedi `geometry/grid`). */
+  setGrid(stepPt: number | null): void {
+    this.gridStep = stepPt;
+    this.overlay.setGrid(stepPt !== null && this.page ? { stepPt, w: this.pageW, h: this.pageH } : null);
   }
   /** Svuota il livello di disegno (cambio pagina o documento). */
   clearScene(): void {

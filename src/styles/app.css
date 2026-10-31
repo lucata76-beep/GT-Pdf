@@ -502,6 +502,15 @@ body.app-mode {
   paint-order: stroke;
   font: 500 11px var(--font-mono);
 }
+/* Griglia (CP6a): linee sottili di 1 px CSS (non scalano con lo zoom) in un colore del progetto, a meta' opacita': sono una guida, non un'informazione. Linee e non
+   punti perche' sono poche (una per passo, solo quelle visibili: al massimo (larghezza + altezza) / 8 px), cadono esattamente sui nodi a ogni zoom e non hanno le
+   giunzioni sfocate di una trama ripetuta a passo frazionario. */
+.sc-grid {
+  stroke: var(--cad-border-strong);
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
 /* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio; etichetta col nome.
    Dimensioni in px CSS fissi (non scalano con lo zoom). Solo a schermo: sta nel livello di sovrapposizione, non nel disegno esportato. */
 .snap-mark rect,
@@ -854,6 +863,45 @@ body.app-mode {
   background: var(--cad-accent-fill);
   border-color: var(--cad-accent-fill);
   color: #ffffff;
+}
+/* Interruttori di aggancio e griglia nel pannello a destra (CP6a): gli stessi della barra di stato, con lo stesso stato. Sotto 720 px (iPhone in verticale) la barra
+   di stato resta compatta come in DESIGN.md ("X, Y, scala, ORTO"): Estremo, Punto medio e Griglia vivono solo nel pannello. Misurato: tenerli nella barra la portava,
+   a 390 x 780, da 93-140 a 123-200 px e il visore da 317-453 a 256-423 px. */
+.panel-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.panel-toggle {
+  min-height: var(--hit);
+  min-width: var(--hit);
+  padding: 0 0.625rem;
+  font: 600 0.6875rem/1rem var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.panel-toggle[aria-pressed='true'] {
+  background: var(--cad-accent-fill);
+  border-color: var(--cad-accent-fill);
+  color: #ffffff;
+}
+.grid-note {
+  margin: 0.25rem 0 0;
+}
+/* Campo "Passo griglia": stessa disposizione dei controlli delle proprieta' (.style-ctl / .ctl-sec) ma con classi proprie, cosi' le prove delle sezioni delle proprieta' non lo contano. */
+.grid-ctl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+.grid-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+@media (max-width: 719.98px) {
+  .statusbar .st-toggle:not([data-toggle='ortho']) {
+    display: none;
+  }
 }
 @media (max-width: 719.98px) {
   .st-coord .unit {

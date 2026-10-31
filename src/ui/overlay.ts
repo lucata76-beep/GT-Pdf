@@ -3,6 +3,7 @@
 // transform translate+scale(zoom), quindi spessori, pattern di tratteggio e corpo dei testi sono in pt come nell'esportazione.
 // Segni, mira e badge hanno dimensione fissa sullo schermo e vengono riposizionati a ogni cambio di vista.
 import { type SheetCover, coverShapeOf } from '../geometry/cover';
+import { gridVisible } from '../geometry/grid';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
 import { SNAP_LABEL, type SnapKind } from '../geometry/snap';
@@ -77,6 +78,9 @@ export class SceneOverlay {
   private readonly previewG = svgEl('g', { class: 'sc-preview' });
   private readonly guide = svgEl('path', { class: 'sc-guide', fill: 'none' });
   private readonly markersG = svgEl('g', { class: 'sc-markers' });
+  /** Griglia (CP6a): linee sottili di 1 px CSS, sotto gli oggetti e sopra il PDF, nelle coordinate dello schermo; si ridisegna a ogni cambio di vista (solo le linee visibili). */
+  private readonly gridEl = svgEl('path', { class: 'sc-grid', fill: 'none', display: 'none' });
+  private grid: { stepPt: number; w: number; h: number } | null = null;
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
   /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio) con il nome: solo a schermo, mai esportato. */
   private readonly snapG = svgEl('g', { class: 'snap-mark', display: 'none' });
@@ -103,7 +107,7 @@ export class SceneOverlay {
     this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.outlineG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
     this.snapG.append(this.snapLabel);
-    svg.append(this.sheetG, this.markersG, this.aimG, this.snapG);
+    svg.append(this.gridEl, this.sheetG, this.markersG, this.aimG, this.snapG);
     this.el = h('div', { class: 'viewer-layer' }, svg, this.badgeEl);
   }
 
@@ -116,6 +120,7 @@ export class SceneOverlay {
     this.sheetG.setAttribute('transform', `translate(${tx} ${ty}) scale(${zoom})`);
     if (zoomChanged) for (const s of [...this.strokes, ...this.draftStrokes]) this.applyWidth(s);
     this.placeScreenItems();
+    this.drawGrid();
   }
 
   private applyWidth(s: StrokeEl): void {
@@ -268,6 +273,50 @@ export class SceneOverlay {
     this.aim = p;
     this.aimG.setAttribute('display', p ? 'inline' : 'none');
     this.placeScreenItems();
+  }
+
+  /**
+   * Griglia: passo in pt del foglio e dimensioni della pagina mostrata (l'origine e' l'angolo in basso a sinistra); null la toglie. Si disegna solo se il passo a
+   * schermo e' almeno `GRID_MIN_SCREEN_PX`.
+   */
+  setGrid(g: { stepPt: number; w: number; h: number } | null): void {
+    this.grid = g;
+    this.drawGrid();
+  }
+
+  private drawGrid(): void {
+    const g = this.grid;
+    if (!g || !gridVisible(g.stepPt, this.zoom)) {
+      this.gridEl.setAttribute('display', 'none');
+      return;
+    }
+    const stepPx = g.stepPt * this.zoom;
+    const vw = this.el.clientWidth;
+    const vh = this.el.clientHeight;
+    const left = this.tx;
+    const right = this.tx + g.w * this.zoom;
+    const top = this.ty;
+    const bottom = this.ty + g.h * this.zoom;
+    const maxI = Math.floor(g.w / g.stepPt + 1e-9);
+    const maxJ = Math.floor(g.h / g.stepPt + 1e-9);
+    // solo le linee dentro il riquadro visibile (con un margine di una linea)
+    const i0 = Math.max(0, Math.floor((0 - left) / stepPx));
+    const i1 = Math.min(maxI, Math.ceil((vw - left) / stepPx));
+    const yTop = Math.max(top, 0);
+    const yBottom = Math.min(bottom, vh);
+    const parts: string[] = [];
+    if (yBottom > yTop) for (let i = i0; i <= i1; i++) parts.push(`M${left + i * stepPx} ${yTop}V${yBottom}`);
+    // linea j: y = ty + (H - j * passo) * zoom, l'origine e' in basso
+    const xL = Math.max(left, 0);
+    const xR = Math.min(right, vw);
+    const j0 = Math.max(0, Math.floor((bottom - vh) / stepPx));
+    const j1 = Math.min(maxJ, Math.ceil((bottom - 0) / stepPx));
+    if (xR > xL) for (let j = j0; j <= j1; j++) {
+      const y = bottom - j * stepPx;
+      if (y >= top - 0.5 && y <= vh + 0.5) parts.push(`M${xL} ${y}H${xR}`);
+    }
+    this.gridEl.setAttribute('d', parts.join(''));
+    this.gridEl.removeAttribute('display');
   }
 
   /** Marcatore di snap sul punto effettivo (foglio) con il tipo; null lo toglie. */

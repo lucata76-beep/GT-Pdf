@@ -12,6 +12,7 @@ import { fmt, fmtTrim } from '../geometry/numbers';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
+import { GRID_DEFAULT_MM, GRID_MIN_SCREEN_PX, gridStepPt, gridVisible } from '../geometry/grid';
 import { SNAP_LABEL, type SnapHit, type SnapKind, findSnap, snapRadiusPt } from '../geometry/snap';
 import { type Command, History } from '../model/history';
 import {
@@ -55,6 +56,7 @@ import { type SaveRunResult, showSaveDialog } from '../ui/saveDialog';
 import { JPEG_QUALITY, type RasterPage } from '../export/flatPlan';
 import { type Child, h } from '../ui/dom';
 import { type IconName, icon } from '../ui/icons';
+import { createGridControls } from '../ui/gridControls';
 import { Keypad } from '../ui/keypad';
 import { type MenuEntry, menuButton } from '../ui/menu';
 import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
@@ -121,6 +123,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let ortho = false;
   /** Snap sugli oggetti (V2a): Estremo e Punto medio, attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
   const snapOn: Record<SnapKind, boolean> = { end: true, mid: true };
+  /** Griglia (V2a): spenta all'avvio; passo in mm (reali se la pagina ha una scala, del foglio se no). Stato della sessione: NON si salva nel progetto. */
+  let gridOn = false;
+  let gridMm = GRID_DEFAULT_MM;
+  /** Ultimo passo in pt (pagina corrente) e ultima visibilita' comunicati: servono a dire in un messaggio quando una ricalibrazione o lo zoom li cambiano. */
+  let gridReportedPt = 0;
+  let gridWasVisible = false;
   /** Proprieta' dei NUOVI oggetti: tipo di linea, colore e spessore (anche delle quote), corpo del testo (testi e quote). */
   const stroke: Stroke = { ...DEFAULT_STROKE };
   let textPt = DEFAULT_TEXT_PT;
@@ -151,7 +159,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Costruzione per punti ----------
   const construction = new Construction(
-    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch) => snapAt(raw, touch) },
+    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch) => snapAt(raw, touch), grid: () => gridActiveStepPt() },
     {
       line: (kind, points) => {
         const obj: LineObject = { id: model.newId(), kind, points: points.map((p) => ({ ...p })), stroke: { ...stroke } };
@@ -181,6 +189,37 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn);
   }
 
+  /** Passo della griglia in pt FISICI del foglio per la pagina corrente (mm reali con la scala della pagina, altrimenti mm del foglio). */
+  const gridStepNow = (): number => gridStepPt(gridMm, model.scale(pageNo));
+  /** Il passo se la griglia e' accesa e si vede a questo zoom (allora disegna e arrotonda), altrimenti null. */
+  function gridActiveStepPt(): number | null {
+    if (!gridOn || !pdf) return null;
+    const step = gridStepNow();
+    return gridVisible(step, viewer.zoomValue) ? step : null;
+  }
+  /** "10 mm reali = 28.35 pt sul foglio" / "10 mm del foglio = 28.35 pt sul foglio". */
+  const gridStepText = (): string => `${fmtTrim(gridMm, 3)} mm ${model.scale(pageNo) ? 'reali' : 'del foglio'} = ${fmt(gridStepNow())} pt sul foglio`;
+  /** Avviso quando la griglia e' accesa ma a questo zoom e' troppo fitta: non si vede e non arrotonda. */
+  const gridHiddenNote = (): string => (gridOn && pdf && !gridVisible(gridStepNow(), viewer.zoomValue) ? ` Ma a questo zoom il passo e' sotto ${GRID_MIN_SCREEN_PX} px: la griglia non si vede e non arrotonda.` : '');
+  /** Rimanda al visore il passo della pagina corrente e rilegge il controllo del pannello. */
+  function refreshGrid(): void {
+    viewer.setGrid(gridOn && pdf ? gridStepNow() : null);
+    gridWasVisible = gridActiveStepPt() !== null;
+    gridCtl.refresh();
+  }
+  /**
+   * Nota per il messaggio di stato dopo un cambio di scala (ricalibrazione, annulla/ripeti di una scala): il passo in mm non cambia ma quello in pt del foglio si'.
+   * Vuota se la griglia e' spenta o il passo in pt e' lo stesso.
+   */
+  function gridRecalNote(): string {
+    if (!gridOn || !pdf) return '';
+    const now = gridStepNow();
+    const was = gridReportedPt;
+    gridReportedPt = now;
+    if (!was || Math.abs(now - was) < 1e-9) return '';
+    return ` La griglia (${fmtTrim(gridMm, 3)} mm ${model.scale(pageNo) ? 'reali' : 'del foglio'}) passa da ${fmt(was)} a ${fmt(now)} pt sul foglio.`;
+  }
+
   /** Lunghezza totale di una spezzata, in mm reali se la pagina e' calibrata, altrimenti in mm del foglio. */
   function lengthText(points: readonly UserPoint[]): string {
     const g = viewer.geometry;
@@ -205,6 +244,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const endBtn = mkToggle('end', SNAP_LABEL.end, 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, quote e coperture', snapOn.end, () => setSnap('end', !snapOn.end));
   const midBtn = mkToggle('mid', SNAP_LABEL.mid, 'Snap sui punti medi: il punto si aggancia al centro dei tratti e dei lati delle coperture', snapOn.mid, () => setSnap('mid', !snapOn.mid));
   const orthoBtn = mkToggle('ortho', 'ORTO', 'Ortogonale: il secondo punto va in orizzontale o in verticale', false, () => setOrtho(!ortho));
+  const gridBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', 'data-toggle': 'grid', title: 'Griglia: mostra i nodi e arrotonda i punti ai nodi (passo nel pannello a destra)', onclick: () => setGridOn(!gridOn) }, 'Griglia');
+  // Gli stessi interruttori stanno anche nel pannello a destra ("Aggancio e griglia"): sotto 720 px la barra di stato resta compatta (X, Y, scala, ORTO: DESIGN.md) e
+  // quei tre vivono solo li'. Ogni interruttore ha piu' pulsanti, che mostrano tutti lo stesso stato.
+  const toggleBtns: Record<'end' | 'mid' | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], grid: [gridBtn] };
+  const setPressed = (id: 'end' | 'mid' | 'grid', on: boolean): void => {
+    for (const b of toggleBtns[id]) b.setAttribute('aria-pressed', String(on));
+  };
+  const panelToggle = (id: 'end' | 'mid' | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
+    const b = h('button', { class: 'btn panel-toggle', type: 'button', 'aria-pressed': String(on), 'data-panel-toggle': id, title, onclick: fn }, label);
+    toggleBtns[id].push(b);
+    return b;
+  };
   const statusbar = h(
     'footer',
     { class: 'statusbar' },
@@ -213,6 +264,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     endBtn,
     midBtn,
     orthoBtn,
+    gridBtn,
     statusMsg,
     pager,
   );
@@ -233,9 +285,17 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
   function setSnap(kind: SnapKind, on: boolean): void {
     snapOn[kind] = on;
-    (kind === 'end' ? endBtn : midBtn).setAttribute('aria-pressed', String(on));
+    setPressed(kind, on);
     const what = kind === 'end' ? 'agli estremi di rette, linee, quote e coperture' : 'al centro dei tratti e dei lati delle coperture';
     say(on ? `${SNAP_LABEL[kind]} attivo: il punto si aggancia ${what}` : `${SNAP_LABEL[kind]} disattivato`);
+    viewer.refreshAim();
+  }
+  function setGridOn(on: boolean): void {
+    gridOn = on;
+    setPressed('grid', on);
+    gridReportedPt = on ? gridStepNow() : 0;
+    refreshGrid();
+    say(on ? `Griglia attiva: passo ${gridStepText()}.${gridHiddenNote()}` : 'Griglia disattivata');
     viewer.refreshAim();
   }
   const updateScaleLabel = (): void => {
@@ -459,6 +519,30 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (!popover.contains(t) && !styleChip.contains(t)) toggleProps(false);
   }
 
+  // ---------- Griglia: passo ----------
+  const gridCtl = createGridControls({
+    get: () => gridMm,
+    set: (mm) => {
+      gridMm = mm;
+      gridReportedPt = gridOn ? gridStepNow() : 0;
+      refreshGrid();
+      say(`Passo della griglia: ${gridStepText()}.${gridOn ? gridHiddenNote() : ' La griglia e\' spenta: accendila dalla barra di stato.'}`);
+      viewer.refreshAim();
+    },
+    note: () => {
+      if (!pdf) return 'Il passo e\' in mm del foglio finche\' la pagina non e\' calibrata, poi in mm reali.';
+      const s = model.scale(pageNo);
+      return s ? `Pagina calibrata (${scaleLabel(s)}): il passo e' in mm REALI, ora ${fmt(gridStepNow())} pt sul foglio.` : `Pagina non calibrata: il passo e' in mm del FOGLIO (${fmt(gridStepNow())} pt). Dopo la calibrazione sara' in mm reali.`;
+    },
+  });
+  const snapPanelToggles = h(
+    'div',
+    { class: 'panel-toggles', role: 'group', 'aria-label': 'Aggancio e griglia' },
+    panelToggle('end', SNAP_LABEL.end, endBtn.title, snapOn.end, () => setSnap('end', !snapOn.end)),
+    panelToggle('mid', SNAP_LABEL.mid, midBtn.title, snapOn.mid, () => setSnap('mid', !snapOn.mid)),
+    panelToggle('grid', 'Griglia', gridBtn.title, false, () => setGridOn(!gridOn)),
+  );
+
   // ---------- Inspector ----------
   const inspector = h('aside', { class: 'inspector', 'aria-label': 'Proprietà' });
   const section = (title: string, ...body: Child[]): HTMLElement => h('section', { class: 'insp-sec' }, h('h2', { class: 'insp-h' }, title), ...body);
@@ -491,6 +575,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     } else {
       secs.push(section('Documento', h('p', { class: 'hint' }, 'Nessun documento aperto.')));
     }
+    secs.push(section('Aggancio e griglia', snapPanelToggles, gridCtl.el));
     const so = selObj();
     secs.push(
       section(
@@ -792,7 +877,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       const s = calibrate(dPt, real);
       if (s) {
         history.exec(new SetScale(page, model.scale(page), s));
-        say(`Scala della pagina ${page}: ${scaleLabel(s)}`);
+        say(`Scala della pagina ${page}: ${scaleLabel(s)}.${gridRecalNote()}`);
       }
     }
     construction.reset();
@@ -945,7 +1030,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   function afterHistory(cmd: Command<DocumentModel> | null, verb: string): void {
     if (!cmd) return;
     if (cmd.page !== pageNo) void goTo(cmd.page); // mostra la pagina interessata
-    say(`${verb}: ${cmd.label}`);
+    say(`${verb}: ${cmd.label}${cmd.page === pageNo ? gridRecalNote() : ''}`);
   }
   function undoAction(): void {
     if (entry) return; // con il tastierino aperto si conferma o si annulla da li'
@@ -979,6 +1064,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   viewer.hooks.onCursor = setCursor;
   viewer.hooks.onView = ({ zoom }) => {
     zoomLabel.textContent = `${fmt((zoom / CSS_PX_PER_PT) * 100, 0)}%`;
+    if (gridOn && pdf) {
+      // la griglia compare o sparisce (e comincia o smette di arrotondare) quando il passo a schermo passa la soglia: lo si dice una volta
+      const vis = gridVisible(gridStepNow(), zoom);
+      if (vis !== gridWasVisible) {
+        gridWasVisible = vis;
+        say(vis ? `Griglia visibile: passo ${gridStepText()}.` : `Griglia nascosta: a questo zoom il passo e' sotto ${GRID_MIN_SCREEN_PX} px (non si vede e non arrotonda).`);
+      }
+    }
   };
   viewer.hooks.onReject = say;
   viewer.hooks.constrain = (raw, touch) => construction.resolve(raw, touch);
@@ -1030,6 +1123,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
   model.onChange(() => {
     refreshScene();
+    refreshGrid(); // una ricalibrazione cambia il passo in pt (il messaggio lo dice: gridRecalNote)
     if (selected !== null && !model.get(pageNo, selected)) selected = null; // l'oggetto selezionato non c'e' piu'
     renderSelection();
     refreshStyleChip();
@@ -1107,6 +1201,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     try {
       const rendering = viewer.setPage(await pdf.doc.getPage(pageNo));
       refreshScene(); // la geometria della nuova pagina e' gia' impostata: gli oggetti compaiono subito
+      gridReportedPt = gridOn ? gridStepNow() : 0;
+      refreshGrid(); // ogni pagina ha la sua scala, quindi il suo passo in pt
       refreshStyleChip();
       renderConstruction();
       inspectorStyle.refresh();
