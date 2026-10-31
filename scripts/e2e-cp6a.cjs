@@ -587,7 +587,7 @@ async function touchSuite(browser) {
   check('interruttori spenti (tocco): nessun marcatore e la lente e\' sul punto grezzo (come 40a01be)', m === null && !!lc3 && near(lc3.x, rawS.x * cs, 0.75) && near(lc3.y, rawS.y * cs, 0.75), JSON.stringify({ m, lc3, atteso: { x: rawS.x * cs, y: rawS.y * cs } }));
   await touch(cdp, 'touchCancel', []);
   // griglia con il dito: la lente e il punto inserito sono sul nodo (passo 20 mm: a 932 x 430 il foglio e' a 0.28 px/pt e 10 mm sarebbero 7.9 px, sotto la soglia di 8)
-  await page.locator('.grid-ctl .preset', { hasText: /^20$/ }).click();
+  await page.locator('.grid-ctl .grid-preset', { hasText: /^20$/ }).click();
   await setToggle(page, 'grid', true);
   const stp = 20 * (72 / 25.4);
   const rr = await canvasRect(page);
@@ -750,8 +750,8 @@ async function gridSuite(browser) {
   check('snap su un oggetto e griglia: vince lo snap (l\'estremo, non il nodo)', o.kind === 'segment' && nearPt(o.points[0], ep, 1e-6), JSON.stringify(o.points?.[0]));
 
   // -- passo: valori predefiniti e campo digitabile, validato
-  check('Passo griglia: campo "10" e predefinito 10 evidenziato', (await stepField(page).inputValue()) === '10' && (await page.locator('.grid-ctl .preset[aria-pressed="true"]').innerText()) === '10');
-  await page.locator('.grid-ctl .preset', { hasText: /^5$/ }).click();
+  check('Passo griglia: campo "10" e predefinito 10 evidenziato', (await stepField(page).inputValue()) === '10' && (await page.locator('.grid-ctl .grid-preset[aria-pressed="true"]').innerText()) === '10');
+  await page.locator('.grid-ctl .grid-preset', { hasText: /^5$/ }).click();
   gl = await gridLinesOf(page);
   check('Passo griglia 5 mm (predefinito): il passo sullo schermo dimezza e il messaggio lo dice', !!gl && near(spacing(gl.xs), 5 * MM_PT * k, 0.01) && /Passo della griglia: 5 mm del foglio = 14\.17 pt/.test(await status(page)), `${gl && spacing(gl.xs)} / ${await status(page)}`);
   await stepField(page).fill('2,5');
@@ -764,11 +764,11 @@ async function gridSuite(browser) {
   for (const [txt, why] of [['0', 'zero'], ['1001', 'sopra il massimo'], ['abc', 'non e\' un numero'], ['0,05', 'sotto il minimo']]) {
     await stepField(page).fill(txt);
     await stepField(page).press('Enter');
-    const msg = await page.locator('.grid-ctl .ctl-msg').innerText();
+    const msg = await page.locator('.grid-ctl .grid-msg').innerText();
     const g2 = await gridLinesOf(page);
     check(`Passo "${txt}" (${why}): rifiutato con un messaggio, il passo resta 7.5 mm`, msg.length > 0 && (await stepField(page).getAttribute('aria-invalid')) === 'true' && !!g2 && near(spacing(g2.xs), 7.5 * MM_PT * k, 0.01), msg);
   }
-  await page.locator('.grid-ctl .preset', { hasText: /^10$/ }).click();
+  await page.locator('.grid-ctl .grid-preset', { hasText: /^10$/ }).click();
 
   // -- scala: il passo e' in mm REALI e una ricalibrazione lo cambia in pt (e lo dice)
   await page.keyboard.press('Control+z'); // toglie l'ultima retta (nessun effetto sulla scala)

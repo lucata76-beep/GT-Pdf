@@ -1382,7 +1382,8 @@ body.app-mode {
 }
 .seg-btn[aria-pressed='true'],
 .swatch[aria-pressed='true'],
-.preset[aria-pressed='true'] {
+.preset[aria-pressed='true'],
+.grid-preset[aria-pressed='true'] {
   border-color: var(--cad-accent-stroke);
   box-shadow: inset 0 0 0 1px var(--cad-accent-stroke);
   color: var(--cad-accent-fill);
@@ -1407,7 +1408,8 @@ body.app-mode {
   border: 1px solid var(--cad-border-strong);
   border-radius: var(--r-sm);
 }
-.preset {
+.preset,
+.grid-preset {
   min-width: 2.75rem;
   padding: 0 0.5rem;
   font-size: 0.75rem;
@@ -1422,13 +1424,15 @@ body.app-mode {
   border-radius: var(--r-sm);
   cursor: pointer;
 }
-.ctl-msg {
+.ctl-msg,
+.grid-msg {
   margin: 0;
   color: var(--on-error-container);
   font-size: 0.75rem;
   line-height: 1rem;
 }
-.ctl-msg:empty {
+.ctl-msg:empty,
+.grid-msg:empty {
   display: none;
 }
 

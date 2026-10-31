@@ -20,7 +20,7 @@ export interface GridControls {
 }
 
 export function createGridControls(b: GridBinding): GridControls {
-  const msg = h('p', { class: 'ctl-msg', role: 'alert' });
+  const msg = h('p', { class: 'grid-msg', role: 'alert' }); // classe propria (non `ctl-msg`): le prove delle proprieta' cercano un solo `.ctl-msg` nel pannello
   const note = h('p', { class: 'hint grid-note' });
   const presetBtns = new Map<number, HTMLButtonElement>();
   const presets = h('div', { class: 'presets', role: 'group', 'aria-label': 'Passi della griglia predefiniti in mm' });
@@ -28,9 +28,12 @@ export function createGridControls(b: GridBinding): GridControls {
     const btn = h(
       'button',
       {
-        class: 'btn preset num',
+        // classe e nome accessibile propri ("5 mm", non "5"): nel pannello ci sono gia' i valori predefiniti dello spessore e dell'altezza del testo (1, 2, 5, 10...),
+        // e le prove delle proprieta' li cercano per classe `preset` e per nome
+        class: 'btn grid-preset num',
         type: 'button',
         'aria-pressed': 'false',
+        'aria-label': `${fmtTrim(mm)} mm`,
         onclick: () => {
           msg.textContent = '';
           field.removeAttribute('aria-invalid');
