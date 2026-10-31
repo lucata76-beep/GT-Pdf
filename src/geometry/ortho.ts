@@ -3,9 +3,14 @@
 // verticale nello spazio utente PDF: per questo il vincolo si calcola nel foglio e poi si riporta nello spazio utente.
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
 
+/** L'asse libero del vincolo: 'x' se il punto si sposta di piu' in orizzontale (a parita': orizzontale), altrimenti 'y'. L'altro asse resta quello dell'ancora. */
+export function orthoFreeAxis(anchor: SheetPoint, p: SheetPoint): 'x' | 'y' {
+  return Math.abs(p.x - anchor.x) >= Math.abs(p.y - anchor.y) ? 'x' : 'y';
+}
+
 /** Sposta `p` sull'asse dominante rispetto ad `a` (a parita' di spostamento: orizzontale). Tutto nel foglio. */
 export function orthoSheet(anchor: SheetPoint, p: SheetPoint): SheetPoint {
-  return Math.abs(p.x - anchor.x) >= Math.abs(p.y - anchor.y) ? { x: p.x, y: anchor.y } : { x: anchor.x, y: p.y };
+  return orthoFreeAxis(anchor, p) === 'x' ? { x: p.x, y: anchor.y } : { x: anchor.x, y: p.y };
 }
 
 /** Come `orthoSheet`, con ancora e punto nello spazio utente: il risultato e' nello spazio utente. */
