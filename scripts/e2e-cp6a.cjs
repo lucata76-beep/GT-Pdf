@@ -1,4 +1,4 @@
-// Prove di CP6a (V2a) su Chromium: snap su Estremo e Punto medio, poi griglia. Mouse (desktop 1280 x 900) e tocco emulato (iPhone 932 x 430 / 390 x 780, DPR 3).
+// Prove di CP6a (V2a) su Chromium: snap su Estremo e Punto medio, poi griglia (passo, origine in basso a sinistra, priorita', ORTO, scala, zoom, pagina ruotata). Mouse (desktop 1280 x 900) e tocco emulato (iPhone 932 x 430 / 390 x 780, DPR 3).
 // Si prova: il punto inserito coincide con il candidato (estremo, centro, angolo, centro del lato); il marcatore (quadrato = Estremo, triangolo = Punto medio, con
 // l'etichetta) sta nel livello di sovrapposizione al punto effettivo; interruttore spento = comportamento di 40a01be; con ORTO acceso; la squadratura del quadrato
 // vince; nessuno snap in Seleziona, Cancella e nel trascinamento; la lente mostra il punto effettivo; l'esportazione e il file progetto non cambiano; la barra di stato.
@@ -13,6 +13,7 @@ const lib = createE2E({ name: 'e2e-cp6a', out: process.argv[2], port: 4201, hpor
 const { check, info, setSection, URL: APP_URL, openSample } = lib;
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1';
 const UI_PX = [14, 16, 18, 20, 22];
+const MM_PT = 72 / 25.4; // pt per mm
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p, q, tol = 1e-6) => near(p.x, q.x, tol) && near(p.y, q.y, tol);
 /** Tolleranza (pt) del confronto con un punto GREZZO ricostruito dal rettangolo del canvas (errore sub-pixel di getBoundingClientRect), non con un candidato esatto. */
@@ -224,8 +225,8 @@ async function mouseSuite(browser) {
 
   // -- interruttori
   const tg = await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })));
-  check('barra di stato: interruttori Estremo, Punto medio, ORTO (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['ortho', 'ORTO']]), JSON.stringify(tg));
-  check('all\'avvio Estremo e Punto medio sono attivi, ORTO spento', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'false']), JSON.stringify(tg));
+  check('barra di stato: interruttori Estremo, Punto medio, ORTO, Griglia (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['ortho', 'ORTO'], ['grid', 'Griglia']]), JSON.stringify(tg));
+  check('all\'avvio Estremo e Punto medio sono attivi, ORTO e Griglia spenti', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'false', 'false']), JSON.stringify(tg));
 
   await tool(page, 'Retta');
   // -- Estremo
@@ -584,7 +585,31 @@ async function touchSuite(browser) {
   const lc3 = await lensCenter();
   const rawS = await (async () => { const r = await canvasRect(page); const kk = r.width / G.width; return { x: (sA1b.x + 6 - r.left) / kk, y: (sA1b.y + 4 - r.top) / kk }; })();
   check('interruttori spenti (tocco): nessun marcatore e la lente e\' sul punto grezzo (come 40a01be)', m === null && !!lc3 && near(lc3.x, rawS.x * cs, 0.75) && near(lc3.y, rawS.y * cs, 0.75), JSON.stringify({ m, lc3, atteso: { x: rawS.x * cs, y: rawS.y * cs } }));
+  await touch(cdp, 'touchCancel', []);
+  // griglia con il dito: la lente e il punto inserito sono sul nodo (passo 20 mm: a 932 x 430 il foglio e' a 0.28 px/pt e 10 mm sarebbero 7.9 px, sotto la soglia di 8)
+  await page.locator('.grid-ctl .preset', { hasText: /^20$/ }).click();
+  await setToggle(page, 'grid', true);
+  const stp = 20 * (72 / 25.4);
+  const rr = await canvasRect(page);
+  const kk = rr.width / G.width;
+  const node = { x: 5 * stp, y: G.height - 8 * stp };
+  const rawT = { x: rr.left + (node.x + 0.3 * stp) * kk, y: rr.top + (node.y - 0.3 * stp) * kk };
+  await touch(cdp, 'touchStart', [[rawT.x, rawT.y]]);
+  await page.waitForTimeout(60);
+  const lc4 = await lensCenter();
+  const csn = await canvasScale();
+  m = await snapMark(page);
+  check('griglia con il dito: la lente copia la zona attorno al NODO, non quella sotto il dito, e non c\'e\' marcatore di snap', m === null && !!lc4 && near(lc4.x, node.x * csn, 0.75) && near(lc4.y, node.y * csn, 0.75), JSON.stringify({ m, lc4, nodo: { x: node.x * csn, y: node.y * csn } }));
   await touch(cdp, 'touchEnd', []);
+  const node2 = { x: 9 * stp, y: G.height - 5 * stp };
+  await touch(cdp, 'touchStart', [[rr.left + (node2.x - 0.3 * stp) * kk, rr.top + (node2.y + 0.3 * stp) * kk]]);
+  await touch(cdp, 'touchEnd', []);
+  await page.waitForTimeout(80);
+  objs = await objectsOf(page);
+  last = objs[objs.length - 1];
+  const t1 = G.userToSheet(last.points[0]);
+  const t2 = G.userToSheet(last.points[1]);
+  check('griglia con il dito: i due punti inseriti sono i nodi', last.kind === 'segment' && near(t1.x, node.x, 1e-6) && near(t1.y, node.y, 1e-6) && near(t2.x, node2.x, 1e-6) && near(t2.y, node2.y, 1e-6), JSON.stringify({ t1, t2, node, node2 }));
   await ctx.close();
 }
 
@@ -613,12 +638,324 @@ async function exportSuite(browser) {
   check('esportazione con il marcatore di snap sullo schermo = esportazione senza (il marcatore non e\' esportato)', h1 === h0, `${h1} / ${h0}`);
   await setToggle(page, 'end', false);
   await setToggle(page, 'mid', false);
+  await setToggle(page, 'grid', true);
+  const h2 = await exportHash();
+  check('esportazione con la griglia accesa e visibile = esportazione senza (la griglia non e\' esportata)', h2 === h0 && (await page.locator('.sc-grid:not([display="none"])').count()) === 1, `${h2} / ${h0}`);
   const proj1 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
-  check('file progetto identico dopo aver cambiato gli interruttori di snap (stesso formato, nessun campo nuovo)', proj1 === proj0);
+  check('file progetto identico dopo aver cambiato gli interruttori di snap e la griglia (stesso formato, nessun campo nuovo)', proj1 === proj0);
   const keys = (t) => { const j = JSON.parse(t); return { root: Object.keys(j), page: Object.keys(j.pages[0]), version: j.version, format: j.format }; };
   check('chiavi e versione del progetto invariate (format "gt-pdf-project", version 1)', JSON.stringify(keys(proj0)) === JSON.stringify(keys(proj1)) && keys(proj1).version === 1 && keys(proj1).format === 'gt-pdf-project', JSON.stringify(keys(proj1)));
-  check('nel progetto non compaiono parole di snap', !/snap|grid|griglia|estremo|punto medio/i.test(proj1));
+  check('nel progetto non compaiono parole di snap o griglia', !/snap|grid|griglia|estremo|punto medio/i.test(proj1));
   await ctx.close();
+}
+
+// ---------------------------------------------------------------- 5) griglia
+/** Linee della griglia disegnata: ascisse (client) delle verticali e ordinate (client) delle orizzontali, o null se non e' disegnata. */
+const gridLinesOf = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('.sc-grid');
+    if (!el || el.getAttribute('display') === 'none') return null;
+    const svg = document.querySelector('.viewer-overlay').getBoundingClientRect();
+    const d = el.getAttribute('d') || '';
+    const xs = [...d.matchAll(/M(-?[\d.e+-]+) (-?[\d.e+-]+)V(-?[\d.e+-]+)/g)].map((m) => svg.left + +m[1]);
+    const ys = [...d.matchAll(/M(-?[\d.e+-]+) (-?[\d.e+-]+)H(-?[\d.e+-]+)/g)].map((m) => svg.top + +m[2]);
+    return { xs, ys, stroke: getComputedStyle(el).stroke, width: parseFloat(getComputedStyle(el).strokeWidth) };
+  });
+const stepField = (page) => page.locator('.grid-ctl input.field');
+const spacing = (a) => (a.length > 1 ? (a[a.length - 1] - a[0]) / (a.length - 1) : NaN);
+
+async function gridSuite(browser) {
+  setSection('griglia, mouse 1280x900');
+  const { ctx, page } = await desktop(browser);
+  await openDoc(page, 'A4 vettoriale', false);
+  const step = 10 * MM_PT; // 10 mm del foglio (pagina non calibrata), in pt
+  await tool(page, 'Retta');
+  let r = await canvasRect(page);
+  let k = r.width / G.width;
+  // il foglio si riadatta quando cambia la barra contestuale (altro strumento) o lo zoom: si rilegge prima di cliccare
+  const remeasure = async () => {
+    r = await canvasRect(page);
+    k = r.width / G.width;
+  };
+
+  check('Griglia spenta all\'avvio: nessuna linea disegnata', (await gridLinesOf(page)) === null);
+  // -- accesa
+  await setToggle(page, 'grid', true);
+  check('Griglia accesa: aria-pressed e messaggio di stato col passo (mm del foglio e pt)', (await pressed(page, 'grid')) && /Griglia attiva: passo 10 mm del foglio = 28\.35 pt/.test(await status(page)), await status(page));
+  let gl = await gridLinesOf(page);
+  await remeasure();
+  check('griglia: linee sottili (1 px) nel livello di sovrapposizione, non esportate', !!gl && near(gl.width, 1, 0.01), JSON.stringify(gl && { w: gl.width, s: gl.stroke }));
+  check('griglia: la prima linea verticale e\' il bordo sinistro della pagina (origine in basso a sinistra), passo = 10 mm x zoom', !!gl && near(gl.xs[0], r.left, 0.05) && near(spacing(gl.xs), step * k, 0.01), JSON.stringify(gl && { x0: gl.xs[0], sx: spacing(gl.xs), atteso: step * k, left: r.left }));
+  check('griglia: la linea orizzontale piu\' bassa e\' il bordo inferiore della pagina, stesso passo', !!gl && near(Math.max(...gl.ys), r.top + r.height, 0.05) && near(spacing(gl.ys), -step * k, 0.01) || (!!gl && near(Math.abs(spacing(gl.ys)), step * k, 0.01) && near(Math.max(...gl.ys), r.top + r.height, 0.05)), JSON.stringify(gl && { yMax: Math.max(...gl.ys), sy: spacing(gl.ys), bottom: r.top + r.height }));
+  check('griglia: numero di linee = quelle che stanno nella pagina (compresa quella sull\'origine)', !!gl && gl.xs.length === Math.floor(G.width / step) + 1 && gl.ys.length === Math.floor(G.height / step) + 1, JSON.stringify(gl && { v: gl.xs.length, o: gl.ys.length, atteso: [Math.floor(G.width / step) + 1, Math.floor(G.height / step) + 1] }));
+
+  // -- arrotondamento al nodo (punti a 0.3 passi dal nodo, lontano dai limiti dell'arrotondamento)
+  const nodeAt = (i, j) => ({ x: i * step, y: G.height - j * step }); // nodo (i, j) sul foglio
+  const clickSheet = async (sx, sy) => {
+    const c = { x: r.left + sx * k, y: r.top + sy * k };
+    await click(page, c);
+  };
+  const lastObj = async () => { const o = await objectsOf(page); return o[o.length - 1]; };
+  const n1 = nodeAt(7, 12);
+  await clickSheet(n1.x + 0.3 * step, n1.y - 0.3 * step);
+  const n2 = nodeAt(14, 20);
+  await clickSheet(n2.x - 0.3 * step, n2.y + 0.3 * step);
+  let o = await lastObj();
+  let s1 = G.userToSheet(o.points[0]);
+  let s2 = G.userToSheet(o.points[1]);
+  check('Retta con la griglia: i due punti sono i nodi piu\' vicini (esattamente)', o.kind === 'segment' && near(s1.x, n1.x, 1e-6) && near(s1.y, n1.y, 1e-6) && near(s2.x, n2.x, 1e-6) && near(s2.y, n2.y, 1e-6), JSON.stringify({ s1, s2, n1, n2 }));
+  check('i nodi sono multipli del passo contati dall\'angolo in basso a sinistra (Y verso l\'alto)', near(s1.x / step, Math.round(s1.x / step), 1e-9) && near((G.height - s1.y) / step, Math.round((G.height - s1.y) / step), 1e-9));
+
+  // -- anteprima: il segno di mira e' sul nodo (il punto che si vede e' quello che si inserisce)
+  await page.mouse.move(r.left + (n1.x + 0.3 * step) * k, r.top + (n1.y - 0.3 * step) * k);
+  await page.waitForTimeout(50);
+  const aim = await page.evaluate(() => { const g = document.querySelector('.aim-mark'); const svg = document.querySelector('.viewer-overlay').getBoundingClientRect(); const m = (g.getAttribute('transform') || '').match(/translate\(\s*(-?[\d.e+-]+)[ ,]+(-?[\d.e+-]+)/); return g.getAttribute('display') === 'none' || !m ? null : { x: svg.left + +m[1], y: svg.top + +m[2] }; });
+  check('mira con la griglia: il segno di mira sta sul nodo', !!aim && near(aim.x, r.left + n1.x * k, 0.05) && near(aim.y, r.top + n1.y * k, 0.05), JSON.stringify(aim));
+
+  // -- ORTO + griglia: solo la coordinata libera si arrotonda, l'altra resta quella dell'ancora
+  await setToggle(page, 'grid', false);
+  await setToggle(page, 'ortho', true);
+  const P = { x: 100.37 * 1, y: 410.61 }; // un punto fuori griglia (grezzo) sul foglio
+  await clickSheet(P.x, P.y);
+  await setToggle(page, 'grid', true); // la griglia si accende con la costruzione in corso
+  const n3 = nodeAt(15, 9);
+  await clickSheet(n3.x + 0.3 * step, P.y + 2); // movimento dominante orizzontale
+  o = await lastObj();
+  s1 = G.userToSheet(o.points[0]);
+  s2 = G.userToSheet(o.points[1]);
+  check('ORTO + griglia: la coordinata libera (x) va al nodo', near(s2.x, n3.x, 1e-6), JSON.stringify({ s2, nodo: n3 }));
+  check('ORTO + griglia: l\'altra coordinata resta quella dell\'ancora, anche se l\'ancora non e\' su un nodo', near(s2.y, s1.y, 1e-9) && !near((G.height - s1.y) / step, Math.round((G.height - s1.y) / step), 1e-3), JSON.stringify({ y1: s1.y, y2: s2.y }));
+  await click(page, { x: r.left + P.x * k, y: r.top + P.y * k });
+  const n4 = nodeAt(6, 19); // abbastanza lontano dall'ancora (un nodo a meno di 6 px verrebbe rifiutato come punto coincidente)
+  await clickSheet(P.x + 3, n4.y + 0.3 * step); // movimento dominante verticale
+  o = await lastObj();
+  s1 = G.userToSheet(o.points[0]);
+  s2 = G.userToSheet(o.points[1]);
+  check('ORTO + griglia, verticale: la y va al nodo e la x resta quella dell\'ancora', near(s2.y, n4.y, 1e-6) && near(s2.x, s1.x, 1e-9), JSON.stringify({ s1, s2, nodo: n4 }));
+  await setToggle(page, 'ortho', false);
+
+  // -- snap sugli oggetti vince sulla griglia
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.evaluate(() => window.__gtpdf.addSpecs(1, [{ k: 'segment', pts: [[0.31, 0.43], [0.52, 0.43]] }]));
+  const ep = userOf((await pageInfo(page)).info, [0.31, 0.43]);
+  const epS = G.userToSheet(ep);
+  check('(premessa) l\'estremo di prova non e\' su un nodo', !near(epS.x / step, Math.round(epS.x / step), 1e-3));
+  await click(page, { x: r.left + epS.x * k + 2, y: r.top + epS.y * k + 2 });
+  await clickSheet(nodeAt(3, 3).x + 1, nodeAt(3, 3).y - 1);
+  o = await lastObj();
+  check('snap su un oggetto e griglia: vince lo snap (l\'estremo, non il nodo)', o.kind === 'segment' && nearPt(o.points[0], ep, 1e-6), JSON.stringify(o.points?.[0]));
+
+  // -- passo: valori predefiniti e campo digitabile, validato
+  check('Passo griglia: campo "10" e predefinito 10 evidenziato', (await stepField(page).inputValue()) === '10' && (await page.locator('.grid-ctl .preset[aria-pressed="true"]').innerText()) === '10');
+  await page.locator('.grid-ctl .preset', { hasText: /^5$/ }).click();
+  gl = await gridLinesOf(page);
+  check('Passo griglia 5 mm (predefinito): il passo sullo schermo dimezza e il messaggio lo dice', !!gl && near(spacing(gl.xs), 5 * MM_PT * k, 0.01) && /Passo della griglia: 5 mm del foglio = 14\.17 pt/.test(await status(page)), `${gl && spacing(gl.xs)} / ${await status(page)}`);
+  await stepField(page).fill('2,5');
+  await stepField(page).press('Enter');
+  check('Passo digitato "2,5": la virgola diventa "."; a questo zoom il passo (circa 6.4 px) e\' sotto 8 px: la griglia non si disegna e il messaggio lo dice', (await stepField(page).inputValue()) === '2.5' && (await gridLinesOf(page)) === null && /sotto 8 px/.test(await status(page)), `${await stepField(page).inputValue()} / ${await status(page)}`);
+  await stepField(page).fill('7,5');
+  await stepField(page).press('Enter');
+  gl = await gridLinesOf(page);
+  check('Passo digitato "7,5": il passo e\' 7.5 mm e la griglia ricompare', (await stepField(page).inputValue()) === '7.5' && !!gl && near(spacing(gl.xs), 7.5 * MM_PT * k, 0.01), `${await stepField(page).inputValue()} / ${gl && spacing(gl.xs)}`);
+  for (const [txt, why] of [['0', 'zero'], ['1001', 'sopra il massimo'], ['abc', 'non e\' un numero'], ['0,05', 'sotto il minimo']]) {
+    await stepField(page).fill(txt);
+    await stepField(page).press('Enter');
+    const msg = await page.locator('.grid-ctl .ctl-msg').innerText();
+    const g2 = await gridLinesOf(page);
+    check(`Passo "${txt}" (${why}): rifiutato con un messaggio, il passo resta 7.5 mm`, msg.length > 0 && (await stepField(page).getAttribute('aria-invalid')) === 'true' && !!g2 && near(spacing(g2.xs), 7.5 * MM_PT * k, 0.01), msg);
+  }
+  await page.locator('.grid-ctl .preset', { hasText: /^10$/ }).click();
+
+  // -- scala: il passo e' in mm REALI e una ricalibrazione lo cambia in pt (e lo dice)
+  await page.keyboard.press('Control+z'); // toglie l'ultima retta (nessun effetto sulla scala)
+  const gl0 = await gridLinesOf(page);
+  const noteBefore = await page.locator('.grid-note').innerText();
+  check('pagina non calibrata: la nota del campo dice "mm del FOGLIO"', /non calibrata/.test(noteBefore) && /FOGLIO/.test(noteBefore), noteBefore);
+  await tool(page, 'Scala');
+  await remeasure();
+  await click(page, { x: r.left + 100 * k, y: r.top + 100 * k });
+  await click(page, { x: r.left + (100 + 10 * step) * k, y: r.top + 100 * k }); // 10 passi = 100 mm sul foglio
+  await page.waitForSelector('.dialog-backdrop');
+  await page.locator('.dialog .dlg-fields input').fill('200'); // 100 mm del foglio = 200 mm reali: 1:2
+  await page.locator('.dialog .btn.primary').click();
+  await page.waitForTimeout(150);
+  gl = await gridLinesOf(page);
+  const msgCal = await status(page);
+  check('ricalibrazione: il passo della griglia (10 mm reali) passa a 14.17 pt sul foglio e lo schermo lo mostra', !!gl && near(spacing(gl.xs), (step / 2) * k, 0.02), `${gl && spacing(gl.xs)} / atteso ${(step / 2) * k}`);
+  check('ricalibrazione: il messaggio di stato dice il passo da / a in pt', /Scala della pagina 1: 1:2\./.test(msgCal) && /La griglia \(10 mm reali\) passa da 28\.35 a 14\.17 pt sul foglio/.test(msgCal), msgCal);
+  check('pagina calibrata: la nota del campo dice "mm REALI" e la scala', /calibrata \(1:2\)/.test(await page.locator('.grid-note').innerText()) && /REALI/.test(await page.locator('.grid-note').innerText()), await page.locator('.grid-note').innerText());
+  await tool(page, 'Retta');
+  await remeasure();
+  const n5 = { x: 9 * (step / 2), y: G.height - 14 * (step / 2) };
+  await clickSheet(n5.x + 0.3 * (step / 2), n5.y - 0.3 * (step / 2));
+  await clickSheet(n5.x + 8.3 * (step / 2), n5.y - 4.3 * (step / 2));
+  o = await lastObj();
+  s1 = G.userToSheet(o.points[0]);
+  s2 = G.userToSheet(o.points[1]);
+  check('con la scala i nodi sono a 10 mm reali (14.17 pt): la retta ha lunghezza 8 x 4 passi', near(s1.x, n5.x, 1e-6) && near(s2.x, n5.x + 8 * (step / 2), 1e-6) && near(s2.y, n5.y - 4 * (step / 2), 1e-6), JSON.stringify({ s1, s2 }));
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z'); // annulla la retta e poi la scala
+  const msgUndo = await status(page);
+  check('annullare la scala riporta il passo e il messaggio lo dice', /Annullato: /.test(msgUndo) && /La griglia \(10 mm del foglio\) passa da 14\.17 a 28\.35 pt sul foglio/.test(msgUndo), msgUndo);
+
+  // -- zoom: sotto la soglia di 8 px la griglia sparisce e non arrotonda
+  await tool(page, 'Retta');
+  await page.evaluate(() => window.__gtpdf.zoomTo(0.2)); // 28.35 pt x 0.2 = 5.7 px < 8
+  await page.waitForTimeout(250);
+  check('zoom basso (passo a schermo sotto 8 px): la griglia non e\' disegnata e il messaggio lo dice', (await gridLinesOf(page)) === null && /Griglia nascosta/.test(await status(page)) && /sotto 8 px/.test(await status(page)), await status(page));
+  const r2 = await canvasRect(page);
+  const k2 = r2.width / G.width;
+  const rawS = { x: 200.37, y: 300.61 };
+  await click(page, { x: r2.left + rawS.x * k2, y: r2.top + rawS.y * k2 });
+  await click(page, { x: r2.left + (rawS.x + 40.4) * k2, y: r2.top + (rawS.y + 33.3) * k2 });
+  o = await lastObj();
+  s1 = G.userToSheet(o.points[0]);
+  check('griglia nascosta: non arrotonda (il punto e\' quello grezzo)', near(s1.x, rawS.x, 0.1) && near(s1.y, rawS.y, 0.1), JSON.stringify({ s1, rawS }));
+  await page.evaluate(() => window.__gtpdf.zoomTo(1));
+  await page.waitForTimeout(250);
+  check('zoom di nuovo alto: la griglia ricompare e il messaggio lo dice', !!(await gridLinesOf(page)) && /Griglia visibile/.test(await status(page)), await status(page));
+
+  // -- spenta: nulla cambia
+  await setToggle(page, 'grid', false);
+  check('Griglia spenta: linee tolte e messaggio', (await gridLinesOf(page)) === null && /Griglia disattivata/.test(await status(page)));
+  await page.evaluate(() => window.__gtpdf.fit());
+  await page.waitForTimeout(250);
+  const r3 = await canvasRect(page);
+  const k3 = r3.width / G.width;
+  const rawOff = { x: 150.37, y: 250.61 };
+  await click(page, { x: r3.left + rawOff.x * k3, y: r3.top + rawOff.y * k3 });
+  await click(page, { x: r3.left + (rawOff.x + 61.3) * k3, y: r3.top + (rawOff.y + 17.7) * k3 });
+  o = await lastObj();
+  s1 = G.userToSheet(o.points[0]);
+  check('griglia spenta: il punto inserito e\' quello grezzo (identico a 40a01be)', near(s1.x, rawOff.x, RAW_TOL) && near(s1.y, rawOff.y, RAW_TOL), JSON.stringify({ s1, rawOff }));
+  await ctx.close();
+}
+
+async function gridPageSuite(browser) {
+  for (const [title] of [['A4 con /Rotate 90'], ['A4 con CropBox']]) {
+    setSection(`griglia, mouse, ${title}`);
+    const { ctx, page } = await desktop(browser);
+    await openDoc(page, title, false);
+    const step = 10 * MM_PT;
+    await tool(page, 'Retta');
+    await setToggle(page, 'grid', true);
+    const r = await canvasRect(page);
+    const k = r.width / G.width;
+    const gl = await gridLinesOf(page);
+    check(`${title}: la griglia parte dall'angolo in basso a sinistra della pagina MOSTRATA`, !!gl && near(gl.xs[0], r.left, 0.05) && near(Math.max(...gl.ys), r.top + r.height, 0.05), JSON.stringify(gl && { x0: gl.xs[0], yMax: Math.max(...gl.ys) }));
+    const raws = [[3.3, 6.4], [6.2, 12.6]]; // restano dentro la pagina piu' piccola (CropBox 400 x 550 pt)
+    for (const [i, j] of raws) {
+      const n = { x: Math.floor(i) * step, y: G.height - Math.floor(j) * step };
+      await click(page, { x: r.left + (n.x + 0.3 * step) * k, y: r.top + (n.y - 0.3 * step) * k });
+      await click(page, { x: r.left + (n.x + 4.3 * step) * k, y: r.top + (n.y - 2.3 * step) * k });
+      const objs = await objectsOf(page);
+      const o = objs[objs.length - 1];
+      const a = G.userToSheet(o.points[0]);
+      const b = G.userToSheet(o.points[1]);
+      check(`${title}: i punti inseriti (spazio utente) corrispondono ai nodi del foglio mostrato`, near(a.x, n.x, 1e-6) && near(a.y, n.y, 1e-6) && near(b.x, n.x + 4 * step, 1e-6) && near(b.y, n.y - 2 * step, 1e-6), JSON.stringify({ a, b, n }));
+    }
+    await ctx.close();
+  }
+}
+
+async function gridPagesSuite(browser) {
+  setSection('griglia, piu\' pagine');
+  const { ctx, page } = await desktop(browser);
+  await openSample(page, '3 pagine miste');
+  await page.evaluate(() => window.__gtpdf.fit());
+  await page.waitForTimeout(300);
+  await tool(page, 'Retta');
+  await setToggle(page, 'grid', true);
+  const stepOf = async () => {
+    const gl = await gridLinesOf(page);
+    const r = await canvasRect(page);
+    const sh = await page.evaluate(() => window.__gtpdf.sheet());
+    return gl ? { px: spacing(gl.xs), pt: spacing(gl.xs) / (r.width / sh.w), page: await page.evaluate(() => window.__gtpdf.page()) } : null;
+  };
+  const a = await stepOf();
+  check('3 pagine miste, pagina 1 (A4): passo 10 mm del foglio = 28.35 pt', !!a && a.page === 1 && near(a.pt, 10 * MM_PT, 0.01), JSON.stringify(a));
+  await page.evaluate(() => window.__gtpdf.setScale(2, 0.7056)); // solo la pagina 2 (A3): 1:2 circa
+  await page.evaluate(() => window.__gtpdf.goTo(2));
+  await page.waitForTimeout(500);
+  const b = await stepOf();
+  check('pagina 2 (A3, scala 0.7056 mm/pt): il passo e\' 10 mm REALI = 14.17 pt sul foglio', !!b && b.page === 2 && near(b.pt, 10 / 0.7056, 0.01), JSON.stringify(b));
+  await page.evaluate(() => window.__gtpdf.goTo(1));
+  await page.waitForTimeout(500);
+  const c = await stepOf();
+  check('tornando alla pagina 1 (non calibrata) il passo e\' di nuovo 28.35 pt: ogni pagina ha il suo', !!c && c.page === 1 && near(c.pt, 10 * MM_PT, 0.01), JSON.stringify(c));
+  await page.evaluate(() => window.__gtpdf.goTo(3));
+  await page.waitForTimeout(500);
+  const d = await stepOf();
+  check('pagina 3 (A4 ruotata): griglia disegnata col passo del foglio', !!d && d.page === 3 && near(d.pt, 10 * MM_PT, 0.01), JSON.stringify(d));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 6) pannello e verticale (barra di stato compatta sotto 720 px)
+async function panelSuite(browser) {
+  setSection('pannello e verticale');
+  // desktop: gli interruttori sono nella barra di stato e anche nel pannello, con lo stesso stato
+  {
+    const { ctx, page } = await desktop(browser);
+    await openDoc(page, 'A4 vettoriale', true);
+    const ids = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => [e.dataset.panelToggle, e.textContent.trim(), e.getAttribute('aria-pressed')]));
+    check('desktop: il pannello "Aggancio e griglia" ha Estremo, Punto medio e Griglia', JSON.stringify(ids) === JSON.stringify([['end', 'Estremo', 'true'], ['mid', 'Punto medio', 'true'], ['grid', 'Griglia', 'false']]), JSON.stringify(ids));
+    await page.locator('.panel-toggle[data-panel-toggle="end"]').click();
+    check('un interruttore del pannello cambia anche quello della barra di stato (stesso stato)', (await pressed(page, 'end')) === false && (await page.locator('.panel-toggle[data-panel-toggle="end"]').getAttribute('aria-pressed')) === 'false');
+    await page.locator('.st-toggle[data-toggle="grid"]').click();
+    check('e viceversa: la Griglia accesa dalla barra di stato risulta accesa nel pannello', (await page.locator('.panel-toggle[data-panel-toggle="grid"]').getAttribute('aria-pressed')) === 'true' && !!(await gridLinesOf(page)));
+    await ctx.close();
+  }
+  // iPhone in verticale: barra di stato compatta come in 40a01be (solo ORTO fra gli interruttori); gli altri nel pannello
+  const BEFORE = [93, 95, 134, 130, 139.5]; // altezze della barra di stato a 390 x 780 per A+ 14..22 misurate su 40a01be
+  for (let idx = 0; idx < UI_PX.length; idx++) {
+    const { ctx, page } = await phone(browser, 390, 780, idx);
+    await openDoc(page, 'A4 vettoriale', true);
+    const vis = await page.$$eval('.statusbar .st-toggle', (els) => els.filter((e) => e.offsetParent !== null).map((e) => e.dataset.toggle));
+    const hgt = await page.evaluate(() => Math.round(document.querySelector('.statusbar').getBoundingClientRect().height * 10) / 10);
+    check(`verticale 390x780 A+ ${UI_PX[idx]}: nella barra di stato resta solo ORTO fra gli interruttori e l'altezza e' quella di 40a01be (${BEFORE[idx]} px)`, JSON.stringify(vis) === '["ortho"]' && near(hgt, BEFORE[idx], 1), JSON.stringify({ vis, hgt }));
+    if (idx === 1) {
+      await page.locator('.insp-toggle').click();
+      await page.waitForTimeout(150);
+      const pv = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.panelToggle, w: r.width, h: r.height, vis: e.offsetParent !== null }; }));
+      check('verticale: nel pannello Estremo, Punto medio e Griglia ci sono e sono >= 44 px', pv.length === 3 && pv.every((b) => b.vis && b.w >= 43.5 && b.h >= 43.5), JSON.stringify(pv));
+      await page.locator('.panel-toggle[data-panel-toggle="mid"]').click();
+      check('verticale: spegnere Punto medio dal pannello e\' effettivo (messaggio e stato)', (await page.locator('.panel-toggle[data-panel-toggle="mid"]').getAttribute('aria-pressed')) === 'false' && /Punto medio disattivato/.test(await status(page)), await status(page));
+    }
+    await ctx.close();
+  }
+}
+
+// ---------------------------------------------------------------- 7) barra di stato a piu' larghezze (tabella informativa; l'invariante dell'altezza e' in e2e-cp5e)
+async function statusSuite(browser) {
+  setSection('barra di stato');
+  const rows = [];
+  for (const [kind, w, h] of [['telefono', 932, 430], ['telefono', 844, 390], ['telefono', 780, 390], ['telefono', 720, 390], ['desktop', 1280, 800]]) {
+    for (let idx = 0; idx < UI_PX.length; idx++) {
+      const { ctx, page } = kind === 'telefono' ? await phone(browser, w, h, idx) : await desktop(browser, w, h, idx);
+      const m = await page.evaluate(() => {
+        const box = document.querySelector('.statusbar');
+        const b = box.getBoundingClientRect();
+        const items = [...box.children].filter((e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0);
+        const out = items.filter((e) => e.getBoundingClientRect().right > b.right + 0.5).map((e) => e.dataset.toggle || e.className);
+        box.scrollLeft = box.scrollWidth;
+        const toggles = [...box.querySelectorAll('.st-toggle')];
+        const last = toggles[toggles.length - 1];
+        const lr = last.getBoundingClientRect();
+        const reach = lr.right <= b.right + 0.5 && lr.left >= b.left - 0.5;
+        const h1 = box.getBoundingClientRect().height;
+        box.scrollLeft = 0;
+        return { out, scrolls: box.scrollWidth > box.clientWidth, reach, h: Math.round(b.height * 10) / 10, h1: Math.round(h1 * 10) / 10 };
+      });
+      check(`${kind} ${w}x${h} A+ ${UI_PX[idx]}: la barra di stato e\' una riga alta ${m.h}; ${m.out.length ? `fuori dalla barra a riposo: ${m.out.join(', ')}, ma scorrendo l'ultimo interruttore (Griglia) si raggiunge` : 'tutto entra'}`, m.reach && m.h === m.h1 && (m.out.length === 0 || m.scrolls), JSON.stringify(m));
+      rows.push(`${w}x${h} A+ ${UI_PX[idx]}: ${m.scrolls ? `scorre, fuori: ${m.out.join(', ') || '-'}` : 'tutto entra'}, altezza ${m.h}`);
+      await ctx.close();
+    }
+  }
+  for (const r of rows) info(r);
 }
 
 async function main() {
@@ -630,6 +967,11 @@ async function main() {
     await pageSuite(browser);
     await touchSuite(browser);
     await exportSuite(browser);
+    await gridSuite(browser);
+    await gridPageSuite(browser);
+    await gridPagesSuite(browser);
+    await panelSuite(browser);
+    await statusSuite(browser);
   } finally {
     await lib.stopAll(servers);
   }
