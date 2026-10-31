@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { CoverDef } from '../geometry/cover';
 import type { DimensionDef } from '../geometry/dimension';
 import { PageGeometry, type UserPoint } from '../geometry/page';
-import { COINCIDENT_PX, Construction, type ConstructionEvents } from './construction';
+import type { SnapHit } from '../geometry/snap';
+import { COINCIDENT_PX, Construction, type ConstructionEnv, type ConstructionEvents, type ConstructionTool } from './construction';
 
 const flat = new PageGeometry({ view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1 });
 const rot = new PageGeometry({ view: [50, 50, 450, 600], rotate: 90, userUnit: 1 }); // Rotate 90 + CropBox
 
-function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {}) {
+function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap?: ConstructionEnv['snap'] } = {}) {
   const log: string[] = [];
   const lines: { kind: string; points: UserPoint[] }[] = [];
   const dims: DimensionDef[] = [];
@@ -35,7 +36,7 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number } = {
     },
     reject: () => log.push('reject'),
   };
-  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho }, ev);
+  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap }, ev);
   return { c, log, lines, dims, covers, texts, state };
 }
 const P = (x: number, y: number): UserPoint => ({ x, y });
@@ -509,5 +510,129 @@ describe('Copertura (rettangolo, quadrato, cerchio)', () => {
     expect(c.prompt).toBe('Copertura circolare: indica il centro');
     c.place(P(100, 100));
     expect(c.prompt).toBe('Copertura circolare: indica un punto sul bordo');
+  });
+});
+
+describe('snap sugli oggetti (V2a)', () => {
+  const hitAt = (g: PageGeometry, u: UserPoint, kind: SnapHit['kind'] = 'end'): SnapHit => ({ point: g.userToSheet(u), kind });
+
+  it('senza `snap` nell\'ambiente il comportamento e\' quello di prima: punto grezzo, o ortogonale se attivo', () => {
+    const { c, state } = setup();
+    c.setTool('segment');
+    const raw = flat.userToSheet(P(130, 90));
+    expect(c.resolve(raw)).toEqual({ point: raw, snap: null });
+    expect(c.constrain(raw)).toEqual(raw);
+    c.place(P(100, 100));
+    state.ortho = true;
+    expect(c.resolve(flat.userToSheet(P(300, 107))).snap).toBeNull();
+    expect(c.resolve(flat.userToSheet(P(300, 107))).point.y).toBeCloseTo(flat.userToSheet(P(100, 100)).y, 12);
+  });
+
+  it('un candidato nel raggio porta il punto li\' e dice il tipo; `constrain` restituisce lo stesso punto', () => {
+    const calls: { raw: { x: number; y: number }; touch: boolean }[] = [];
+    const target = hitAt(flat, P(200, 300), 'mid');
+    const { c } = setup({ snap: (raw, touch) => (calls.push({ raw, touch }), target) });
+    c.setTool('segment');
+    const raw = flat.userToSheet(P(203, 297));
+    expect(c.resolve(raw, true)).toEqual({ point: target.point, snap: 'mid' });
+    expect(c.constrain(raw)).toEqual(target.point);
+    expect(calls[0]).toEqual({ raw, touch: true });
+    expect(calls[1]?.touch).toBe(false);
+  });
+
+  it('priorita\': lo snap vince sull\'ORTO (il punto puo\' andare fuori asse); senza candidato resta l\'ORTO', () => {
+    let hit: SnapHit | null = hitAt(flat, P(400, 400));
+    const { c, state } = setup({ ortho: true, snap: () => hit });
+    state.ortho = true;
+    c.setTool('segment');
+    c.place(P(100, 100));
+    const raw = flat.userToSheet(P(390, 108));
+    expect(c.resolve(raw)).toEqual({ point: flat.userToSheet(P(400, 400)), snap: 'end' });
+    hit = null;
+    const o = c.resolve(raw);
+    expect(o.snap).toBeNull();
+    expect(o.point.y).toBeCloseTo(flat.userToSheet(P(100, 100)).y, 12); // orizzontale come prima
+    expect(o.point.x).toBeCloseTo(raw.x, 12);
+  });
+
+  it('con snap, inserire il punto effettivo da\' esattamente il punto utente del candidato (anche con /Rotate 90 + CropBox)', () => {
+    for (const geom of [flat, rot]) {
+      const target = P(140.25, 321.5);
+      const { c } = setup({ geom, snap: () => hitAt(geom, target) });
+      c.setTool('segment');
+      const eff = c.resolve(geom.userToSheet(P(143, 318)));
+      c.place(geom.sheetToUser(eff.point));
+      const first = c.points[0] as UserPoint;
+      expect(first.x).toBeCloseTo(target.x, 9);
+      expect(first.y).toBeCloseTo(target.y, 9);
+    }
+  });
+
+  it('quadrato: sul secondo punto vince la squadratura (nessuno snap); sul primo si aggancia', () => {
+    let asked = 0;
+    const target = hitAt(flat, P(500, 500));
+    const { c } = setup({ snap: () => (asked++, target) });
+    c.setCoverKind('square');
+    c.setTool('cover');
+    c.setCoverKind('square');
+    expect(c.resolve(flat.userToSheet(P(10, 10))).snap).toBe('end'); // primo angolo
+    expect(asked).toBe(1);
+    c.place(P(100, 100));
+    const r = c.resolve(flat.userToSheet(P(300, 180)));
+    expect(r.snap).toBeNull();
+    expect(asked).toBe(1); // lo snap non e\' nemmeno stato interrogato
+    const a = flat.userToSheet(P(100, 100));
+    expect(Math.abs(r.point.x - a.x)).toBeCloseTo(Math.abs(r.point.y - a.y), 12);
+  });
+
+  it('rettangolo e cerchio: lo snap vale per entrambi i punti', () => {
+    const target = hitAt(flat, P(500, 500));
+    for (const kind of ['rect', 'circle'] as const) {
+      const { c } = setup({ snap: () => target });
+      c.setTool('cover');
+      c.setCoverKind(kind);
+      expect(c.resolve(flat.userToSheet(P(10, 10))).snap).toBe('end');
+      c.place(P(100, 100));
+      expect(c.resolve(flat.userToSheet(P(300, 180))).snap).toBe('end');
+    }
+  });
+
+  it('non si interroga lo snap senza strumento o con lo strumento bloccato (dialogo o tastierino aperto)', () => {
+    let asked = 0;
+    const target = hitAt(flat, P(500, 500));
+    const { c } = setup({ snap: () => (asked++, target) });
+    expect(c.resolve(flat.userToSheet(P(10, 10))).snap).toBeNull(); // nessuno strumento
+    c.setTool('calibrate');
+    c.place(P(100, 100));
+    c.place(P(300, 100)); // due punti: il dialogo e\' aperto, lo strumento e\' bloccato
+    expect(c.locked).toBe(true);
+    asked = 0;
+    expect(c.resolve(flat.userToSheet(P(10, 10))).snap).toBeNull();
+    expect(asked).toBe(0);
+  });
+
+  it('tutti gli strumenti di costruzione si agganciano al primo punto; Distanza anche per una nuova misura', () => {
+    const target = hitAt(flat, P(500, 500));
+    const tools: ConstructionTool[] = ['segment', 'polyline', 'calibrate', 'distance', 'text', 'dim', 'cover'];
+    for (const t of tools) {
+      const { c } = setup({ snap: () => target });
+      c.setTool(t);
+      expect(c.resolve(flat.userToSheet(P(10, 10))).snap, t).toBe('end');
+    }
+    const { c } = setup({ snap: () => target });
+    c.setTool('distance');
+    c.place(P(100, 100));
+    c.place(P(300, 100));
+    expect(c.done).toBe(true);
+    expect(c.resolve(flat.userToSheet(P(10, 10))).snap).toBe('end'); // il tocco successivo inizia una nuova misura
+  });
+
+  it('terzo punto di una quota: si aggancia come ogni punto indicato', () => {
+    const target = hitAt(flat, P(250, 400));
+    const { c } = setup({ snap: () => target });
+    c.setTool('dim');
+    c.place(P(100, 100));
+    c.place(P(300, 100));
+    expect(c.resolve(flat.userToSheet(P(240, 395)))).toEqual({ point: target.point, snap: 'end' });
   });
 });

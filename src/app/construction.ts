@@ -2,10 +2,14 @@
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
 // Testo, Quota e Copertura non usano l'ortogonale: la posizione della linea di quota e' gia' vincolata dal tipo di quota
 // e una copertura con ORTO sarebbe un rettangolo senza altezza. Il quadrato ha il suo vincolo (`squareSheet`).
+// Priorita' del punto effettivo (`resolve`): (1) squadratura del secondo punto del quadrato; (2) snap su un oggetto, se un candidato e' nel
+// raggio; (3) ORTO, se attivo e c'e' un'ancora. Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO acceso
+// lo snap puo' portare il punto fuori asse e si vede.
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
 import { orthoSheet } from '../geometry/ortho';
 import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
+import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
 
 export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover';
@@ -15,6 +19,11 @@ export interface ConstructionEnv {
   /** Pixel CSS per pt del foglio (zoom a schermo). */
   zoom(): number;
   ortho(): boolean;
+  /**
+   * Snap sugli oggetti (V2a): il candidato (Estremo o Punto medio) entro il raggio dal punto grezzo, o null. `touch` = raggio del dito.
+   * Facoltativa: senza, nessuno snap (comportamento di prima).
+   */
+  snap?(raw: SheetPoint, touch: boolean): SnapHit | null;
 }
 
 export interface ConstructionEvents {
@@ -114,14 +123,27 @@ export class Construction {
     return this.points.at(-1) ?? null;
   }
 
-  /** Porta il punto grezzo (foglio) sul punto effettivo: ortogonale rispetto all'ultimo punto, se attivo; per il quadrato, l'angolo squadrato. */
-  constrain(raw: SheetPoint): SheetPoint {
+  /**
+   * Porta il punto grezzo (foglio) sul punto effettivo e dice se e' stato uno snap a portarlo li'. Ordine: per il secondo punto del quadrato, l'angolo
+   * squadrato (vince su tutto); poi lo snap su un oggetto (a ogni punto indicato, a strumento non bloccato); poi l'ortogonale rispetto all'ultimo punto, se attivo.
+   * `touch`: il raggio di cattura dello snap e' piu' largo col dito.
+   */
+  resolve(raw: SheetPoint, touch = false): Resolved {
     const geom = this.env.geometry();
     const first = this.points[0];
-    if (geom && first && this.tool === 'cover' && this.coverKind === 'square' && this.points.length === 1 && !this.locked) return squareSheet(geom.userToSheet(first), raw);
+    if (geom && first && this.tool === 'cover' && this.coverKind === 'square' && this.points.length === 1 && !this.locked) return { point: squareSheet(geom.userToSheet(first), raw), snap: null };
+    if (geom && this.tool && !this.locked) {
+      const hit = this.env.snap?.(raw, touch) ?? null;
+      if (hit) return { point: hit.point, snap: hit.kind };
+    }
     const a = this.anchor;
-    if (!geom || !a || !this.env.ortho()) return raw;
-    return orthoSheet(geom.userToSheet(a), raw);
+    if (!geom || !a || !this.env.ortho()) return { point: raw, snap: null };
+    return { point: orthoSheet(geom.userToSheet(a), raw), snap: null };
+  }
+
+  /** Il solo punto effettivo di `resolve`. */
+  constrain(raw: SheetPoint, touch = false): SheetPoint {
+    return this.resolve(raw, touch).point;
   }
 
   /** Un tocco (o clic) ha inserito il punto `placed` (gia' vincolato). */
