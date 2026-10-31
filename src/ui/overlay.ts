@@ -5,6 +5,7 @@
 import { type SheetCover, coverShapeOf } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
+import { SNAP_LABEL, type SnapKind } from '../geometry/snap';
 import { DRAWING_FONT, type DrawItem } from '../model/scene';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
 import { h } from './dom';
@@ -23,6 +24,10 @@ export interface Badge {
   at: SheetPoint;
   lines: readonly string[];
 }
+
+/** Marcatore di snap: mezzo lato in px CSS (8 x 8 px di DESIGN.md) e larghezza stimata di un carattere dell'etichetta (11 px, spaziatura fissa). */
+const SNAP_HALF = 4;
+const SNAP_CHAR_PX = 6.6;
 
 const svgEl = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] => {
   const el = document.createElementNS(SVG_NS, tag);
@@ -73,12 +78,20 @@ export class SceneOverlay {
   private readonly guide = svgEl('path', { class: 'sc-guide', fill: 'none' });
   private readonly markersG = svgEl('g', { class: 'sc-markers' });
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
+  /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio) con il nome: solo a schermo, mai esportato. */
+  private readonly snapG = svgEl('g', { class: 'snap-mark', display: 'none' });
+  private readonly snapShape: Record<SnapKind, SVGElement> = {
+    end: svgEl('rect', { x: -SNAP_HALF, y: -SNAP_HALF, width: 2 * SNAP_HALF, height: 2 * SNAP_HALF }),
+    mid: svgEl('polygon', { points: `0,${-SNAP_HALF} ${SNAP_HALF},${SNAP_HALF} ${-SNAP_HALF},${SNAP_HALF}` }),
+  };
+  private readonly snapLabel = svgEl('text', { x: SNAP_HALF + 5, y: -SNAP_HALF - 2 });
   private readonly badgeEl = h('div', { class: 'measure-badge', hidden: true });
   private strokes: StrokeEl[] = [];
   private draftStrokes: StrokeEl[] = [];
   private previewStroke: StrokeEl | null = null;
   private markers: { g: SVGGElement; p: SheetPoint }[] = [];
   private aim: SheetPoint | null = null;
+  private snap: { p: SheetPoint; kind: SnapKind } | null = null;
   private badge: Badge | null = null;
   private tx = 0;
   private ty = 0;
@@ -89,7 +102,8 @@ export class SceneOverlay {
     this.guide.setAttribute('display', 'none');
     this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.outlineG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
-    svg.append(this.sheetG, this.markersG, this.aimG);
+    this.snapG.append(this.snapLabel);
+    svg.append(this.sheetG, this.markersG, this.aimG, this.snapG);
     this.el = h('div', { class: 'viewer-layer' }, svg, this.badgeEl);
   }
 
@@ -256,6 +270,22 @@ export class SceneOverlay {
     this.placeScreenItems();
   }
 
+  /** Marcatore di snap sul punto effettivo (foglio) con il tipo; null lo toglie. */
+  setSnap(p: SheetPoint | null, kind: SnapKind | null): void {
+    this.snap = p && kind ? { p, kind } : null;
+    if (!this.snap) {
+      this.snapG.setAttribute('display', 'none');
+      delete this.snapG.dataset.kind;
+      return;
+    }
+    this.snapG.dataset.kind = this.snap.kind;
+    this.snapG.insertBefore(this.snapShape[this.snap.kind], this.snapLabel);
+    this.snapShape[this.snap.kind === 'end' ? 'mid' : 'end'].remove();
+    this.snapLabel.textContent = SNAP_LABEL[this.snap.kind];
+    this.snapG.setAttribute('display', 'inline');
+    this.placeScreenItems();
+  }
+
   setBadge(b: Badge | null): void {
     this.badge = b;
     if (!b) {
@@ -270,6 +300,16 @@ export class SceneOverlay {
   private placeScreenItems(): void {
     for (const m of this.markers) m.g.setAttribute('transform', `translate(${this.tx + m.p.x * this.zoom} ${this.ty + m.p.y * this.zoom})`);
     if (this.aim) this.aimG.setAttribute('transform', `translate(${this.tx + this.aim.x * this.zoom} ${this.ty + this.aim.y * this.zoom})`);
+    if (this.snap) {
+      const sx = this.tx + this.snap.p.x * this.zoom;
+      const sy = this.ty + this.snap.p.y * this.zoom;
+      this.snapG.setAttribute('transform', `translate(${sx} ${sy})`);
+      // l'etichetta sta a destra del marcatore; vicino al bordo destro del visore passa a sinistra (11 px di corpo: circa 6.6 px per carattere, a spaziatura fissa)
+      const w = SNAP_LABEL[this.snap.kind].length * SNAP_CHAR_PX;
+      const flip = sx + SNAP_HALF + 5 + w > this.el.clientWidth - 4 && sx - SNAP_HALF - 5 - w > 4;
+      this.snapLabel.setAttribute('x', String(flip ? -SNAP_HALF - 5 : SNAP_HALF + 5));
+      this.snapLabel.setAttribute('text-anchor', flip ? 'end' : 'start');
+    }
     if (this.badge && !this.badgeEl.hidden) {
       const sx = this.tx + this.badge.at.x * this.zoom;
       const sy = this.ty + this.badge.at.y * this.zoom;

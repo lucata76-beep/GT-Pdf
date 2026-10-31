@@ -10,6 +10,7 @@ import type { SheetCover } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
 import { SCREEN_PIXEL_BUDGET, fitRenderSize } from '../geometry/pixels';
+import type { Resolved } from '../geometry/snap';
 import type { Stroke } from '../model/stroke';
 import type { PDFPageProxy, RenderTask } from '../pdf/loader';
 import { h } from './dom';
@@ -44,8 +45,11 @@ export type ViewerMode = 'pan' | 'pick' | 'erase' | 'select';
 export interface ViewerHooks {
   /** Posizione del cursore sul foglio (pt fisici, origine in alto a sinistra); null quando esce dal foglio. */
   onCursor?: (p: SheetPoint | null) => void;
-  /** Modo 'pick': porta il punto grezzo sul punto effettivo (es. vincolo ortogonale). Vale per mira, anteprima e inserimento. */
-  constrain?: (raw: SheetPoint) => SheetPoint;
+  /**
+   * Modo 'pick': porta il punto grezzo sul punto effettivo (snap sugli oggetti, vincolo ortogonale, squadratura) e dice se e' stato uno snap (e di che tipo).
+   * Vale per mira, anteprima, lente e inserimento. `touch`: il puntatore e' un dito (raggio di cattura piu' largo).
+   */
+  constrain?: (raw: SheetPoint, touch: boolean) => Resolved;
   /** Modo 'pick': il punto che verrebbe inserito adesso (gia' vincolato), durante la mira o il passaggio del mouse; null alla fine. */
   onAim?: (effective: SheetPoint | null) => void;
   /** Modo 'pick': punto inserito (rilascio dopo la mira), gia' vincolato. */
@@ -158,6 +162,7 @@ export class PdfViewer {
       if (this.pointers.size > 0) return; // tasto premuto: la cattura del puntatore continua a seguirlo
       this.lastHover = null;
       this.overlay.setAim(null);
+      this.overlay.setSnap(null, null);
       this.hooks.onAim?.(null);
       this.hooks.onErasePreview?.(null, 0);
     });
@@ -273,6 +278,7 @@ export class PdfViewer {
     this.overlay.setPreview(null);
     this.overlay.setGuide(null);
     this.overlay.setMarkers([]);
+    this.overlay.setSnap(null, null);
     this.overlay.setBadge(null);
   }
 
@@ -395,10 +401,10 @@ export class PdfViewer {
     return this.zoom;
   }
 
-  /** Il punto effettivo per una posizione nel riquadro: grezzo + vincolo dell'app (es. ortogonale). */
-  private effective(pos: Pt): SheetPoint {
+  /** Il punto effettivo per una posizione nel riquadro: grezzo + vincolo dell'app (snap, ortogonale, squadratura). */
+  private effective(pos: Pt, touch: boolean): Resolved {
     const raw = this.toSheet(pos);
-    return this.hooks.constrain ? this.hooks.constrain(raw) : raw;
+    return this.hooks.constrain ? this.hooks.constrain(raw, touch) : { point: raw, snap: null };
   }
 
   get sheetSize(): { w: number; h: number } {
@@ -522,7 +528,7 @@ export class PdfViewer {
     if (aim && aim.id === e.pointerId) {
       const pos = this.local(e);
       this.cancelAim();
-      if (e.type === 'pointerup') this.place(pos);
+      if (e.type === 'pointerup') this.place(pos, aim.touch);
     }
     const tap = this.tap;
     if (tap && tap.id === e.pointerId) {
@@ -569,11 +575,11 @@ export class PdfViewer {
     this.queueStats();
   }
 
-  private place(pos: Pt): void {
+  private place(pos: Pt, touch: boolean): void {
     const geom = this.geom;
     if (!geom) return;
     const raw = this.toSheet(pos);
-    const eff = this.effective(pos);
+    const eff = this.effective(pos, touch).point;
     if (!geom.contains(raw) || !geom.contains(eff)) {
       this.hooks.onReject?.('Punto fuori dalla pagina: non inserito');
       return;
@@ -616,11 +622,12 @@ export class PdfViewer {
     this.lastHover = pos;
     if (this.mode === 'pick') {
       const raw = this.toSheet(pos);
-      const eff = this.effective(pos);
+      const { point: eff, snap } = this.effective(pos, false);
       const ok = this.inPage(raw);
       this.hooks.onAim?.(ok ? eff : null);
       // il segno di mira serve solo se il vincolo ha spostato il punto (altrimenti c'e' gia' il cursore a croce)
       this.overlay.setAim(ok && Math.hypot(eff.x - raw.x, eff.y - raw.y) * this.zoom > 1 ? eff : null);
+      this.overlay.setSnap(ok && snap ? eff : null, snap);
     } else if (this.mode === 'erase') {
       this.previewErase(pos, false);
     }
@@ -657,6 +664,7 @@ export class PdfViewer {
     const had = this.aim !== null;
     this.aim = null;
     this.overlay.setAim(null);
+    this.overlay.setSnap(null, null);
     this.lens.hide();
     if (had) this.hooks.onAim?.(null);
   }
@@ -665,8 +673,9 @@ export class PdfViewer {
     const aim = this.aim;
     if (!aim) return;
     const raw = this.toSheet(aim.pos);
-    const eff = this.effective(aim.pos);
+    const { point: eff, snap } = this.effective(aim.pos, aim.touch);
     this.overlay.setAim(eff);
+    this.overlay.setSnap(snap ? eff : null, snap);
     this.hooks.onAim?.(this.inPage(raw) ? eff : null);
     if (!aim.touch || !this.canvas || !this.lastRender) return; // la lente serve al dito, non al mouse
     const box = this.el.getBoundingClientRect();

@@ -502,6 +502,22 @@ body.app-mode {
   paint-order: stroke;
   font: 500 11px var(--font-mono);
 }
+/* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio; etichetta col nome.
+   Dimensioni in px CSS fissi (non scalano con lo zoom). Solo a schermo: sta nel livello di sovrapposizione, non nel disegno esportato. */
+.snap-mark rect,
+.snap-mark polygon {
+  stroke: var(--cad-snap-topology);
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linejoin: miter;
+}
+.snap-mark text {
+  fill: var(--cad-snap-topology);
+  stroke: var(--cad-sheet);
+  stroke-width: 3;
+  paint-order: stroke;
+  font: 500 11px var(--font-mono);
+}
 
 /* Pannello "Nessun documento aperto" (CP5e): non esce mai da .work. Scorre se e' piu' alto; il contenitore interno sta al centro con `margin: auto` (con spazio
    in piu' lo divide, senza spazio non va in negativo e non taglia in alto), non con `justify-content: safe center`: `safe` e' in Safari dalla 17.6 (BCD,

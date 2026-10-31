@@ -12,6 +12,7 @@ import { fmt, fmtTrim } from '../geometry/numbers';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
+import { SNAP_LABEL, type SnapHit, type SnapKind, findSnap, snapRadiusPt } from '../geometry/snap';
 import { type Command, History } from '../model/history';
 import {
   AddObject,
@@ -118,6 +119,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let uiSize = loadUiSize();
   let opening = false;
   let ortho = false;
+  /** Snap sugli oggetti (V2a): Estremo e Punto medio, attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
+  const snapOn: Record<SnapKind, boolean> = { end: true, mid: true };
   /** Proprieta' dei NUOVI oggetti: tipo di linea, colore e spessore (anche delle quote), corpo del testo (testi e quote). */
   const stroke: Stroke = { ...DEFAULT_STROKE };
   let textPt = DEFAULT_TEXT_PT;
@@ -148,7 +151,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Costruzione per punti ----------
   const construction = new Construction(
-    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho },
+    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch) => snapAt(raw, touch) },
     {
       line: (kind, points) => {
         const obj: LineObject = { id: model.newId(), kind, points: points.map((p) => ({ ...p })), stroke: { ...stroke } };
@@ -171,6 +174,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     },
   );
 
+  /** Snap sugli oggetti della pagina corrente: il candidato piu' vicino al punto grezzo (foglio) entro il raggio (px CSS / zoom), tra i tipi attivi. */
+  function snapAt(raw: SheetPoint, touch: boolean): SnapHit | null {
+    const g = viewer.geometry;
+    if (!g || !pdf || (!snapOn.end && !snapOn.mid)) return null;
+    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn);
+  }
+
   /** Lunghezza totale di una spezzata, in mm reali se la pagina e' calibrata, altrimenti in mm del foglio. */
   function lengthText(points: readonly UserPoint[]): string {
     const g = viewer.geometry;
@@ -189,12 +199,19 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const nextBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina successiva', disabled: true, onclick: () => void goTo(pageNo + 1) }, icon('chevron-right'));
   const pager = h('div', { class: 'st-pager' }, prevBtn, stPage, nextBtn);
   const scaleBtn = h('button', { class: 'st-scale-btn num', type: 'button', title: 'Calibra la scala di questa pagina', onclick: () => selectTool('calibrate') }, 'non calibrata');
-  const orthoBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', title: 'Ortogonale: il secondo punto va in orizzontale o in verticale', onclick: () => setOrtho(!ortho) }, 'ORTO');
+  /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio e ORTO (`data-toggle` li distingue). */
+  const mkToggle = (id: 'end' | 'mid' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
+    h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': String(on), 'data-toggle': id, title, onclick: fn }, label);
+  const endBtn = mkToggle('end', SNAP_LABEL.end, 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, quote e coperture', snapOn.end, () => setSnap('end', !snapOn.end));
+  const midBtn = mkToggle('mid', SNAP_LABEL.mid, 'Snap sui punti medi: il punto si aggancia al centro dei tratti e dei lati delle coperture', snapOn.mid, () => setSnap('mid', !snapOn.mid));
+  const orthoBtn = mkToggle('ortho', 'ORTO', 'Ortogonale: il secondo punto va in orizzontale o in verticale', false, () => setOrtho(!ortho));
   const statusbar = h(
     'footer',
     { class: 'statusbar' },
     h('span', { class: 'st-coord' }, h('span', { class: 'lbl' }, 'X:'), stX, h('span', { class: 'unit' }, 'mm'), h('span', { class: 'lbl' }, 'Y:'), stY, h('span', { class: 'unit' }, 'mm')),
     h('span', { class: 'st-scale' }, h('span', { class: 'lbl' }, 'SCALA:'), scaleBtn),
+    endBtn,
+    midBtn,
     orthoBtn,
     statusMsg,
     pager,
@@ -212,6 +229,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ortho = on;
     orthoBtn.setAttribute('aria-pressed', String(on));
     say(on ? 'Ortogonale attivo: il punto successivo va in orizzontale o in verticale' : 'Ortogonale disattivato');
+    viewer.refreshAim();
+  }
+  function setSnap(kind: SnapKind, on: boolean): void {
+    snapOn[kind] = on;
+    (kind === 'end' ? endBtn : midBtn).setAttribute('aria-pressed', String(on));
+    const what = kind === 'end' ? 'agli estremi di rette, linee, quote e coperture' : 'al centro dei tratti e dei lati delle coperture';
+    say(on ? `${SNAP_LABEL[kind]} attivo: il punto si aggancia ${what}` : `${SNAP_LABEL[kind]} disattivato`);
     viewer.refreshAim();
   }
   const updateScaleLabel = (): void => {
@@ -957,7 +981,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     zoomLabel.textContent = `${fmt((zoom / CSS_PX_PER_PT) * 100, 0)}%`;
   };
   viewer.hooks.onReject = say;
-  viewer.hooks.constrain = (raw) => construction.constrain(raw);
+  viewer.hooks.constrain = (raw, touch) => construction.resolve(raw, touch);
   viewer.hooks.onAim = (eff) => {
     const g = viewer.geometry;
     currentAim = eff && g ? g.sheetToUser(eff) : null;
@@ -1511,6 +1535,34 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         }
       },
       setScale: (page: number, mmPerPt: number) => history.exec(new SetScale(page, model.scale(page), { mmPerPt })),
+      /**
+       * Prestazioni dello snap (scripts/perf-cp6a.cjs): chiama `findSnap`, la stessa funzione dell'app, su oggetti sintetici di una pagina. Per ogni lotto di
+       * `batch` chiamate misura il tempo del lotto; misura anche `singles` chiamate una per una (performance.now() ha risoluzione limitata).
+       */
+      snapRun: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { batch: number; batches: number; singles?: number }) => {
+        const info = pdf?.pages[0];
+        if (!info) throw new Error('nessun documento');
+        const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+        const sheetRaws = raws.map((u) => g.userToSheet(u));
+        let hits = 0;
+        let calls = 0;
+        const batchMs: number[] = [];
+        for (let b = 0; b < o.batches; b++) {
+          const t0 = performance.now();
+          for (let i = 0; i < o.batch; i++) {
+            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, snapOn)) hits++;
+            calls++;
+          }
+          batchMs.push(performance.now() - t0);
+        }
+        const singleMs: number[] = [];
+        for (let i = 0; i < (o.singles ?? 500); i++) {
+          const t0 = performance.now();
+          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, snapOn);
+          singleMs.push(performance.now() - t0);
+        }
+        return { hits, calls, batch: o.batch, batchMs, singleMs };
+      },
       goTo: (n: number) => goTo(n),
       /** I byte originali del PDF aperto (stesso Uint8Array dell'app: serve a provare che non cambiano). */
       originalBytes: () => pdf?.bytes ?? null,
