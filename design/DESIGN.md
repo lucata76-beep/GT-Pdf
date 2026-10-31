@@ -231,13 +231,19 @@ Quota sul disegno
 - Stile esatto di frecce e proporzioni (fissato in CP3, di progetto, NON da una norma): vedere "Testo, quote e tastierino (CP3)" sotto e `docs/PIANO.md` (Scelte di CP3).
 - Tipi di quota: lineare (allineata, orizzontale, verticale), diametro, raggio. Valore automatico dalla scala oppure digitato.
 
-Snap (V2: gli snap sugli oggetti, a partire da Estremo e Punto medio, non sono in V1; in V1 c'e' solo ORTO)
+Snap (V2: gli snap sugli oggetti, a partire da Estremo e Punto medio, non sono in V1; in V1 c'e' solo ORTO). **Realizzati in CP6a (V2a): Estremo e Punto medio e la Griglia**; Centro (con il cerchio, V2b) e Intersezione restano da fare.
 - Marker 8x8px, tratto 1.5px: quadrato = estremo, triangolo = punto medio, cerchio = centro, croce = intersezione. Colori: `snap-topology` e `snap-vector`.
 - Etichetta del tipo di snap con i nomi: Estremo, Punto medio, Centro, Intersezione (non "Spigolo").
 - Nella barra di stato: toggle singoli `[Estremo] [Punto medio] [Centro] [Intersezione] [Ortogonale] [Griglia]`.
+- **Realizzato in CP6a** (decisioni 48-52 di docs/PIANO.md):
+  - **Marcatore**: nel livello di sovrapposizione, solo a schermo (non esportato); quadrato 8x8 px = Estremo, triangolo 8x8 px = Punto medio, tratto 1.5 px, colore `snap-topology` (#00796B, 5.32:1 su bianco); accanto, l'etichetta "Estremo" o "Punto medio" (11 px, a spaziatura fissa, con alone del colore del foglio; vicino al bordo destro del visore passa a sinistra). Compare sul punto che verrebbe inserito, durante la mira del dito e il passaggio del mouse. **Nella lente non compare** (la lente copia solo il PDF), ma la lente mostra il punto agganciato.
+  - **Candidati**: Retta e Linea (estremi e centro di ogni tratto), Copertura rettangolare e quadrata (4 angoli e centri dei 4 lati), Quota (i due punti misurati). Nessuno per il testo e per la copertura circolare. Raggio di cattura: 10 px col mouse, 22 col dito (**valori di partenza, da tarare sul PC**).
+  - **Interruttori**: `Estremo` e `Punto medio` nella barra di stato accanto a `ORTO` e `Griglia` (`st-toggle`, `aria-pressed`), attivi all'avvio; stato della sessione, non salvato nel progetto. Sotto 720 px (iPhone in verticale) la barra di stato resta compatta (X, Y, scala, ORTO) e questi tre stanno solo nel pannello a destra, sezione "Aggancio e griglia" (>= 44 px).
+  - **Priorita'**: squadratura del quadrato, poi snap su un oggetto, poi ORTO, poi griglia.
+- **Griglia (CP6a)**: DESIGN.md non la disegnava. **Linee sottili di 1 px** (colore `border-strong` a meta' opacita'), sotto gli oggetti e sopra il PDF, solo quelle visibili; origine nell'angolo in basso a sinistra della pagina mostrata. **Nascosta (e non arrotonda) quando il passo a schermo e' sotto 8 px CSS.** Passo in mm nel pannello a destra, sezione "Aggancio e griglia", campo "Passo griglia" (valori predefiniti 1, 2, 5, 10, 20, 50 + campo digitabile 0.1-1000), con una nota che dice se il passo e' in mm reali o del foglio. Spenta all'avvio.
 
 Barra di stato
-- Coordinate cursore (`X: 142.50 mm  Y: 88.25 mm`), stato calibrazione, toggle snap. Su iPhone: riga compatta con X, Y, scala, ORTO.
+- Coordinate cursore (`X: 142.50 mm  Y: 88.25 mm`), stato calibrazione, toggle snap. Su iPhone: riga compatta con X, Y, scala, ORTO. **CP6a**: da 720 px la barra contiene anche `Estremo`, `Punto medio` e `Griglia`; se non entra tutto la riga scorre (decisione 39): a 932 px entra tutto fino ad A+ 20, a 844 px fino ad A+ 18, a 780 px fino ad A+ 16 e a 720 px fino ad A+ 14 (misure in "Scelte di CP6a"). X e Y restano sul cursore grezzo, non sul punto agganciato.
 
 Lente (iPhone)
 - Riquadro quadrato con mirino a croce e snap magnetico, mostra l'ingrandimento. Dimensione 80x80 px e scostamento 70px sopra il punto di tocco: valori di partenza (da Design originale), da tarare su iPhone reale (NON VERIFICATO).
@@ -326,7 +332,7 @@ Tolleranze (campi, classi), Livelli, funzioni CNC, stampa, account/registrazione
 
 - Lente: forma e dimensioni definitive (provare su iPhone reale).
 - Separatore decimale: deciso il 27/10/2026: mostrato sempre ".", in digitazione la "," e' accettata e normalizzata a ".". Tasto segno meno per valori negativi: non serve nelle quote (valori positivi); aperto per il futuro.
-- Snap su Estremo e Punto medio: in V2 (decisione 27/10/2026), non in CP3.
+- Snap su Estremo e Punto medio: **realizzato in CP6a (V2a)**; raggio di cattura (10 px mouse, 22 px dito) e soglia della griglia (8 px) da tarare sul PC; marcatore nella lente e X/Y sul punto agganciato: da decidere (docs/PIANO.md, "Scelte di CP6a").
 - Schermate non ancora disegnate: copia/duplica, menu aperti. Coperture, Seleziona, Cancella e i layout ABC e simboli sono stati realizzati in CP3-CP4 seguendo questo file.
 - Colonna di pulsanti sul foglio: copre ancora una striscia del foglio (12 % della larghezza a pagina intera, 390 x 780); l'eventuale pulsante apri/chiudi si decide dopo la prova su iPhone (decisione 16).
 - Layout iPhone definitivo da tarare su dispositivo.
