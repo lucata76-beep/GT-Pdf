@@ -8,7 +8,7 @@ import { COINCIDENT_PX, Construction, type ConstructionEnv, type ConstructionEve
 const flat = new PageGeometry({ view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1 });
 const rot = new PageGeometry({ view: [50, 50, 450, 600], rotate: 90, userUnit: 1 }); // Rotate 90 + CropBox
 
-function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap?: ConstructionEnv['snap'] } = {}) {
+function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap?: ConstructionEnv['snap']; grid?: ConstructionEnv['grid'] } = {}) {
   const log: string[] = [];
   const lines: { kind: string; points: UserPoint[] }[] = [];
   const dims: DimensionDef[] = [];
@@ -36,7 +36,7 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap
     },
     reject: () => log.push('reject'),
   };
-  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap }, ev);
+  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap, grid: opts.grid }, ev);
   return { c, log, lines, dims, covers, texts, state };
 }
 const P = (x: number, y: number): UserPoint => ({ x, y });
@@ -634,5 +634,104 @@ describe('snap sugli oggetti (V2a)', () => {
     c.place(P(100, 100));
     c.place(P(300, 100));
     expect(c.resolve(flat.userToSheet(P(240, 395)))).toEqual({ point: target.point, snap: 'end' });
+  });
+});
+
+describe('griglia (V2a)', () => {
+  const STEP = 20;
+  /** Il nodo piu' vicino sul foglio: origine in basso a sinistra della pagina mostrata, Y verso l'alto. */
+  const node = (g: PageGeometry, p: { x: number; y: number }): { x: number; y: number } => ({
+    x: Math.round(p.x / STEP) * STEP,
+    y: g.height - Math.round((g.height - p.y) / STEP) * STEP,
+  });
+
+  it('senza `grid` nell\'ambiente o con la griglia spenta/nascosta (null) il punto resta quello grezzo', () => {
+    for (const grid of [undefined, () => null]) {
+      const { c } = setup({ grid });
+      c.setTool('segment');
+      const raw = { x: 41.3, y: 63.7 };
+      expect(c.resolve(raw)).toEqual({ point: raw, snap: null });
+    }
+  });
+
+  it('griglia accesa: il punto va al nodo piu\' vicino, con tutti gli strumenti, anche col primo punto', () => {
+    const tools: ConstructionTool[] = ['segment', 'polyline', 'calibrate', 'distance', 'text', 'dim', 'cover'];
+    for (const t of tools) {
+      const { c } = setup({ grid: () => STEP });
+      c.setTool(t);
+      const raw = { x: 141.3, y: 363.7 };
+      const r = c.resolve(raw);
+      expect(r.snap, t).toBeNull();
+      expect(r.point.x, t).toBeCloseTo(node(flat, raw).x, 9);
+      expect(r.point.y, t).toBeCloseTo(node(flat, raw).y, 9);
+    }
+  });
+
+  it('priorita\': lo snap sugli oggetti vince sulla griglia (il punto agganciato non viene arrotondato)', () => {
+    const target = { point: { x: 141.3, y: 363.7 }, kind: 'end' as const };
+    const { c } = setup({ snap: () => target, grid: () => STEP });
+    c.setTool('segment');
+    expect(c.resolve({ x: 150, y: 370 })).toEqual({ point: target.point, snap: 'end' });
+  });
+
+  it('con ORTO: si arrotonda solo la coordinata libera, l\'altra resta quella dell\'ancora (anche se l\'ancora non e\' su un nodo)', () => {
+    const { c, state } = setup({ grid: () => STEP });
+    state.ortho = true;
+    c.setTool('segment');
+    c.place(P(103.3, 207.9)); // l\'ancora non e\' su un nodo
+    const a = flat.userToSheet(P(103.3, 207.9));
+    const h = c.resolve({ x: a.x + 141.3, y: a.y + 3 }); // movimento orizzontale: libera la x
+    expect(h.point.y).toBe(a.y);
+    expect(h.point.x).toBeCloseTo(Math.round((a.x + 141.3) / STEP) * STEP, 9);
+    const v = c.resolve({ x: a.x - 2, y: a.y - 141.3 }); // movimento verticale: libera la y
+    expect(v.point.x).toBe(a.x);
+    expect(v.point.y).toBeCloseTo(flat.height - Math.round((flat.height - (a.y - 141.3)) / STEP) * STEP, 9);
+  });
+
+  it('quadrato: sul secondo punto vince la squadratura (non si arrotonda); sul primo si arrotonda', () => {
+    const { c } = setup({ grid: () => STEP });
+    c.setTool('cover');
+    c.setCoverKind('square');
+    const first = c.resolve({ x: 101.3, y: 203.7 });
+    expect(first.point.x % STEP).toBeCloseTo(0, 9);
+    c.place(flat.sheetToUser(first.point));
+    const a = flat.userToSheet(c.points[0] as UserPoint);
+    const r = c.resolve({ x: a.x + 133.3, y: a.y + 41.7 });
+    expect(Math.abs(r.point.x - a.x)).toBeCloseTo(Math.abs(r.point.y - a.y), 12);
+    expect(Math.abs(r.point.x - a.x)).toBeCloseTo(133.3, 9); // lato = il maggiore degli spostamenti, non un multiplo del passo
+  });
+
+  it('non si arrotonda senza strumento o con lo strumento bloccato', () => {
+    let asked = 0;
+    const { c } = setup({ grid: () => (asked++, STEP) });
+    const raw = { x: 41.3, y: 63.7 };
+    expect(c.resolve(raw).point).toEqual(raw); // nessuno strumento
+    c.setTool('calibrate');
+    c.place(P(100, 100));
+    c.place(P(300, 100));
+    expect(c.locked).toBe(true);
+    asked = 0;
+    expect(c.resolve(raw).point).toEqual(raw);
+    expect(asked).toBe(0);
+  });
+
+  it('pagina /Rotate 90 + CropBox: i nodi sono sul foglio mostrato e il punto torna esatto nello spazio utente', () => {
+    const { c } = setup({ geom: rot, grid: () => STEP });
+    c.setTool('segment');
+    const raw = { x: rot.width / 2 + 3.3, y: rot.height / 2 - 4.4 };
+    const r = c.resolve(raw);
+    expect(r.point.x / STEP).toBeCloseTo(Math.round(r.point.x / STEP), 9);
+    expect((rot.height - r.point.y) / STEP).toBeCloseTo(Math.round((rot.height - r.point.y) / STEP), 9);
+    const u = rot.sheetToUser(r.point);
+    const back = rot.userToSheet(u);
+    expect(back.x).toBeCloseTo(r.point.x, 9);
+    expect(back.y).toBeCloseTo(r.point.y, 9);
+  });
+
+  it('vicino al bordo il nodo resta dentro la pagina (nessun rifiuto "fuori dalla pagina")', () => {
+    const { c } = setup({ grid: () => STEP });
+    c.setTool('segment');
+    const r = c.resolve({ x: flat.width - 0.2, y: 0.3 });
+    expect(flat.contains(r.point)).toBe(true);
   });
 });

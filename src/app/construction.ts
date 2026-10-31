@@ -3,11 +3,13 @@
 // Testo, Quota e Copertura non usano l'ortogonale: la posizione della linea di quota e' gia' vincolata dal tipo di quota
 // e una copertura con ORTO sarebbe un rettangolo senza altezza. Il quadrato ha il suo vincolo (`squareSheet`).
 // Priorita' del punto effettivo (`resolve`): (1) squadratura del secondo punto del quadrato; (2) snap su un oggetto, se un candidato e' nel
-// raggio; (3) ORTO, se attivo e c'e' un'ancora. Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO acceso
-// lo snap puo' portare il punto fuori asse e si vede.
+// raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
+// ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
+// acceso lo snap puo' portare il punto fuori asse e si vede.
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
-import { orthoSheet } from '../geometry/ortho';
+import { snapToGrid } from '../geometry/grid';
+import { orthoFreeAxis, orthoSheet } from '../geometry/ortho';
 import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
@@ -24,6 +26,11 @@ export interface ConstructionEnv {
    * Facoltativa: senza, nessuno snap (comportamento di prima).
    */
   snap?(raw: SheetPoint, touch: boolean): SnapHit | null;
+  /**
+   * Griglia (V2a): il passo in pt FISICI del foglio se la griglia e' accesa e si vede a questo zoom, altrimenti null. Facoltativa: senza, nessuna griglia.
+   * L'origine e' l'angolo in basso a sinistra della pagina mostrata (`snapToGrid`).
+   */
+  grid?(): number | null;
 }
 
 export interface ConstructionEvents {
@@ -136,9 +143,12 @@ export class Construction {
       const hit = this.env.snap?.(raw, touch) ?? null;
       if (hit) return { point: hit.point, snap: hit.kind };
     }
+    const step = geom && this.tool && !this.locked ? (this.env.grid?.() ?? null) : null;
     const a = this.anchor;
-    if (!geom || !a || !this.env.ortho()) return { point: raw, snap: null };
-    return { point: orthoSheet(geom.userToSheet(a), raw), snap: null };
+    if (!geom || !a || !this.env.ortho()) return { point: step && geom ? snapToGrid(raw, step, geom) : raw, snap: null };
+    const sa = geom.userToSheet(a);
+    const o = orthoSheet(sa, raw);
+    return { point: step ? snapToGrid(o, step, geom, orthoFreeAxis(sa, raw)) : o, snap: null };
   }
 
   /** Il solo punto effettivo di `resolve`. */
