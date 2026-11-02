@@ -539,6 +539,22 @@ describe('Quota con ORTO (CP6b, decisione 56)', () => {
     }
   });
 
+  it('pagina con solo CropBox (nessun /Rotate): gli assi sono quelli del foglio mostrato, per Allineata, Ø e R', () => {
+    const crop = new PageGeometry({ view: [50, 50, 450, 600], rotate: 0, userUnit: 1 });
+    for (const dim of WITH_ORTHO) {
+      const { c, dims, log } = started(dim, { geom: crop, ortho: true }, P(100, 100));
+      const a = crop.userToSheet(P(100, 100));
+      const eff = c.constrain({ x: a.x + 200, y: a.y + 9 });
+      expect(eff.y, dim).toBe(a.y);
+      const user = crop.sheetToUser(eff);
+      expect(user.y, dim).toBeCloseTo(100, 9); // senza /Rotate l'orizzontale dello schermo e' anche orizzontale nello spazio utente
+      c.place(user);
+      if (dim === 'aligned') c.place(crop.sheetToUser({ x: a.x + 100, y: a.y + 40 }));
+      expect(log, dim).toEqual([`dim:${dim}`]);
+      expect(crop.userToSheet((dims[0] as DimensionDef).p2).y, dim).toBeCloseTo(a.y, 9);
+    }
+  });
+
   it('a quota bloccata (tastierino aperto) non c\'e\' ancora; dopo il reset l\'ancora e\' il nuovo primo punto', () => {
     const { c } = started('diameter', { ortho: true });
     c.place(P(160, 700));
