@@ -1088,14 +1088,28 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const o = sheet ? objectAt(sheet, tol) : null;
     viewer.setHighlight(o ? shapeOf(o) : null);
   };
+  /** Cancella un oggetto con il comando dello strumento Cancella: un solo passo di Annulla, lo stesso messaggio. */
+  function removeObject(o: PageObject): void {
+    history.exec(new RemoveObject(pageNo, o));
+    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
+  }
+  /**
+   * Canc con lo strumento Seleziona: cancella l'oggetto selezionato (CP6b, decisione 57) e azzera la selezione. Il punto da estendere quando la selezione
+   * sara' multipla: un solo comando per tutti gli oggetti scelti (un solo Annulla) al posto del singolo `removeObject`.
+   */
+  function deleteSelected(): void {
+    const o = selObj();
+    if (!o) return;
+    removeObject(o);
+    setSelected(null);
+  }
   viewer.hooks.onErase = (sheet, tol) => {
     const o = objectAt(sheet, tol);
     if (!o) {
       say('Nessun oggetto in questo punto: tocca sopra un oggetto');
       return;
     }
-    history.exec(new RemoveObject(pageNo, o));
-    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
+    removeObject(o);
   };
   // Seleziona: un tocco sceglie l'oggetto in primo piano; trascinare l'oggetto selezionato lo sposta (un solo comando).
   viewer.hooks.onSelect = (sheet, tol) => {
@@ -1143,7 +1157,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (root.hidden || e.defaultPrevented || document.querySelector('.dialog-backdrop')) return;
     const target = e.target as HTMLElement | null;
     if (target?.matches('input, textarea, select')) return;
-    // Invio, Backspace e Canc valgono solo se il focus non e' su un pulsante o un menu (resta l'uso da tastiera dei pulsanti).
+    // Invio, Backspace e Canc valgono solo se il focus non e' su un pulsante o un menu (resta l'uso da tastiera dei pulsanti): vale anche per Canc su un oggetto selezionato.
     const onCanvas = target === null || target === document.body || viewer.el.contains(target);
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
@@ -1164,6 +1178,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && construction.pending && onCanvas) {
       e.preventDefault();
       undoAction();
+    } else if (e.key === 'Delete' && tool === 'select' && selected !== null && onCanvas) {
+      // Canc cancella l'oggetto selezionato (non Backspace: resta solo l'annullamento dell'ultimo punto in costruzione).
+      e.preventDefault();
+      deleteSelected();
     }
   });
 
