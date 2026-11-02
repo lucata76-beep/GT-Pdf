@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CoverDef } from '../geometry/cover';
-import type { DimensionDef } from '../geometry/dimension';
+import type { DimType, DimensionDef } from '../geometry/dimension';
 import { PageGeometry, type UserPoint } from '../geometry/page';
 import type { SnapHit } from '../geometry/snap';
 import { COINCIDENT_PX, Construction, type ConstructionEnv, type ConstructionEvents, type ConstructionTool } from './construction';
@@ -365,15 +365,6 @@ describe('Quota', () => {
     expect(c.pending).toBe(false);
   });
 
-  it('l\'ortogonale non si applica alle quote', () => {
-    const { c } = setup({ ortho: true });
-    c.setTool('dim');
-    c.setDimType('aligned');
-    c.place(P(100, 700));
-    const raw = flat.userToSheet(P(300, 730));
-    expect(c.constrain(raw)).toEqual(raw);
-  });
-
   it('testo guida per ogni tipo e passo', () => {
     const { c } = setup();
     c.setTool('dim');
@@ -393,6 +384,183 @@ describe('Quota', () => {
     expect(c.prompt).toBe('Quota raggio R: indica un punto sul bordo');
     c.place(P(160, 700));
     expect(c.prompt).toBe('Quota raggio R: digita il valore con il tastierino');
+  });
+});
+
+describe('Quota con ORTO (CP6b, decisione 56)', () => {
+  const WITH_ORTHO = ['aligned', 'diameter', 'radius'] as const; // ORTO sul secondo punto, come la Retta
+  const WITHOUT_ORTHO = ['horizontal', 'vertical'] as const; // misurano gia' una componente: nessun ORTO
+  const ALL: DimType[] = ['aligned', 'horizontal', 'vertical', 'diameter', 'radius'];
+  const STEP = 20;
+  /** Quota `dim` con il primo punto in `first` (utente). */
+  const started = (dim: DimType, opts: Parameters<typeof setup>[0] = {}, first: UserPoint = P(100, 700)) => {
+    const t = setup(opts);
+    t.c.setTool('dim');
+    t.c.setDimType(dim);
+    t.c.place(first);
+    return t;
+  };
+
+  it('Allineata, Ø e R: il secondo punto va in orizzontale o in verticale rispetto al primo (pagina senza /Rotate)', () => {
+    for (const dim of WITH_ORTHO) {
+      const { c } = started(dim, { ortho: true });
+      const a = flat.userToSheet(P(100, 700));
+      const h = c.constrain({ x: a.x + 200, y: a.y + 30 }); // quasi orizzontale
+      expect(h.y, dim).toBe(a.y);
+      expect(h.x, dim).toBe(a.x + 200);
+      const v = c.constrain({ x: a.x - 25, y: a.y - 180 }); // quasi verticale
+      expect(v.x, dim).toBe(a.x);
+      expect(v.y, dim).toBe(a.y - 180);
+    }
+  });
+
+  it('inserito il secondo punto vincolato, la quota ha p1 e p2 sulla stessa Y (o X) del foglio, e il terzo punto di Allineata resta libero', () => {
+    for (const dim of WITH_ORTHO) {
+      const { c, dims } = started(dim, { ortho: true });
+      const a = flat.userToSheet(P(100, 700));
+      const eff = c.constrain({ x: a.x + 200.37, y: a.y + 41.9 });
+      c.place(flat.sheetToUser(eff));
+      if (dim === 'aligned') {
+        expect(c.anchor).toBeNull(); // terzo punto: la posizione della linea di quota, nessun ORTO
+        const raw3 = { x: a.x + 80.2, y: a.y + 55.5 };
+        expect(c.constrain(raw3)).toEqual(raw3);
+        c.place(flat.sheetToUser(raw3));
+      }
+      expect(dims, dim).toHaveLength(1);
+      const d = dims[0] as DimensionDef;
+      const s1 = flat.userToSheet(d.p1);
+      const s2 = flat.userToSheet(d.p2);
+      expect(Math.abs(s2.y - s1.y), dim).toBeLessThan(1e-9);
+      expect(s2.x - s1.x, dim).toBeCloseTo(200.37, 9);
+    }
+  });
+
+  it('ORTO spento: il secondo punto di ogni tipo di quota e\' quello grezzo (come prima di CP6b)', () => {
+    for (const dim of ALL) {
+      const { c } = started(dim, { ortho: false });
+      const raw = flat.userToSheet(P(300, 730));
+      expect(c.constrain(raw), dim).toEqual(raw);
+      expect(c.resolve(raw), dim).toEqual({ point: raw, snap: null });
+    }
+  });
+
+  it('il primo punto non ha ancora un\'ancora: nessun vincolo, con ORTO acceso', () => {
+    for (const dim of ALL) {
+      const { c } = setup({ ortho: true });
+      c.setTool('dim');
+      c.setDimType(dim);
+      expect(c.anchor, dim).toBeNull();
+      const raw = { x: 12.3, y: 34.5 };
+      expect(c.constrain(raw), dim).toEqual(raw);
+    }
+  });
+
+  it('Orizzontale e Verticale: nessun ORTO, ne\' sul secondo punto ne\' sul terzo (regressione, ORTO acceso)', () => {
+    for (const dim of WITHOUT_ORTHO) {
+      const { c, log, dims } = started(dim, { ortho: true });
+      expect(c.anchor, dim).toBeNull();
+      // un punto quasi sulla stessa X (orizzontale) o Y (verticale): con ORTO sarebbe collassato e rifiutato; senza resta quello grezzo
+      const a = flat.userToSheet(P(100, 700));
+      const raw2 = dim === 'horizontal' ? { x: a.x + 12.5, y: a.y + 180 } : { x: a.x + 180, y: a.y + 12.5 };
+      expect(c.constrain(raw2), dim).toEqual(raw2);
+      c.place(flat.sheetToUser(raw2));
+      expect(c.points, dim).toHaveLength(2);
+      expect(c.anchor, dim).toBeNull();
+      const raw3 = { x: a.x + 60.3, y: a.y + 90.7 };
+      expect(c.constrain(raw3), dim).toEqual(raw3);
+      c.place(flat.sheetToUser(raw3));
+      expect(log, dim).toEqual([`dim:${dim}`]);
+      expect(dims[0]?.p2, dim).toEqual(flat.sheetToUser(raw2));
+    }
+  });
+
+  it('Orizzontale e Verticale: due punti sulla stessa X (o Y) restano rifiutati anche con ORTO acceso', () => {
+    const h = started('horizontal', { ortho: true });
+    h.c.place(P(100, 500));
+    expect(h.log).toEqual(['reject']);
+    const v = started('vertical', { ortho: true });
+    v.c.place(P(300, 700));
+    expect(v.log).toEqual(['reject']);
+  });
+
+  it('priorita\': lo snap vince sull\'ORTO sul secondo punto (il punto puo\' andare fuori asse e si vede); senza candidato resta l\'ORTO', () => {
+    for (const dim of WITH_ORTHO) {
+      const a = flat.userToSheet(P(100, 700));
+      const target: SnapHit = { point: { x: a.x + 150, y: a.y + 70 }, kind: 'end' };
+      let near = true;
+      const { c } = started(dim, { ortho: true, snap: () => (near ? target : null) });
+      expect(c.resolve({ x: a.x + 148, y: a.y + 66 }), dim).toEqual({ point: target.point, snap: 'end' });
+      near = false;
+      const r = c.resolve({ x: a.x + 148, y: a.y + 66 });
+      expect(r.snap, dim).toBeNull();
+      expect(r.point, dim).toEqual({ x: a.x + 148, y: a.y });
+    }
+  });
+
+  it('con la griglia e ORTO: si arrotonda solo l\'asse libero (l\'altro resta quello del primo punto); senza ORTO tutti e due', () => {
+    for (const dim of WITH_ORTHO) {
+      const first = P(103.3, 207.9); // non su un nodo
+      const a = flat.userToSheet(first);
+      const on = started(dim, { ortho: true, grid: () => STEP }, first);
+      const h = on.c.resolve({ x: a.x + 141.3, y: a.y + 3 });
+      expect(h.point.y, dim).toBe(a.y);
+      expect(h.point.x, dim).toBeCloseTo(Math.round((a.x + 141.3) / STEP) * STEP, 9);
+      const off = started(dim, { ortho: false, grid: () => STEP }, first);
+      const g = off.c.resolve({ x: a.x + 141.3, y: a.y + 3 });
+      expect(g.point.x, dim).toBeCloseTo(Math.round((a.x + 141.3) / STEP) * STEP, 9);
+      expect(g.point.y, dim).toBeCloseTo(flat.height - Math.round((flat.height - (a.y + 3)) / STEP) * STEP, 9);
+    }
+  });
+
+  it('con la griglia e ORTO acceso il terzo punto di Allineata si arrotonda su tutti e due gli assi (ORTO non vi si applica)', () => {
+    const { c } = started('aligned', { ortho: true, grid: () => STEP });
+    c.place(flat.sheetToUser(c.resolve({ x: flat.userToSheet(P(100, 700)).x + 200, y: flat.userToSheet(P(100, 700)).y + 4 }).point));
+    expect(c.points).toHaveLength(2);
+    const r = c.resolve({ x: 141.3, y: 363.7 });
+    expect(r.point.x).toBeCloseTo(Math.round(141.3 / STEP) * STEP, 9);
+    expect(r.point.y).toBeCloseTo(flat.height - Math.round((flat.height - 363.7) / STEP) * STEP, 9);
+  });
+
+  it('pagina /Rotate 90 + CropBox: l\'orizzontale e\' quella che si vede sullo schermo, per Allineata, Ø e R', () => {
+    for (const dim of WITH_ORTHO) {
+      const { c, dims, log } = started(dim, { geom: rot, ortho: true }, P(100, 100)); // foglio (50, 50)
+      const eff = c.constrain({ x: 250, y: 60 }); // quasi orizzontale sullo schermo
+      expect(eff.y, dim).toBeCloseTo(50, 9);
+      expect(eff.x, dim).toBeCloseTo(250, 9);
+      const user = rot.sheetToUser(eff);
+      expect(user.x, dim).toBeCloseTo(100, 9); // nello spazio utente e' verticale
+      c.place(user);
+      if (dim === 'aligned') c.place(rot.sheetToUser({ x: 150, y: 120 }));
+      expect(log, dim).toEqual([`dim:${dim}`]);
+      const d = dims[0] as DimensionDef;
+      expect(rot.userToSheet(d.p2).y, dim).toBeCloseTo(rot.userToSheet(d.p1).y, 9);
+      const v = c.constrain({ x: 60, y: 300 }); // (a quota gia' inserita l'ancora non c'e' piu': nessun vincolo)
+      expect(v, dim).toEqual({ x: 60, y: 300 });
+    }
+  });
+
+  it('a quota bloccata (tastierino aperto) non c\'e\' ancora; dopo il reset l\'ancora e\' il nuovo primo punto', () => {
+    const { c } = started('diameter', { ortho: true });
+    c.place(P(160, 700));
+    expect(c.locked).toBe(true);
+    expect(c.anchor).toBeNull();
+    c.reset();
+    c.place(P(100, 600));
+    expect(c.anchor).toEqual(P(100, 600));
+  });
+
+  it('il testo guida non cambia con l\'ORTO acceso (una riga su iPhone)', () => {
+    for (const ortho of [false, true]) {
+      const { c } = setup({ ortho });
+      c.setTool('dim');
+      c.setDimType('aligned');
+      const seen: string[] = [c.prompt];
+      c.place(P(100, 700));
+      seen.push(c.prompt);
+      c.place(P(300, 700));
+      seen.push(c.prompt);
+      expect(seen).toEqual(['Quota allineata: indica il primo punto', 'Quota allineata: indica il secondo punto', 'Quota allineata: indica dove mettere la linea di quota']);
+    }
   });
 });
 

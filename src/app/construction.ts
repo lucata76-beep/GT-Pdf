@@ -1,7 +1,9 @@
 // Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota e Copertura.
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
-// Testo, Quota e Copertura non usano l'ortogonale: la posizione della linea di quota e' gia' vincolata dal tipo di quota
-// e una copertura con ORTO sarebbe un rettangolo senza altezza. Il quadrato ha il suo vincolo (`squareSheet`).
+// Testo e Copertura non usano l'ortogonale: una copertura con ORTO sarebbe un rettangolo senza altezza e il quadrato ha il suo vincolo (`squareSheet`).
+// La Quota lo usa solo sul SECONDO punto di Allineata, Ø e R (come la Retta; decisione 56 di PIANO.md). Non sull'Orizzontale e sulla Verticale, che misurano
+// gia' una componente (e `place` rifiuta due punti sulla stessa X o Y), e non sul terzo punto di nessuna quota: e' la posizione della linea di quota,
+// gia' vincolata dal tipo di quota.
 // Priorita' del punto effettivo (`resolve`): (1) squadratura del secondo punto del quadrato; (2) snap su un oggetto, se un candidato e' nel
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
@@ -124,9 +126,13 @@ export class Construction {
     return this.points.length > 0 && !this.done;
   }
 
-  /** L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto. */
+  /**
+   * L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto e per gli strumenti senza ORTO (Testo, Copertura).
+   * Quota: solo il secondo punto di Allineata, Ø e R (con un punto gia' indicato); null per Orizzontale e Verticale e per il terzo punto (posizione della linea di quota).
+   */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.tool === 'text' || this.tool === 'dim' || this.tool === 'cover' || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.done || this.locked) return null;
+    if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
   }
 
