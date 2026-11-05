@@ -474,6 +474,16 @@ async function selectSuite(browser, title, rotated) {
   await redo(page);
   check('Ripeti: lo cancella di nuovo, in un solo passo', (await objectsOf(page)).length === n0 - 1);
   await undo(page);
+  // proprieta' del cerchio selezionato (pannello a destra): spessore 3 pt, in un solo passo di Annulla
+  await click(page, await clientOfUser(page, onCircle(200)), 3, 2);
+  const insp = page.locator('.inspector');
+  const propsBefore = JSON.stringify((await objectsOf(page)).find((o) => o.kind === 'circle'));
+  await insp.locator('.presets[aria-label^="Spessori"] .preset', { hasText: /^3$/ }).click();
+  await page.waitForTimeout(100);
+  const circAfter = (await objectsOf(page)).find((o) => o.kind === 'circle');
+  check('proprieta\' del cerchio selezionato: lo spessore 3 pt si applica e il messaggio dice "Proprieta\' modificate: cerchio. Annulla le ripristina."', circAfter.stroke.widthPt === 3 && /^Propriet. modificate: cerchio\. Annulla le ripristina\.$/.test(await status(page)), JSON.stringify(circAfter.stroke) + ' ' + (await status(page)));
+  await undo(page);
+  check('Annulla ripristina le proprieta\' del cerchio in un passo', JSON.stringify((await objectsOf(page)).find((o) => o.kind === 'circle')) === propsBefore);
   // trascinamento
   await click(page, await clientOfUser(page, onCircle(200)), 3, 2);
   const p1Before = (await objectsOf(page)).find((o) => o.kind === 'circle');

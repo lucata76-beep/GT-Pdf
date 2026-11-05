@@ -202,7 +202,7 @@ async function mouseSuite(browser, decoder) {
   // --- Palette e menu ---
   check('Palette: Seleziona e Copertura attivi', !(await page.locator('button.tool[title="Seleziona"]').isDisabled()) && !(await page.locator('button.tool[title="Copertura"]').isDisabled()));
   const toolTitles = await page.$$eval('.palette .tool', (els) => els.map((e) => e.getAttribute('title')));
-  check('Palette: 10 voci (9 visibili su schermo stretto, Distanza e\' nei pulsanti sul foglio)', toolTitles.length === 10 && toolTitles[1] === 'Seleziona' && toolTitles.at(-1) === 'Copertura', toolTitles.join(','));
+  check('Palette: 11 voci (10 visibili su schermo stretto, Distanza e\' nei pulsanti sul foglio; dalla V2b c\'e\' "Cerchio e arco")', toolTitles.length === 11 && toolTitles[1] === 'Seleziona' && toolTitles.at(-1) === 'Copertura', toolTitles.join(','));
   await page.getByRole('button', { name: 'Modifica', exact: true }).click();
   const selItem = page.getByRole('menuitem', { name: 'Seleziona / sposta' });
   check('Menu Modifica: "Seleziona / sposta" attivo', !(await selItem.isDisabled()));
@@ -629,7 +629,7 @@ async function touchSuite(browser, decoder) {
   });
   const fullyVisible = pal.items.filter((i) => i.l >= 0 && i.r <= pal.client).map((i) => i.t);
   info(`palette: ${pal.items.length} voci visibili, larghezza della riga ${pal.client} px, contenuto ${pal.scroll} px, voci intere senza scorrere: ${fullyVisible.length} (${fullyVisible.join(', ')}); ogni voce ${pal.items[0].w}x${pal.items[0].h} px`);
-  check('Palette: 9 voci visibili, scorre in orizzontale (contenuto piu\' largo della riga)', pal.items.length === 9 && pal.scroll > pal.client, JSON.stringify(pal));
+  check('Palette: 10 voci visibili, scorre in orizzontale (contenuto piu\' largo della riga)', pal.items.length === 10 && pal.scroll > pal.client, JSON.stringify(pal));
   check('Palette: ogni voce >= 44 px di altezza e Seleziona e\' tra le prime visibili senza scorrere', pal.items.every((i) => i.h >= 43.5) && fullyVisible.includes('Seleziona'), JSON.stringify(pal.items));
   const fz = await page.evaluate(() => {
     const f = document.querySelector('.float-zoom').getBoundingClientRect();
@@ -1013,7 +1013,7 @@ async function menuScrollSuite(browser) {
         check(`${tag}: il pannello sta nello schermo (fondo ${Math.round(m.bottom)} <= ${m.innerH})`, m.top >= 0 && m.bottom <= m.innerH + 0.5, JSON.stringify(m));
         check(`${tag}: tutte le ${m.n} voci sono raggiungibili scorrendo`, m.unreachable.length === 0, m.unreachable.join(', '));
         check(`${tag}: bersagli touch >= 44 px`, m.small.length === 0, m.small.join(', '));
-        if (!aPlus && w === 390 && h === 780 && name === 'Inserisci') check('Verticale invariato: il menu Inserisci entra intero (545 px, nessuno scorrimento)', !m.overflow && near(m.clientH, 545, 2), JSON.stringify(m));
+        if (!aPlus && w === 390 && h === 780 && name === 'Inserisci') check('Verticale: il menu Inserisci entra intero (633 px = 14 voci da 44 px dopo la V2b, erano 545 con 12; nessuno scorrimento)', !m.overflow && near(m.clientH, 633, 2), JSON.stringify(m));
         if (!aPlus && w === 390) check(`${tag}: in verticale non scorre`, !m.overflow, JSON.stringify(m));
         if (m.overflow) {
           // scorrimento vero col dito: trascinamenti touch verso l'alto (CDP dispatchTouchEvent: `synthesizeScrollGesture` in questa emulazione non scorre il pannello, mentre il trascinamento e la rotella si), poi l'ultima voce attivabile si tocca
