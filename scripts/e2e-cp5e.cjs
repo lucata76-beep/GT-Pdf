@@ -167,7 +167,8 @@ async function fitSuite(browser) {
     });
   // Misurato: finestra minima (con 59 + 59 px di margini) a cui NON esce nulla. A 932 px (>= 900) il pulsante del pannello non c'e' e tutto entra.
   // (CP6a: con i quattro interruttori Estremo, Punto medio, ORTO e Griglia la barra di stato e' piu' larga: 932 A+22, 844 A+20, 780 A+18 non entrano piu' e scorrono; misure in "Scelte di CP6a")
-  const mustFit = { 932: [0, 1, 2, 3], 844: [0, 1, 2], 780: [0, 1], 720: [0, 1] };
+  // (CP6c: con anche l'interruttore Centro la barra di stato e' ancora piu' larga: 932 A+20, 844 A+18 e 720 A+16 non entrano piu' e scorrono; misure in "Scelte di CP6c")
+  const mustFit = { 932: [0, 1, 2], 844: [0, 1], 780: [0, 1], 720: [0] };
   const rows = [];
   for (const [w, h] of [[932, 320], [844, 390], [780, 390], [720, 390]]) {
     for (let idx = 0; idx < UI_PX.length; idx++) {
