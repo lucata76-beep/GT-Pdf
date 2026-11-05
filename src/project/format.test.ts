@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { DimType } from '../geometry/dimension';
 import type { PageObject } from '../model/model';
-import { LIMITS, type Project, PROJECT_FORMAT, PROJECT_VERSION, objectToJson, parseProject, serializeProject, verifyProjectText } from './format';
+import { LIMITS, type Project, PROJECT_FORMAT, PROJECT_VERSION, READABLE_VERSIONS, objectToJson, parseProject, serializeProject, verifyProjectText } from './format';
 
 const sampleObjects = (): PageObject[] => [
   { id: 3, kind: 'cover', shape: 'rect', p1: { x: 10, y: 20 }, p2: { x: 110.5, y: 220.25 } },
@@ -14,6 +14,8 @@ const sampleObjects = (): PageObject[] => [
   ...(['aligned', 'horizontal', 'vertical', 'diameter', 'radius'] as DimType[]).map(
     (dim, i): PageObject => ({ id: 20 + i, kind: 'dim', dim, p1: { x: 10, y: 10 + i }, p2: { x: 60, y: 10 + i }, a: { x: 10, y: 30 + i }, b: { x: 60, y: 30 + i }, valueText: i % 2 === 0 ? null : `Ø${i}.5 ±0.1`, color: '#6A1B9A', widthPt: 0.75, textPt: 8 }),
   ),
+  { id: 10, kind: 'circle', p1: { x: 200.5, y: 300.25 }, p2: { x: 240.5, y: 330.25 }, stroke: { style: 'dashed', color: '#2E7D32', widthPt: 1.5 } },
+  { id: 11, kind: 'arc', p1: { x: 100, y: 100 }, p2: { x: 150, y: 140.5 }, p3: { x: 220, y: 100 }, stroke: { style: 'dashdot', color: '#E65100', widthPt: 0.5 } },
 ];
 
 const sampleProject = (): Project => ({
@@ -87,7 +89,7 @@ describe('formato del progetto: scrittura e lettura', () => {
     expect(text).not.toContain('"z"');
     for (const obj of sampleObjects()) {
       const keys = Object.keys(objectToJson(obj));
-      const want = { cover: ['id', 'kind', 'shape', 'p1', 'p2'], segment: ['id', 'kind', 'points', 'stroke'], polyline: ['id', 'kind', 'points', 'stroke'], text: ['id', 'kind', 'at', 'text', 'textPt', 'color'], dim: ['id', 'kind', 'dim', 'p1', 'p2', 'a', 'b', 'valueText', 'color', 'widthPt', 'textPt'] }[obj.kind];
+      const want = { circle: ['id', 'kind', 'p1', 'p2', 'stroke'], arc: ['id', 'kind', 'p1', 'p2', 'p3', 'stroke'], cover: ['id', 'kind', 'shape', 'p1', 'p2'], segment: ['id', 'kind', 'points', 'stroke'], polyline: ['id', 'kind', 'points', 'stroke'], text: ['id', 'kind', 'at', 'text', 'textPt', 'color'], dim: ['id', 'kind', 'dim', 'p1', 'p2', 'a', 'b', 'valueText', 'color', 'widthPt', 'textPt'] }[obj.kind];
       expect(keys).toEqual(want);
     }
   });
@@ -104,13 +106,13 @@ describe('formato del progetto: scrittura e lettura', () => {
     for (const w of ['history', 'undo', 'redo', 'select', 'tool', 'zoom', 'uisize', 'ortho', 'orto']) expect(text, w).not.toContain(w);
   });
 
-  it('non si salvano gli interruttori di snap (Estremo, Punto medio) e la griglia (visibilita\' e passo): stato della sessione; le chiavi del file sono quelle della versione 1', () => {
+  it('non si salvano gli interruttori di snap (Estremo, Punto medio, Centro) e la griglia (visibilita\' e passo): stato della sessione; le chiavi del file sono le stesse di sempre e la versione scritta e\' la 2', () => {
     const text = serializeProject(sampleProject());
-    for (const w of ['snap', 'estremo', 'punto medio', 'griglia', 'grid', 'passo', 'step']) expect(text.toLowerCase(), w).not.toContain(w);
+    for (const w of ['snap', 'estremo', 'punto medio', 'centro', 'center', 'griglia', 'grid', 'passo', 'step']) expect(text.toLowerCase(), w).not.toContain(w);
     const j = asJson();
     expect(Object.keys(j).sort()).toEqual(['app', 'format', 'pages', 'pdf', 'version']);
     expect(Object.keys(j.pages[0]).sort()).toEqual(['number', 'objects', 'rotate', 'scale', 'userUnit', 'view']);
-    expect(j.version).toBe(1);
+    expect(j.version).toBe(2);
   });
 
   it('i campi sconosciuti si ignorano senza copiarli; __proto__ e constructor non arrivano mai sugli oggetti ne\' inquinano i prototipi', () => {
@@ -162,12 +164,14 @@ const SEG = 3; // indice del segmento nell'elenco di sampleObjects (id 6)
 const TXT = 6;
 const DIM = 7;
 const COV = 0;
+const CIR = 12; // il cerchio (id 10) e l'arco (id 11) sono in fondo all'elenco di sampleObjects
+const ARC = 13;
 
 const MUTATIONS: Mut[] = [
   // radice
   ['format diverso', (j) => (j.format = 'altro'), /non e' un progetto di GT-Pdf/],
   ['format mancante', (j) => delete j.format, /non e' un progetto di GT-Pdf/],
-  ['versione futura', (j) => (j.version = 2), /versione piu' recente \(2\).*Aggiorna l'app/],
+  ['versione futura', (j) => (j.version = 3), /versione più recente \(3\).*legge le versioni 1 e 2.*Aggiorna l'app/],
   ['versione 0', (j) => (j.version = 0), /Versione del progetto 0 non supportata/],
   ['versione non intera', (j) => (j.version = 1.5), /non e' un numero intero/],
   ['versione testo', (j) => (j.version = '1'), /non e' un numero intero/],
@@ -253,6 +257,30 @@ const MUTATIONS: Mut[] = [
   ['quota senza b', (j) => delete O(j, DIM).b, /b deve essere un oggetto/],
   ['spessore quota', (j) => (O(j, DIM).widthPt = 99), /spessore .* fuori dall'intervallo/],
   ['corpo quota', (j) => (O(j, DIM).textPt = 0), /corpo del testo .* fuori dall'intervallo/],
+  // cerchi (versione 2)
+  ['cerchio con centro e punto sul bordo coincidenti', (j) => (O(j, CIR).p2 = { ...O(j, CIR).p1 }), /pagina 1, oggetto 13: un cerchio ha il raggio maggiore di zero/],
+  ['cerchio senza p2', (j) => delete O(j, CIR).p2, /p2 deve essere un oggetto/],
+  ['cerchio con p1 fuori limite', (j) => (O(j, CIR).p1.x = 1e9), /p1\.x .* fuori dall'intervallo/],
+  ['cerchio senza stroke', (j) => delete O(j, CIR).stroke, /stroke deve essere un oggetto/],
+  ['cerchio: tipo di linea sconosciuto', (j) => (O(j, CIR).stroke.style = 'puntini'), /tipo di linea non valido/],
+  ['cerchio: colore con nome', (j) => (O(j, CIR).stroke.color = 'red'), /colore deve essere "#RRGGBB"/],
+  ['cerchio: spessore sopra il massimo', (j) => (O(j, CIR).stroke.widthPt = 21), /spessore .* fuori dall'intervallo 0\.1–20/],
+  ['cerchio con punti: campi dell\'arco ignorati ma p1 e p2 obbligatori', (j) => delete O(j, CIR).p1, /p1 deve essere un oggetto/],
+  // archi (versione 2)
+  ['arco con tre punti allineati', (j) => Object.assign(O(j, ARC), { p1: { x: 0, y: 0 }, p2: { x: 5, y: 5 }, p3: { x: 10, y: 10 } }), /pagina 1, oggetto 14: arco non valido: I tre punti sono allineati: un arco non passa da tre punti su una retta\./],
+  ['arco quasi allineato (meno di 1 grado)', (j) => Object.assign(O(j, ARC), { p1: { x: 0, y: 0 }, p2: { x: 150, y: 0.3 }, p3: { x: 300, y: 0 } }), /arco non valido: I tre punti sono allineati/],
+  ['arco con inizio e fine coincidenti', (j) => (O(j, ARC).p3 = { ...O(j, ARC).p1 }), /arco non valido: I tre punti sono allineati/],
+  ['arco con il punto di passaggio sull\'inizio', (j) => (O(j, ARC).p2 = { ...O(j, ARC).p1 }), /arco non valido/],
+  ['arco con raggio oltre il massimo', (j) => {
+    const R = 2_000_000;
+    const at = (deg: number) => ({ x: -R + R * Math.cos((deg * Math.PI) / 180), y: R * Math.sin((deg * Math.PI) / 180) });
+    Object.assign(O(j, ARC), { p1: at(-1), p2: at(0), p3: at(1) });
+  }, /arco non valido: Il raggio dell'arco sarebbe troppo grande/],
+  ['arco senza p3', (j) => delete O(j, ARC).p3, /p3 deve essere un oggetto/],
+  ['arco con p3 fuori limite', (j) => (O(j, ARC).p3.y = -1e9), /p3\.y .* fuori dall'intervallo/],
+  ['arco senza stroke', (j) => delete O(j, ARC).stroke, /stroke deve essere un oggetto/],
+  ['arco: spessore testo', (j) => (O(j, ARC).stroke.widthPt = '1'), /spessore deve essere un numero/],
+  ['id duplicato tra cerchio e arco', (j) => (O(j, ARC).id = O(j, CIR).id), /pagina 1, oggetto 14: id 10 gia' usato/],
 ];
 
 describe('formato del progetto: una mutazione per ogni regola (file non valido, messaggio in italiano con la posizione)', () => {
@@ -316,11 +344,21 @@ describe('formato del progetto: una mutazione per ogni regola (file non valido, 
     expect(!r.ok && /troppi oggetti nel progetto/.test(r.error)).toBe(true);
   });
 
-  it('versione futura: messaggio chiaro; versione uguale a 1: ok', () => {
+  it('versione futura: messaggio chiaro (legge le versioni 1 e 2); le versioni 1 e 2 si leggono', () => {
     const j = asJson();
     j.version = 7;
     const r = parseProject(JSON.stringify(j));
-    expect(!r.ok && r.error).toMatch(/versione piu' recente \(7\): questa app legge solo la versione 1/);
+    expect(!r.ok && r.error).toBe("Il progetto è di una versione più recente (7): questa app legge le versioni 1 e 2. Aggiorna l'app.");
+    j.version = 0;
+    expect(parseProject(JSON.stringify(j))).toMatchObject({ ok: false, error: 'Versione del progetto 0 non supportata: questa app legge le versioni 1 e 2.' });
+    expect(READABLE_VERSIONS).toEqual([1, 2]);
+    expect(PROJECT_VERSION).toBe(2);
+    for (const v of [1, 2]) {
+      const k = asJson();
+      k.version = v;
+      k.pages[0].objects = k.pages[0].objects.filter((o: Json) => o.kind !== 'circle' && o.kind !== 'arc');
+      expect(parseProject(JSON.stringify(k)).ok, `versione ${v}`).toBe(true);
+    }
   });
 });
 
@@ -343,5 +381,72 @@ describe('rilettura immediata (verifyProjectText)', () => {
   it('un testo valido ma riscritto in modo diverso (non generato da serializeProject) non torna', () => {
     const text = JSON.stringify(asJson(), null, 2);
     expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2 })).toMatch(/non e' identico/);
+  });
+});
+
+describe('versioni 1 e 2 (V2b, decisione 65): lettura, riscrittura e rifiuti', () => {
+  // il progetto non ha i tipi di Node (nessun @types/node): il modulo si carica con un nome in variabile (come in testPdfs.test.ts)
+  let v1Text = '';
+  beforeAll(async () => {
+    const fsName = 'node:fs';
+    const fs = (await import(/* @vite-ignore */ fsName)) as { readFileSync(url: URL, enc: string): string };
+    v1Text = fs.readFileSync(new URL('./fixtures/project-v1-47a660e.json', import.meta.url), 'utf8');
+  });
+
+  it('un progetto salvato con 47a660e (versione 1, fixture scritto dal codice di quel commit) si apre, con gli stessi oggetti', () => {
+    const j = JSON.parse(v1Text) as Json;
+    expect(j.version).toBe(1);
+    expect(j.app).toBe('47a660e');
+    const r = parseProject(v1Text);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.objectCount).toBe(11); // 3 coperture, retta, linea, testo, 5 quote
+    expect(r.scaleCount).toBe(1);
+    expect(r.project.pages).toHaveLength(2);
+    // gli oggetti letti sono quelli del file, campo per campo (stessa forma di objectToJson)
+    r.project.pages.forEach((pg, i) => expect(pg.objects.map(objectToJson)).toEqual(j.pages[i].objects));
+  });
+
+  it('riscritto, diventa versione 2 con gli stessi oggetti, pagine e scale; rilegge identico', () => {
+    const r = parseProject(v1Text);
+    if (!r.ok) throw new Error(r.error);
+    const out = serializeProject(r.project);
+    const a = JSON.parse(v1Text) as Json;
+    const b = JSON.parse(out) as Json;
+    expect(b.version).toBe(2);
+    expect({ ...b, version: 1 }).toEqual(a); // l'unica differenza e' il numero di versione
+    const again = parseProject(out);
+    expect(again.ok && again.project).toEqual(r.project);
+    expect(verifyProjectText(out, { pages: 2, objects: 11, scales: 1 })).toBeNull();
+  });
+
+  it('round-trip di tutti i tipi (retta, linea, testo, quota, tre coperture, cerchio, arco) in versione 2', () => {
+    const p = sampleProject();
+    const text = serializeProject(p);
+    expect(JSON.parse(text).version).toBe(2);
+    const r = parseProject(text);
+    expect(r.ok && r.project).toEqual(p);
+    const kinds = p.pages[0]!.objects.map((o) => o.kind);
+    for (const k of ['segment', 'polyline', 'text', 'dim', 'cover', 'circle', 'arc']) expect(kinds, k).toContain(k);
+    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2 })).toBeNull();
+  });
+
+  it('un file di versione 1 che contiene un cerchio o un arco e\' rifiutato (in 1 non esistono), con la posizione', () => {
+    for (const kind of ['circle', 'arc'] as const) {
+      const j = asJson();
+      j.version = 1;
+      j.pages[0].objects = j.pages[0].objects.filter((o: Json) => (o.kind !== 'circle' && o.kind !== 'arc') || o.kind === kind); // solo il tipo provato: il primo fuori posto e' quello segnalato
+      const bad = j.pages[0].objects.findIndex((o: Json) => o.kind === kind);
+      const r = parseProject(JSON.stringify(j));
+      expect(r.ok, kind).toBe(false);
+      expect(!r.ok && r.error, kind).toBe(`pagina 1, oggetto ${bad + 1}: un progetto di versione 1 non ha ${kind === 'circle' ? 'cerchi' : 'archi'}: sono della versione 2.`);
+    }
+  });
+
+  it('cerchio e arco rilettura: le coordinate non cambiano (round-trip esatto dei double)', () => {
+    const o = { id: 1, kind: 'arc', p1: { x: 0.1, y: 0.2 }, p2: { x: 99.9, y: 40.30000000000001 }, p3: { x: 200.123456789, y: 0.2 }, stroke: { style: 'solid', color: '#D32F2F', widthPt: 1 } } as const;
+    const p: Project = { app: 'x', pdf: { name: 'a.pdf', size: 1, sha256: null }, pages: [{ number: 1, view: [0, 0, 300, 300], rotate: 0, userUnit: 1, scale: null, objects: [o] }] };
+    const r = parseProject(serializeProject(p));
+    expect(r.ok && r.project.pages[0]?.objects[0]).toEqual(o);
   });
 });

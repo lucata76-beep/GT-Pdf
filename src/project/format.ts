@@ -8,19 +8,28 @@
 //    lunghezza, colori, tipi di linea, forme, caratteri dei testi: tutto controllato, con messaggi in italiano che dicono dove ("pagina 2, oggetto 5: ...").
 //  - Coordinate nello spazio utente PDF (pt), mai pixel di schermo; la scala e' `mmPerPt` a precisione piena (N e l'etichetta si ricavano).
 //  - Numeri: `JSON.stringify` scrive il numero piu' breve che si rilegge identico (round-trip esatto dei double).
-//  - Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell'interfaccia, ORTO e interruttori di snap Estremo e Punto medio
-//    e la griglia (accesa e passo) (CP6a: stato della sessione, non del lavoro; il formato e la versione non cambiano).
+//  - Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell'interfaccia, ORTO e interruttori di snap (Estremo, Punto medio,
+//    Centro) e la griglia (accesa e passo) (CP6a: stato della sessione, non del lavoro).
+//  - VERSIONE (V2b, decisione 65 di docs/PIANO.md): la scrittura e' sempre versione 2; la lettura accetta 1 e 2. La versione 2 aggiunge i tipi 'circle' e 'arc';
+//    un file di versione 1 che li contiene e' rifiutato (in 1 non esistono). Il resto del formato e' identico: un progetto salvato prima di V2b si apre uguale.
+import { ARC_PROBLEM_TEXT, arcProblem } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind } from '../geometry/cover';
 import { type DimType, DIM_TYPES } from '../geometry/dimension';
 import type { UserPoint } from '../geometry/page';
 import type { PageScale } from '../geometry/scale';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { TEXT_MAX_PT, TEXT_MIN_PT } from '../model/textStyle';
-import type { CoverObject, DimensionObject, LineObject, PageObject, TextObject } from '../model/model';
+import type { ArcObject, CircleObject, CoverObject, DimensionObject, LineObject, PageObject, TextObject } from '../model/model';
 import { LINE_STYLES, type LineStyleId, WIDTH_MAX_PT, WIDTH_MIN_PT, parseHexColor } from '../model/stroke';
 
 export const PROJECT_FORMAT = 'gt-pdf-project';
-export const PROJECT_VERSION = 1;
+/** La versione che si scrive (sempre questa). */
+export const PROJECT_VERSION = 2;
+/** Le versioni che si leggono. */
+export const READABLE_VERSIONS: readonly number[] = [1, 2];
+/** Il file di versione 1 non ha cerchi e archi (introdotti dalla 2). */
+const V1_KINDS = ['segment', 'polyline', 'text', 'dim', 'cover'] as const;
+const V2_KINDS = [...V1_KINDS, 'circle', 'arc'] as const;
 
 /**
  * Limiti di lettura. Scelti per essere larghi rispetto all'uso previsto (un progetto di 124 pagine con circa 2000 oggetti pesa meno di 1 MB) e stretti
@@ -88,6 +97,10 @@ export function objectToJson(o: PageObject): Record<string, unknown> {
       return { id: o.id, kind: 'dim', dim: o.dim, p1: pt(o.p1), p2: pt(o.p2), a: pt(o.a), b: pt(o.b), valueText: o.valueText, color: o.color, widthPt: o.widthPt, textPt: o.textPt };
     case 'cover':
       return { id: o.id, kind: 'cover', shape: o.shape, p1: pt(o.p1), p2: pt(o.p2) };
+    case 'circle':
+      return { id: o.id, kind: 'circle', p1: pt(o.p1), p2: pt(o.p2), stroke: { style: o.stroke.style, color: o.stroke.color, widthPt: o.stroke.widthPt } };
+    case 'arc':
+      return { id: o.id, kind: 'arc', p1: pt(o.p1), p2: pt(o.p2), p3: pt(o.p3), stroke: { style: o.stroke.style, color: o.stroke.color, widthPt: o.stroke.widthPt } };
   }
 }
 
@@ -163,12 +176,25 @@ const LINE_STYLE_IDS = LINE_STYLES.map((s) => s.id) as readonly LineStyleId[];
 const COVER_SHAPES = COVER_TYPES.map((c) => c.id) as readonly CoverKind[];
 const DIM_KINDS = DIM_TYPES.map((d) => d.id) as readonly DimType[];
 
-function readObject(raw: unknown, where: string, ids: Set<number>): PageObject {
+/** Il tratto di retta, linea, cerchio e arco: tipo di linea, colore, spessore. */
+function readStroke(raw: unknown, where: string): LineObject['stroke'] {
+  const s = rec(raw, where, 'stroke');
+  return {
+    style: oneOf(own(s, 'style'), LINE_STYLE_IDS, where, 'tipo di linea'),
+    color: color(own(s, 'color'), where),
+    widthPt: num(own(s, 'widthPt'), where, 'spessore', WIDTH_MIN_PT, WIDTH_MAX_PT, ' pt'),
+  };
+}
+
+function readObject(raw: unknown, where: string, ids: Set<number>, version: number): PageObject {
   const r = rec(raw, where, 'l\'oggetto');
   const id = int(own(r, 'id'), where, 'id', 1, LIMITS.id);
   if (ids.has(id)) bad(where, `id ${id} gia' usato da un altro oggetto.`);
   ids.add(id);
-  const kind = oneOf(own(r, 'kind'), ['segment', 'polyline', 'text', 'dim', 'cover'] as const, where, 'kind');
+  const kinds = version >= 2 ? V2_KINDS : V1_KINDS;
+  const rawKind = own(r, 'kind');
+  if ((rawKind === 'circle' || rawKind === 'arc') && version < 2) bad(where, `un progetto di versione ${version} non ha ${rawKind === 'circle' ? 'cerchi' : 'archi'}: sono della versione 2.`);
+  const kind = oneOf(rawKind, kinds, where, 'kind');
   switch (kind) {
     case 'segment':
     case 'polyline': {
@@ -176,17 +202,23 @@ function readObject(raw: unknown, where: string, ids: Set<number>): PageObject {
       if (kind === 'segment' && pts.length !== 2) bad(where, 'una retta ha esattamente 2 punti.');
       if (pts.length < 2) bad(where, 'una linea ha almeno 2 punti.');
       if (pts.length > LIMITS.pointsPerLine) bad(where, `troppi punti (${pts.length}, massimo ${LIMITS.pointsPerLine}).`);
-      const s = rec(own(r, 'stroke'), where, 'stroke');
-      const o: LineObject = {
-        id,
-        kind,
-        points: pts,
-        stroke: {
-          style: oneOf(own(s, 'style'), LINE_STYLE_IDS, where, 'tipo di linea'),
-          color: color(own(s, 'color'), where),
-          widthPt: num(own(s, 'widthPt'), where, 'spessore', WIDTH_MIN_PT, WIDTH_MAX_PT, ' pt'),
-        },
-      };
+      const o: LineObject = { id, kind, points: pts, stroke: readStroke(own(r, 'stroke'), where) };
+      return o;
+    }
+    case 'circle': {
+      const p1 = point(own(r, 'p1'), where, 'p1');
+      const p2 = point(own(r, 'p2'), where, 'p2');
+      if (p1.x === p2.x && p1.y === p2.y) bad(where, 'un cerchio ha il raggio maggiore di zero: p1 (centro) e p2 (punto sul bordo) coincidono.');
+      const o: CircleObject = { id, kind: 'circle', p1, p2, stroke: readStroke(own(r, 'stroke'), where) };
+      return o;
+    }
+    case 'arc': {
+      const p1 = point(own(r, 'p1'), where, 'p1');
+      const p2 = point(own(r, 'p2'), where, 'p2');
+      const p3 = point(own(r, 'p3'), where, 'p3');
+      const problem = arcProblem(p1, p2, p3);
+      if (problem) bad(where, `arco non valido: ${ARC_PROBLEM_TEXT[problem]}`);
+      const o: ArcObject = { id, kind: 'arc', p1, p2, p3, stroke: readStroke(own(r, 'stroke'), where) };
       return o;
     }
     case 'text': {
@@ -259,8 +291,8 @@ function parseOrThrow(text: string): ParseResult {
   if (own(root, 'format') !== PROJECT_FORMAT) return bad('', `Il file non e' un progetto di GT-Pdf (manca format = "${PROJECT_FORMAT}").`);
   const version = own(root, 'version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return bad('', 'La versione del progetto non e\' un numero intero.');
-  if (version !== PROJECT_VERSION) {
-    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge solo la versione ${PROJECT_VERSION}. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge solo la versione ${PROJECT_VERSION}.`);
+  if (!READABLE_VERSIONS.includes(version)) {
+    return bad('', version > PROJECT_VERSION ? `Il progetto è di una versione più recente (${version}): questa app legge le versioni 1 e 2. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1 e 2.`);
   }
   const app = str(own(root, 'app'), '', 'app');
   if (app.length > LIMITS.appChars) bad('', `app: massimo ${LIMITS.appChars} caratteri.`);
@@ -309,7 +341,7 @@ function parseOrThrow(text: string): ParseResult {
     objectCount += list.length;
     if (objectCount > LIMITS.objectsTotal) bad(where, `troppi oggetti nel progetto (oltre ${LIMITS.objectsTotal}).`);
     const objects = list.map((o, k) => {
-      const ob = readObject(o, `pagina ${i + 1}, oggetto ${k + 1}`, ids);
+      const ob = readObject(o, `pagina ${i + 1}, oggetto ${k + 1}`, ids, version);
       if (ob.id > maxId) maxId = ob.id;
       return ob;
     });
