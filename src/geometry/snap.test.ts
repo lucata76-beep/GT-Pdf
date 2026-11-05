@@ -6,10 +6,10 @@ import { SNAP_KINDS, SNAP_LABEL, SNAP_TOL_PX, type SnapKinds, findSnap, snapCand
 
 const flat = new PageGeometry({ view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1 });
 const rotCrop = new PageGeometry({ view: [50, 50, 450, 600], rotate: 90, userUnit: 1 }); // /Rotate 90 + CropBox
-const ALL: SnapKinds = { end: true, mid: true };
-const ONLY_END: SnapKinds = { end: true, mid: false };
-const ONLY_MID: SnapKinds = { end: false, mid: true };
-const NONE: SnapKinds = { end: false, mid: false };
+const ALL: SnapKinds = { end: true, mid: true, center: true };
+const ONLY_END: SnapKinds = { end: true, mid: false, center: false };
+const ONLY_MID: SnapKinds = { end: false, mid: true, center: false };
+const NONE: SnapKinds = { end: false, mid: false, center: false };
 
 const stroke = { style: 'solid', color: '#D32F2F', widthPt: 1 } as const;
 const line = (id: number, kind: 'segment' | 'polyline', pts: UserPoint[]): LineObject => ({ id, kind, points: pts, stroke: { ...stroke } });
@@ -27,8 +27,8 @@ const nudge = (p: Pt, dx: number, dy: number): Pt => ({ x: p.x + dx, y: p.y + dy
 
 describe('costanti', () => {
   it('i nomi dei tipi sono quelli di DESIGN.md', () => {
-    expect(SNAP_LABEL).toEqual({ end: 'Estremo', mid: 'Punto medio' });
-    expect(SNAP_KINDS).toEqual(['end', 'mid']);
+    expect(SNAP_LABEL).toEqual({ end: 'Estremo', mid: 'Punto medio', center: 'Centro' });
+    expect(SNAP_KINDS).toEqual(['end', 'mid', 'center']);
   });
   it('raggio di cattura: valori di partenza uguali a quelli di selezione, in pt = px / zoom', () => {
     expect(SNAP_TOL_PX).toEqual({ touch: 22, mouse: 10 });
@@ -110,11 +110,12 @@ describe('Copertura', () => {
     expect(hit?.kind).toBe('mid');
     near(hit?.point as Pt, S(flat, P(150, 200)));
   });
-  it('cerchio: nessun candidato in V2a (il Centro arriva con il cerchio, V2b)', () => {
+  it('cerchio: solo il Centro (V2b, decisione 67); il punto sul bordo e il bordo non sono candidati', () => {
     const circ = cover(6, 'circle', P(200, 200), P(250, 200));
-    expect(snapCandidates(circ, flat)).toEqual([]);
-    expect(findSnap([circ], flat, S(flat, P(200, 200)), 50, ALL)).toBeNull();
-    expect(findSnap([circ], flat, S(flat, P(250, 200)), 50, ALL)).toBeNull();
+    expect(snapCandidates(circ, flat).map((c) => c.kind)).toEqual(['center']);
+    near(snapCandidates(circ, flat)[0]!.point, S(flat, P(200, 200)));
+    expect(findSnap([circ], flat, S(flat, P(200, 200)), 5, ALL)?.kind).toBe('center');
+    expect(findSnap([circ], flat, S(flat, P(250, 200)), 5, ALL)).toBeNull();
   });
 });
 

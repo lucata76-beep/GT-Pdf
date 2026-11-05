@@ -1,4 +1,4 @@
-// Snap sugli oggetti (V2a, CP6a): Estremo e Punto medio. Logica senza DOM, nel foglio mostrato (pt fisici, /Rotate, CropBox e
+// Snap sugli oggetti (V2a, CP6a: Estremo e Punto medio; V2b, CP6c: Centro e punti in costruzione). Logica senza DOM, nel foglio mostrato (pt fisici, /Rotate, CropBox e
 // UserUnit gia' applicati da `PageGeometry`) come `hit.ts` e `ortho.ts`: si riporta nello spazio utente solo all'inserimento,
 // con `geom.sheetToUser`, come per ogni altro punto.
 //
@@ -6,17 +6,24 @@
 //   Retta e Linea .......... Estremo = ogni punto; Punto medio = il centro di ogni tratto.
 //   Copertura rettangolo
 //   e quadrato ............. Estremo = i 4 angoli; Punto medio = i centri dei 4 lati, come li vede il foglio dopo /Rotate.
-//   Copertura cerchio ...... nessuno (il Centro arriva con il cerchio, V2b).
+//   Copertura cerchio ...... Centro (decisione 67 di docs/PIANO.md; la 48 lo rimandava a V2b).
+//   Cerchio (V2b) .......... Centro.
+//   Arco (V2b) ............. Estremo = inizio (p1) e fine (p3); Punto medio = il punto a meta' dell'ARCO (non il punto di passaggio p2); Centro.
+//                            Il punto di passaggio p2 non e' un candidato: e' solo un punto per cui passa la curva.
 //   Quota .................. Estremo = i due punti misurati `p1` e `p2` (servono alle quote a catena); nessun Punto medio.
 //   Testo .................. nessuno.
-// A parita' di distanza vince l'Estremo sul Punto medio.
+//   Punti in costruzione ... Estremo = ogni punto gia' indicato nella costruzione in corso (`pending` di `findSnap`: chiudere una spezzata, tornare su un punto,
+//                            Arco, Quota). Non sono oggetti del modello: li passa chi costruisce, e senza di loro i risultati sono quelli di prima.
+// A parita' di distanza vince l'Estremo sul Punto medio e il Punto medio sul Centro.
 import type { PageObject } from '../model/model';
+import { arcEnd, arcMid, arcStart, curveOnSheet } from './arc';
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
 
-export type SnapKind = 'end' | 'mid';
-export const SNAP_KINDS: readonly SnapKind[] = ['end', 'mid'];
-/** Nomi dei tipi di snap, come in DESIGN.md ("Estremo", "Punto medio"; non "Spigolo"). */
-export const SNAP_LABEL: Record<SnapKind, string> = { end: 'Estremo', mid: 'Punto medio' };
+export type SnapKind = 'end' | 'mid' | 'center';
+/** Nell'ordine degli interruttori e della priorita': Estremo, Punto medio, Centro. */
+export const SNAP_KINDS: readonly SnapKind[] = ['end', 'mid', 'center'];
+/** Nomi dei tipi di snap, come in DESIGN.md ("Estremo", "Punto medio", "Centro"; non "Spigolo"). */
+export const SNAP_LABEL: Record<SnapKind, string> = { end: 'Estremo', mid: 'Punto medio', center: 'Centro' };
 export type SnapKinds = Readonly<Record<SnapKind, boolean>>;
 
 export interface SnapHit {
@@ -43,7 +50,7 @@ export const snapRadiusPt = (touch: boolean, zoom: number): number => (touch ? S
 /** Due distanze che differiscono meno di cosi' (pt) sono una parita': vince l'Estremo. */
 const TIE_EPS = 1e-9;
 
-const rank = (k: SnapKind): number => (k === 'end' ? 0 : 1);
+const rank = (k: SnapKind): number => (k === 'end' ? 0 : k === 'mid' ? 1 : 2);
 
 /**
  * Candidati di uno snap in un oggetto, nel foglio. Serve a chi vuole elencarli (prove); `findSnap` non la usa: scorre gli
@@ -70,8 +77,36 @@ function visitCandidates(o: PageObject, geom: PageGeometry, emit: (x: number, y:
       }
       return;
     }
+    case 'circle': {
+      const c = geom.userToSheet(o.p1);
+      emit(c.x, c.y, 'center');
+      return;
+    }
+    case 'arc': {
+      const a = curveOnSheet(o, geom);
+      if (!a) {
+        // punti che non danno un arco (non succede: costruzione e file lo escludono): almeno i due estremi, che sono punti indicati
+        const s = geom.userToSheet(o.p1);
+        const e = geom.userToSheet(o.p3);
+        emit(s.x, s.y, 'end');
+        emit(e.x, e.y, 'end');
+        return;
+      }
+      const s = arcStart(a);
+      const m = arcMid(a);
+      const e = arcEnd(a);
+      emit(s.x, s.y, 'end');
+      emit(e.x, e.y, 'end');
+      emit(m.x, m.y, 'mid');
+      emit(a.c.x, a.c.y, 'center');
+      return;
+    }
     case 'cover': {
-      if (o.shape === 'circle') return;
+      if (o.shape === 'circle') {
+        const c = geom.userToSheet(o.p1);
+        emit(c.x, c.y, 'center');
+        return;
+      }
       // Rettangolo e quadrato (gia' squadrato nei suoi punti): sul foglio e' sempre allineato agli assi, qualunque /Rotate.
       const a = geom.userToSheet(o.p1);
       const b = geom.userToSheet(o.p2);
@@ -105,11 +140,14 @@ function visitCandidates(o: PageObject, geom: PageGeometry, emit: (x: number, y:
 
 /**
  * Il candidato piu' vicino a `raw` entro `radius` (pt del foglio, bordo compreso), tra i soli tipi attivi; null se non ce n'e'.
- * A parita' di distanza (entro 1e-9 pt) vince l'Estremo sul Punto medio; a parita' anche di tipo, il primo nell'ordine degli oggetti.
+ * A parita' di distanza (entro 1e-9 pt) vince l'Estremo sul Punto medio e il Punto medio sul Centro; a parita' anche di tipo, il primo nell'ordine degli
+ * oggetti (i punti in costruzione vengono dopo gli oggetti).
  * `objects` sono gli oggetti della pagina corrente (nello spazio utente); il risultato e' nel foglio.
+ * `pending`: i punti gia' indicati nella costruzione in corso (nello spazio utente), candidati Estremo come gli estremi degli oggetti; se mancano o sono
+ * vuoti il risultato e' quello di sempre.
  */
-export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw: SheetPoint, radius: number, kinds: SnapKinds): SnapHit | null {
-  if (!(radius > 0) || (!kinds.end && !kinds.mid)) return null;
+export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw: SheetPoint, radius: number, kinds: SnapKinds, pending: readonly UserPoint[] = []): SnapHit | null {
+  if (!(radius > 0) || (!kinds.end && !kinds.mid && !kinds.center)) return null;
   const r2 = radius * radius;
   let bestD = Infinity;
   let bestKind: SnapKind = 'end';
@@ -132,5 +170,11 @@ export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw
     }
   };
   for (const o of objects) visitCandidates(o, geom, consider);
+  if (kinds.end) {
+    for (const p of pending) {
+      const sp = geom.userToSheet(p);
+      consider(sp.x, sp.y, 'end');
+    }
+  }
   return found ? { point: { x: bestX, y: bestY }, kind: bestKind } : null;
 }
