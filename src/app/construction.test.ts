@@ -34,6 +34,7 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap
       log.push(`cover:${def.shape}`);
       covers.push(def);
     },
+    curve: (kind) => log.push(`curve:${kind}`),
     reject: () => log.push('reject'),
   };
   const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap, grid: opts.grid }, ev);

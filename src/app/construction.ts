@@ -1,13 +1,15 @@
-// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota e Copertura.
+// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota, Copertura e Cerchio/Arco.
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
 // Testo e Copertura non usano l'ortogonale: una copertura con ORTO sarebbe un rettangolo senza altezza e il quadrato ha il suo vincolo (`squareSheet`).
+// Cerchio e Arco (V2b) non lo usano: sono scelte dell'assistente da confermare (decisione 67); snap e griglia valgono come per ogni punto indicato.
 // La Quota lo usa solo sul SECONDO punto di Allineata, Ø e R (come la Retta; decisione 56 di PIANO.md). Non sull'Orizzontale e sulla Verticale, che misurano
 // gia' una componente (e `place` rifiuta due punti sulla stessa X o Y), e non sul terzo punto di nessuna quota: e' la posizione della linea di quota,
 // gia' vincolata dal tipo di quota.
 // Priorita' del punto effettivo (`resolve`): (1) squadratura del secondo punto del quadrato; (2) snap su un oggetto, se un candidato e' nel
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
-// acceso lo snap puo' portare il punto fuori asse e si vede.
+// acceso lo snap puo' portare il punto fuori asse e si vede. I punti gia' indicati nella costruzione in corso sono candidati dello snap (Estremo): V2b.
+import { ARC_PROBLEM_TEXT, type CurveKind, arcProblem, curveInfo } from '../geometry/arc';
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
 import { snapToGrid } from '../geometry/grid';
@@ -16,7 +18,7 @@ import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
 
-export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover';
+export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve';
 
 export interface ConstructionEnv {
   geometry(): PageGeometry | null;
@@ -24,10 +26,11 @@ export interface ConstructionEnv {
   zoom(): number;
   ortho(): boolean;
   /**
-   * Snap sugli oggetti (V2a): il candidato (Estremo o Punto medio) entro il raggio dal punto grezzo, o null. `touch` = raggio del dito.
+   * Snap sugli oggetti (V2a): il candidato (Estremo, Punto medio o Centro) entro il raggio dal punto grezzo, o null. `touch` = raggio del dito.
+   * `pending` sono i punti gia' indicati nella costruzione in corso (V2b), candidati Estremo; vuoto se non ce n'e'.
    * Facoltativa: senza, nessuno snap (comportamento di prima).
    */
-  snap?(raw: SheetPoint, touch: boolean): SnapHit | null;
+  snap?(raw: SheetPoint, touch: boolean, pending: readonly UserPoint[]): SnapHit | null;
   /**
    * Griglia (V2a): il passo in pt FISICI del foglio se la griglia e' accesa e si vede a questo zoom, altrimenti null. Facoltativa: senza, nessuna griglia.
    * L'origine e' l'angolo in basso a sinistra della pagina mostrata (`snapToGrid`).
@@ -48,6 +51,8 @@ export interface ConstructionEvents {
   dimension(def: DimensionDef): void;
   /** Copertura completata (rettangolo, quadrato gia' squadrato, cerchio). */
   cover(def: CoverDef): void;
+  /** Cerchio (centro, punto sul bordo) o Arco (inizio, punto sull'arco, fine) completato. */
+  curve(kind: CurveKind, points: UserPoint[]): void;
   reject(reason: string): void;
 }
 
@@ -62,6 +67,7 @@ export const TOOL_NAME: Record<ConstructionTool, string> = {
   text: 'Testo',
   dim: 'Quota',
   cover: 'Copertura',
+  curve: 'Cerchio e arco',
 };
 
 export class Construction {
@@ -75,6 +81,8 @@ export class Construction {
   dimType: DimType = 'aligned';
   /** Forma della Copertura in costruzione. */
   coverKind: CoverKind = 'rect';
+  /** Cerchio o Arco in costruzione. */
+  curveKind: CurveKind = 'circle';
 
   constructor(
     private readonly env: ConstructionEnv,
@@ -98,6 +106,12 @@ export class Construction {
     this.reset();
   }
 
+  /** Cambia tra Cerchio e Arco: i punti gia' indicati si scartano (cambia il numero di punti e il loro significato). */
+  setCurveKind(kind: CurveKind): void {
+    this.curveKind = kind;
+    this.reset();
+  }
+
   /** Punti che servono per completare lo strumento corrente. */
   get needed(): number {
     switch (this.tool) {
@@ -110,6 +124,8 @@ export class Construction {
         return 1;
       case 'dim':
         return dimInfo(this.dimType).points;
+      case 'curve':
+        return curveInfo(this.curveKind).points;
       default:
         return Infinity; // Linea: finisce con Fine
     }
@@ -127,11 +143,11 @@ export class Construction {
   }
 
   /**
-   * L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto e per gli strumenti senza ORTO (Testo, Copertura).
+   * L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto e per gli strumenti senza ORTO (Testo, Copertura, Cerchio e Arco).
    * Quota: solo il secondo punto di Allineata, Ø e R (con un punto gia' indicato); null per Orizzontale e Verticale e per il terzo punto (posizione della linea di quota).
    */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.done || this.locked) return null;
     if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
   }
@@ -146,7 +162,7 @@ export class Construction {
     const first = this.points[0];
     if (geom && first && this.tool === 'cover' && this.coverKind === 'square' && this.points.length === 1 && !this.locked) return { point: squareSheet(geom.userToSheet(first), raw), snap: null };
     if (geom && this.tool && !this.locked) {
-      const hit = this.env.snap?.(raw, touch) ?? null;
+      const hit = this.env.snap?.(raw, touch, this.pending ? this.points : []) ?? null;
       if (hit) return { point: hit.point, snap: hit.kind };
     }
     const step = geom && this.tool && !this.locked ? (this.env.grid?.() ?? null) : null;
@@ -179,6 +195,19 @@ export class Construction {
         if (this.tool === 'polyline' && this.points.length >= 2) this.finish();
         else this.ev.reject('I due punti coincidono: scegli un secondo punto diverso.');
         return;
+      }
+      if (this.tool === 'curve' && this.curveKind === 'arc' && this.points.length === 2) {
+        // Arco, terzo punto: la fine non puo' coincidere con l'inizio (sarebbe un cerchio) e i tre punti devono dare un arco (non allineati, raggio non enorme).
+        const s1 = geom.userToSheet(this.points[0] as UserPoint);
+        if (Math.hypot(sb.x - s1.x, sb.y - s1.y) * this.env.zoom() < COINCIDENT_PX) {
+          this.ev.reject('Inizio e fine coincidono: per un arco chiuso usa il cerchio.');
+          return;
+        }
+        const problem = arcProblem(this.points[0] as UserPoint, this.points[1] as UserPoint, p);
+        if (problem) {
+          this.ev.reject(ARC_PROBLEM_TEXT[problem]);
+          return;
+        }
       }
       if (this.tool === 'cover' && this.coverKind === 'rect') {
         // Rettangolo: gli angoli devono differire su entrambi gli assi, altrimenti non ha area.
@@ -226,6 +255,14 @@ export class Construction {
           const def: CoverDef = { shape: this.coverKind, p1: this.points[0] as UserPoint, p2: this.points[1] as UserPoint };
           this.reset();
           this.ev.cover(def);
+        }
+        break;
+      case 'curve':
+        if (this.points.length === this.needed) {
+          const pts = this.points;
+          const kind = this.curveKind;
+          this.reset();
+          this.ev.curve(kind, pts);
         }
         break;
       case 'dim':
@@ -281,6 +318,8 @@ export class Construction {
         return this.dimPrompt(n);
       case 'cover':
         return this.coverPrompt(n);
+      case 'curve':
+        return this.curvePrompt(n);
       default:
         return '';
     }
@@ -297,6 +336,12 @@ export class Construction {
       default:
         return n === 0 ? `${name}: indica il primo angolo` : `${name}: indica l'angolo opposto`;
     }
+  }
+
+  /** Una riga, come gli altri: Cerchio (centro, punto sul bordo) e Arco (inizio, punto sull'arco, fine). */
+  private curvePrompt(n: number): string {
+    if (this.curveKind === 'circle') return n === 0 ? 'Cerchio: indica il centro' : 'Cerchio: indica un punto sul bordo';
+    return n === 0 ? 'Arco: indica l\'inizio' : n === 1 ? 'Arco: indica un punto sull\'arco' : 'Arco: indica la fine';
   }
 
   private dimPrompt(n: number): string {
