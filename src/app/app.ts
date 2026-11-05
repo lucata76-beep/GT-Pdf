@@ -1718,7 +1718,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
        * Prestazioni dello snap (scripts/perf-cp6a.cjs): chiama `findSnap`, la stessa funzione dell'app, su oggetti sintetici di una pagina. Per ogni lotto di
        * `batch` chiamate misura il tempo del lotto; misura anche `singles` chiamate una per una (performance.now() ha risoluzione limitata).
        */
-      snapRun: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { batch: number; batches: number; singles?: number }) => {
+      snapRun: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { batch: number; batches: number; singles?: number; pending?: UserPoint[] }) => {
         const info = pdf?.pages[0];
         if (!info) throw new Error('nessun documento');
         const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
@@ -1729,7 +1729,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         for (let b = 0; b < o.batches; b++) {
           const t0 = performance.now();
           for (let i = 0; i < o.batch; i++) {
-            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, snapOn)) hits++;
+            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, snapOn, o.pending)) hits++;
             calls++;
           }
           batchMs.push(performance.now() - t0);
@@ -1737,7 +1737,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const singleMs: number[] = [];
         for (let i = 0; i < (o.singles ?? 500); i++) {
           const t0 = performance.now();
-          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, snapOn);
+          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, snapOn, o.pending);
           singleMs.push(performance.now() - t0);
         }
         return { hits, calls, batch: o.batch, batchMs, singleMs };
