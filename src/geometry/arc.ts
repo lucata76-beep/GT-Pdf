@@ -83,8 +83,8 @@ export function arcThroughPoints(p1: Pt, p2: Pt, p3: Pt): SheetArc | null {
 }
 
 /**
- * Soglie dell'arco per tre punti: valori di PARTENZA, NON tarati (li giudica l'utente sul PC), scelti dall'assistente. In unita' delle coordinate date
- * (nello spazio utente quando si valida un progetto o un oggetto, in pt del foglio per l'interfaccia: uguali con UserUnit 1).
+ * Soglie dell'arco per tre punti: valori di PARTENZA, NON tarati (li giudica l'utente sul PC), scelti dall'assistente. In unita' delle coordinate date: la
+ * costruzione e la lettura del file le applicano entrambe ai punti nello spazio utente (`arcProblem` e' la stessa funzione), cosi' quello che si costruisce il file lo rilegge.
  *  - `ARC_MIN_SWEEP_RAD`: l'arco deve coprire almeno 1 grado. Sotto, l'arco e' indistinguibile da un tratto dritto (con una corda di 300 px la
  *    freccia e' 0.65 px) e il centro e' lontanissimo; e' lo stesso che dire che il punto sull'arco vede la corda sotto un angolo > 179.5 gradi.
  *  - `ARC_MAX_RADIUS`: raggio massimo 1.000.000, come il limite delle coordinate del file (`LIMITS.coordAbs`). Con la soglia dei gradi il raggio e'
