@@ -171,7 +171,7 @@ const MUTATIONS: Mut[] = [
   // radice
   ['format diverso', (j) => (j.format = 'altro'), /non e' un progetto di GT-Pdf/],
   ['format mancante', (j) => delete j.format, /non e' un progetto di GT-Pdf/],
-  ['versione futura', (j) => (j.version = 3), /versione più recente \(3\).*legge le versioni 1 e 2.*Aggiorna l'app/],
+  ['versione futura', (j) => (j.version = 3), /versione piu' recente \(3\).*legge le versioni 1 e 2.*Aggiorna l'app/],
   ['versione 0', (j) => (j.version = 0), /Versione del progetto 0 non supportata/],
   ['versione non intera', (j) => (j.version = 1.5), /non e' un numero intero/],
   ['versione testo', (j) => (j.version = '1'), /non e' un numero intero/],
@@ -348,7 +348,7 @@ describe('formato del progetto: una mutazione per ogni regola (file non valido, 
     const j = asJson();
     j.version = 7;
     const r = parseProject(JSON.stringify(j));
-    expect(!r.ok && r.error).toBe("Il progetto è di una versione più recente (7): questa app legge le versioni 1 e 2. Aggiorna l'app.");
+    expect(!r.ok && r.error).toBe("Il progetto e' di una versione piu' recente (7): questa app legge le versioni 1 e 2. Aggiorna l'app.");
     j.version = 0;
     expect(parseProject(JSON.stringify(j))).toMatchObject({ ok: false, error: 'Versione del progetto 0 non supportata: questa app legge le versioni 1 e 2.' });
     expect(READABLE_VERSIONS).toEqual([1, 2]);

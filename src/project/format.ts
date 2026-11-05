@@ -292,7 +292,7 @@ function parseOrThrow(text: string): ParseResult {
   const version = own(root, 'version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return bad('', 'La versione del progetto non e\' un numero intero.');
   if (!READABLE_VERSIONS.includes(version)) {
-    return bad('', version > PROJECT_VERSION ? `Il progetto è di una versione più recente (${version}): questa app legge le versioni 1 e 2. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1 e 2.`);
+    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge le versioni 1 e 2. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1 e 2.`);
   }
   const app = str(own(root, 'app'), '', 'app');
   if (app.length > LIMITS.appChars) bad('', `app: massimo ${LIMITS.appChars} caratteri.`);
