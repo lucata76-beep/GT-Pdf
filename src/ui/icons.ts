@@ -1,5 +1,6 @@
 // Icone Lucide nel repository (licenza: LICENSES/Lucide-ISC-MIT.txt).
 import check from '../assets/icons/check.svg?raw';
+import circle from '../assets/icons/circle.svg?raw';
 import chevronLeft from '../assets/icons/chevron-left.svg?raw';
 import chevronRight from '../assets/icons/chevron-right.svg?raw';
 import copy from '../assets/icons/copy.svg?raw';
@@ -34,6 +35,7 @@ import zoomOut from '../assets/icons/zoom-out.svg?raw';
 
 const ICONS = {
   check,
+  circle,
   'chevron-left': chevronLeft,
   'chevron-right': chevronRight,
   copy,

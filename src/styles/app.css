@@ -511,10 +511,11 @@ body.app-mode {
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
-/* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio; etichetta col nome.
+/* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro (V2b); etichetta col nome.
    Dimensioni in px CSS fissi (non scalano con lo zoom). Solo a schermo: sta nel livello di sovrapposizione, non nel disegno esportato. */
 .snap-mark rect,
-.snap-mark polygon {
+.snap-mark polygon,
+.snap-mark circle {
   stroke: var(--cad-snap-topology);
   stroke-width: 1.5;
   fill: none;
@@ -1458,11 +1459,13 @@ body.app-mode {
   user-select: none;
 }
 .ctx-types,
-.ctx-covers {
+.ctx-covers,
+.ctx-curves {
   flex: 1 1 100%;
 }
 .ctx-types .seg-btn,
-.ctx-covers .seg-btn {
+.ctx-covers .seg-btn,
+.ctx-curves .seg-btn {
   min-height: var(--hit);
   font-size: 0.75rem;
 }

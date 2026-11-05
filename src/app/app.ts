@@ -4,6 +4,7 @@
 // Ogni modifica passa da un comando (annulla/ripeti).
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
+import { CURVE_TYPES, type CurveKind, arcProblem, curveOnSheet } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
 import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
@@ -17,6 +18,8 @@ import { SNAP_LABEL, type SnapHit, type SnapKind, findSnap, snapRadiusPt } from 
 import { type Command, History } from '../model/history';
 import {
   AddObject,
+  type ArcObject,
+  type CircleObject,
   type CoverObject,
   type DimensionObject,
   DocumentModel,
@@ -29,6 +32,8 @@ import {
   SetScale,
   type TextObject,
   drawOrder,
+  hasStroke,
+  isCurve,
   isLine,
   objectLabel,
   objectNoun,
@@ -38,6 +43,7 @@ import {
 } from '../model/model';
 import { type DrawItem, buildDrawItems, objectLayoutFor, sheetLine } from '../model/scene';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
+import { addedMessage, deletedMessage, movedMessage, selectedText } from './messages';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile, makeProjectFile } from '../export/deliver';
 import { exportFileName, projectFileName } from '../export/fileName';
@@ -84,6 +90,7 @@ const TOOLS: Tool[] = [
   { id: 'select', label: 'Seleziona', icon: 'mouse-pointer', mode: 'select', needsDoc: true },
   { id: 'segment', label: 'Retta', icon: 'slash', mode: 'pick', needsDoc: true },
   { id: 'polyline', label: 'Linea', icon: 'polyline', mode: 'pick', needsDoc: true },
+  { id: 'curve', label: 'Cerchio e arco', icon: 'circle', mode: 'pick', needsDoc: true },
   { id: 'calibrate', label: 'Scala', icon: 'scaling', mode: 'pick', needsDoc: true },
   { id: 'distance', label: 'Distanza', icon: 'ruler-dimension', mode: 'pick', needsDoc: true },
   { id: 'erase', label: 'Cancella', icon: 'eraser', mode: 'erase', needsDoc: true },
@@ -92,8 +99,6 @@ const TOOLS: Tool[] = [
   { id: 'cover', label: 'Copertura', icon: 'square', mode: 'pick', needsDoc: true },
 ];
 const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase' && id !== 'select';
-/** Desinenza del participio per i messaggi: "Testo cancellato", "Quota cancellata". */
-const fem = (o: PageObject): 'o' | 'a' => (o.kind === 'text' ? 'o' : 'a');
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
 type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
 
@@ -102,6 +107,8 @@ type Frac = [number, number];
 type HookSpec =
   | { k: 'segment' | 'polyline'; pts: Frac[]; style?: Stroke['style']; color?: string; w?: number }
   | { k: 'cover'; shape: CoverKind; a: Frac; b: Frac }
+  | { k: 'circle'; a: Frac; b: Frac; style?: Stroke['style']; color?: string; w?: number }
+  | { k: 'arc'; a: Frac; b: Frac; c: Frac; style?: Stroke['style']; color?: string; w?: number }
   | { k: 'text'; at: Frac; text: string; pt?: number; color?: string }
   | { k: 'dim'; dim: DimType; pts: Frac[]; value?: string | null; color?: string; w?: number; pt?: number };
 
@@ -121,8 +128,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let uiSize = loadUiSize();
   let opening = false;
   let ortho = false;
-  /** Snap sugli oggetti (V2a): Estremo e Punto medio, attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
-  const snapOn: Record<SnapKind, boolean> = { end: true, mid: true };
+  /** Snap sugli oggetti: Estremo e Punto medio (V2a) e Centro (V2b), attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
+  const snapOn: Record<SnapKind, boolean> = { end: true, mid: true, center: true };
   /** Griglia (V2a): spenta all'avvio; passo in mm (reali se la pagina ha una scala, del foglio se no). Stato della sessione: NON si salva nel progetto. */
   let gridOn = false;
   let gridMm = GRID_DEFAULT_MM;
@@ -136,6 +143,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let dimType: DimType = 'aligned';
   /** Forma della copertura che si sta per disegnare. */
   let coverKind: CoverKind = 'rect';
+  /** Cerchio o arco che si sta per disegnare. */
+  let curveKind: CurveKind = 'circle';
   /** Oggetto selezionato (id) nella pagina corrente, solo con lo strumento Seleziona. */
   let selected: number | null = null;
   /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
@@ -159,7 +168,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Costruzione per punti ----------
   const construction = new Construction(
-    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch) => snapAt(raw, touch), grid: () => gridActiveStepPt() },
+    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch, pending) => snapAt(raw, touch, pending), grid: () => gridActiveStepPt() },
     {
       line: (kind, points) => {
         const obj: LineObject = { id: model.newId(), kind, points: points.map((p) => ({ ...p })), stroke: { ...stroke } };
@@ -178,15 +187,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         history.exec(new AddObject(pageNo, obj));
         say(`${coverInfo(def.shape).label} aggiunta: bianca, sotto linee, quote e testi. Annulla per toglierla.`);
       },
+      curve: (kind, points) => {
+        const g = viewer.geometry;
+        const [p1, p2, p3] = points.map((p) => ({ ...p })) as [UserPoint, UserPoint, UserPoint];
+        const obj: CircleObject | ArcObject = kind === 'circle' ? { id: model.newId(), kind, p1, p2, stroke: { ...stroke } } : { id: model.newId(), kind, p1, p2, p3, stroke: { ...stroke } };
+        history.exec(new AddObject(pageNo, obj));
+        const arc = g ? curveOnSheet(obj, g) : null;
+        say(addedMessage(obj, arc ? `raggio ${mmText(arc.r)}` : undefined));
+      },
       reject: say,
     },
   );
 
   /** Snap sugli oggetti della pagina corrente: il candidato piu' vicino al punto grezzo (foglio) entro il raggio (px CSS / zoom), tra i tipi attivi. */
-  function snapAt(raw: SheetPoint, touch: boolean): SnapHit | null {
+  function snapAt(raw: SheetPoint, touch: boolean, pending: readonly UserPoint[]): SnapHit | null {
     const g = viewer.geometry;
-    if (!g || !pdf || (!snapOn.end && !snapOn.mid)) return null;
-    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn);
+    if (!g || !pdf || (!snapOn.end && !snapOn.mid && !snapOn.center)) return null;
+    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn, pending);
   }
 
   /** Passo della griglia in pt FISICI del foglio per la pagina corrente (mm reali con la scala della pagina, altrimenti mm del foglio). */
@@ -220,14 +237,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return ` La griglia (${fmtTrim(gridMm, 3)} mm ${model.scale(pageNo) ? 'reali' : 'del foglio'}) passa da ${fmt(was)} a ${fmt(now)} pt sul foglio.`;
   }
 
+  /** Una lunghezza in pt del foglio, in mm reali se la pagina e' calibrata, altrimenti in mm del foglio. */
+  function mmText(dPt: number): string {
+    const s = model.scale(pageNo);
+    return s ? `${fmt(realMm(dPt, s))} mm` : `${fmt(ptToMm(dPt))} mm sul foglio (pagina non calibrata)`;
+  }
   /** Lunghezza totale di una spezzata, in mm reali se la pagina e' calibrata, altrimenti in mm del foglio. */
   function lengthText(points: readonly UserPoint[]): string {
     const g = viewer.geometry;
     if (!g) return '';
     let dPt = 0;
     for (let i = 1; i < points.length; i++) dPt += g.distancePt(points[i - 1] as UserPoint, points[i] as UserPoint);
-    const s = model.scale(pageNo);
-    return s ? `${fmt(realMm(dPt, s))} mm` : `${fmt(ptToMm(dPt))} mm sul foglio (pagina non calibrata)`;
+    return mmText(dPt);
   }
 
   // ---------- Barra di stato ----------
@@ -239,19 +260,20 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const pager = h('div', { class: 'st-pager' }, prevBtn, stPage, nextBtn);
   const scaleBtn = h('button', { class: 'st-scale-btn num', type: 'button', title: 'Calibra la scala di questa pagina', onclick: () => selectTool('calibrate') }, 'non calibrata');
   /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio e ORTO (`data-toggle` li distingue). */
-  const mkToggle = (id: 'end' | 'mid' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
+  const mkToggle = (id: 'end' | 'mid' | 'center' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
     h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': String(on), 'data-toggle': id, title, onclick: fn }, label);
-  const endBtn = mkToggle('end', SNAP_LABEL.end, 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, quote e coperture', snapOn.end, () => setSnap('end', !snapOn.end));
-  const midBtn = mkToggle('mid', SNAP_LABEL.mid, 'Snap sui punti medi: il punto si aggancia al centro dei tratti e dei lati delle coperture', snapOn.mid, () => setSnap('mid', !snapOn.mid));
+  const endBtn = mkToggle('end', SNAP_LABEL.end, 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati', snapOn.end, () => setSnap('end', !snapOn.end));
+  const midBtn = mkToggle('mid', SNAP_LABEL.mid, 'Snap sui punti medi: il punto si aggancia al centro dei tratti, dei lati delle coperture e degli archi', snapOn.mid, () => setSnap('mid', !snapOn.mid));
+  const centerBtn = mkToggle('center', SNAP_LABEL.center, 'Snap sul centro: il punto si aggancia al centro di cerchi, archi e coperture circolari', snapOn.center, () => setSnap('center', !snapOn.center));
   const orthoBtn = mkToggle('ortho', 'ORTO', 'Ortogonale: il secondo punto va in orizzontale o in verticale', false, () => setOrtho(!ortho));
   const gridBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', 'data-toggle': 'grid', title: 'Griglia: mostra i nodi e arrotonda i punti ai nodi (passo nel pannello a destra)', onclick: () => setGridOn(!gridOn) }, 'Griglia');
   // Gli stessi interruttori stanno anche nel pannello a destra ("Aggancio e griglia"): sotto 720 px la barra di stato resta compatta (X, Y, scala, ORTO: DESIGN.md) e
   // quei tre vivono solo li'. Ogni interruttore ha piu' pulsanti, che mostrano tutti lo stesso stato.
-  const toggleBtns: Record<'end' | 'mid' | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], grid: [gridBtn] };
-  const setPressed = (id: 'end' | 'mid' | 'grid', on: boolean): void => {
+  const toggleBtns: Record<'end' | 'mid' | 'center' | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], center: [centerBtn], grid: [gridBtn] };
+  const setPressed = (id: 'end' | 'mid' | 'center' | 'grid', on: boolean): void => {
     for (const b of toggleBtns[id]) b.setAttribute('aria-pressed', String(on));
   };
-  const panelToggle = (id: 'end' | 'mid' | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
+  const panelToggle = (id: 'end' | 'mid' | 'center' | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
     const b = h('button', { class: 'btn panel-toggle', type: 'button', 'aria-pressed': String(on), 'data-panel-toggle': id, title, onclick: fn }, label);
     toggleBtns[id].push(b);
     return b;
@@ -263,6 +285,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     h('span', { class: 'st-scale' }, h('span', { class: 'lbl' }, 'SCALA:'), scaleBtn),
     endBtn,
     midBtn,
+    centerBtn,
     orthoBtn,
     gridBtn,
     statusMsg,
@@ -286,7 +309,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   function setSnap(kind: SnapKind, on: boolean): void {
     snapOn[kind] = on;
     setPressed(kind, on);
-    const what = kind === 'end' ? 'agli estremi di rette, linee, quote e coperture' : 'al centro dei tratti e dei lati delle coperture';
+    const what = kind === 'end' ? 'agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati' : kind === 'mid' ? 'al centro dei tratti, dei lati delle coperture e degli archi' : 'al centro di cerchi, archi e coperture circolari';
     say(on ? `${SNAP_LABEL[kind]} attivo: il punto si aggancia ${what}` : `${SNAP_LABEL[kind]} disattivato`);
     viewer.refreshAim();
   }
@@ -348,11 +371,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const insertMenu = (): MenuEntry[] => [
     { label: 'Retta', disabled: !pdf, onSelect: () => selectTool('segment') },
     { label: 'Linea', disabled: !pdf, onSelect: () => selectTool('polyline') },
+    ...CURVE_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCurveKind(t.id) })),
     'separator',
     { label: 'Testo', disabled: !pdf, onSelect: () => selectTool('text') },
     ...DIM_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) })),
     ...COVER_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCoverKind(t.id) })),
-    { label: 'Cerchio, arco, raccordo', hint: 'V2', disabled: true },
+    { label: 'Raccordo', hint: 'V2c', disabled: true },
   ];
   const zoomMenu = (): MenuEntry[] => [
     { label: 'Zoom avanti', disabled: !pdf, onSelect: () => viewer.zoomBy(1.25) },
@@ -410,7 +434,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return selected === null ? undefined : model.get(pageNo, selected);
   }
   /** Quali controlli servono a un oggetto: quelli delle sue proprieta' (la copertura non ne ha). */
-  const kindOfObject = (o: PageObject): StyleKind => (isLine(o) ? 'line' : o.kind === 'text' ? 'text' : o.kind === 'dim' ? 'dim' : 'none');
+  const kindOfObject = (o: PageObject): StyleKind => (hasStroke(o) ? 'line' : o.kind === 'text' ? 'text' : o.kind === 'dim' ? 'dim' : 'none');
   /** Proprieta' dell'oggetto come tipo di linea e corpo; quelle che l'oggetto non ha restano quelle di sessione (i controlli corrispondenti sono nascosti). */
   function propsView(o: PageObject): { stroke: Stroke; textPt: number } {
     const p = propsOf(o);
@@ -502,8 +526,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     coverTypeBtns.set(t.id, b);
     coverTypes.append(b);
   }
+  const curveTypeBtns = new Map<CurveKind, HTMLButtonElement>();
+  const curveTypes = h('div', { class: 'ctx-curves seg', role: 'group', 'aria-label': 'Cerchio o arco', hidden: true });
+  for (const t of CURVE_TYPES) {
+    const b = h('button', { class: 'btn seg-btn', type: 'button', 'aria-pressed': String(t.id === curveKind), title: t.label, onclick: () => selectCurveKind(t.id) }, t.label);
+    curveTypeBtns.set(t.id, b);
+    curveTypes.append(b);
+  }
   const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -540,6 +571,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     { class: 'panel-toggles', role: 'group', 'aria-label': 'Aggancio e griglia' },
     panelToggle('end', SNAP_LABEL.end, endBtn.title, snapOn.end, () => setSnap('end', !snapOn.end)),
     panelToggle('mid', SNAP_LABEL.mid, midBtn.title, snapOn.mid, () => setSnap('mid', !snapOn.mid)),
+    panelToggle('center', SNAP_LABEL.center, centerBtn.title, snapOn.center, () => setSnap('center', !snapOn.center)),
     panelToggle('grid', 'Griglia', gridBtn.title, false, () => setGridOn(!gridOn)),
   );
 
@@ -687,6 +719,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     construction.setTool(isConstructionTool(id) ? id : null);
     if (id === 'dim') construction.setDimType(dimType);
     if (id === 'cover') construction.setCoverKind(coverKind);
+    if (id === 'curve') construction.setCurveKind(curveKind);
     currentAim = null;
     viewer.setMode(def.mode ?? 'pan');
     viewer.setHighlight(null);
@@ -727,6 +760,17 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (tool !== 'cover') selectTool('cover');
     else {
       construction.setCoverKind(k);
+      currentAim = null;
+      renderConstruction();
+    }
+  }
+
+  /** Sceglie Cerchio o Arco (e passa allo strumento Cerchio e arco). */
+  function selectCurveKind(k: CurveKind): void {
+    curveKind = k;
+    if (tool !== 'curve') selectTool('curve');
+    else {
+      construction.setCurveKind(k);
       currentAim = null;
       renderConstruction();
     }
@@ -801,6 +845,17 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       viewer.setBadge(null);
       const first = pts[0];
       if (first && aim) viewer.setCoverDraft(coverOnSheet({ shape: coverKind, p1: first, p2: aim }, geom)); // fondo bianco sotto gli oggetti + contorno sottile (solo a schermo)
+    } else if (t === 'curve') {
+      viewer.setMarkers(pts.map((p) => ({ p })));
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+      // anteprima solo a schermo (mai esportata), con le proprieta' che avra': cerchio dopo il centro; arco: dopo il primo punto la corda fino al cursore,
+      // dopo il secondo l'arco per i tre punti con il cursore come fine (se i tre punti non danno un arco, nulla)
+      const [a, b] = [pts[0], pts[1]];
+      if (a && aim && pts.length === 1 && curveKind === 'circle') viewer.setArcPreview(curveOnSheet({ kind: 'circle', p1: a, p2: aim }, geom), stroke);
+      else if (a && aim && pts.length === 1) viewer.setPreview([a, aim], stroke);
+      else if (a && b && aim && pts.length === 2 && arcProblem(a, b, aim) === null) viewer.setArcPreview(curveOnSheet({ kind: 'arc', p1: a, p2: b, p3: aim }, geom), stroke);
+      else viewer.setPreview(null);
     } else if (t === 'segment' || t === 'polyline') {
       const line = aim && pts.length > 0 ? [...pts, aim] : pts;
       viewer.setMarkers(pts.map((p) => ({ p })));
@@ -836,14 +891,16 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         ? 'Cancella: tocca un oggetto per cancellarlo (Annulla lo ripristina)'
         : tool === 'select'
           ? so
-            ? `Selezionat${fem(so)}: ${objectLabel(so)}` // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
+            ? selectedText(so) // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
             : 'Seleziona: tocca un oggetto, poi trascinalo'
           : '';
     dimTypes.hidden = tool !== 'dim';
     for (const [id, b] of dimTypeBtns) b.setAttribute('aria-pressed', String(id === dimType));
     coverTypes.hidden = tool !== 'cover';
     for (const [id, b] of coverTypeBtns) b.setAttribute('aria-pressed', String(id === coverKind));
-    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'text' || tool === 'dim' || tool === 'select');
+    curveTypes.hidden = tool !== 'curve';
+    for (const [id, b] of curveTypeBtns) b.setAttribute('aria-pressed', String(id === curveKind));
+    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'curve' || tool === 'text' || tool === 'dim' || tool === 'select');
     // Con Seleziona il riquadro occupa sempre il suo posto (invisibile se non c'e' nulla da cambiare): se comparisse
     // solo con un oggetto selezionato, selezionare farebbe cambiare altezza alla barra e il foglio si ridimensionerebbe sotto il dito.
     styleChip.classList.toggle('ghost', tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'));
@@ -895,6 +952,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const g = viewer.geometry;
     if (!g) return { lines: [], rects: [], circles: [] };
     if (o.kind === 'cover') return coverShapeOf(coverOnSheet(o, g));
+    if (isCurve(o)) {
+      const arc = curveOnSheet(o, g);
+      return { lines: [], rects: [], circles: [], arcs: arc ? [arc] : [] }; // la LINEA del cerchio o dell'arco, non il disco: si sceglie sul tratto
+    }
     return isLine(o) ? { lines: [sheetLine(o, g)], rects: [], circles: [] } : objectLayout(o, g).hit;
   };
   /** Gli oggetti dal fondo al primo piano (le coperture sotto tutto): la stessa scena che disegna l'esportazione "Appiattito". */
@@ -1091,7 +1152,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   /** Cancella un oggetto con il comando dello strumento Cancella: un solo passo di Annulla, lo stesso messaggio. */
   function removeObject(o: PageObject): void {
     history.exec(new RemoveObject(pageNo, o));
-    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} cancellat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} ripristina.`);
+    say(deletedMessage(o));
   }
   /**
    * Canc con lo strumento Seleziona: cancella l'oggetto selezionato (CP6b, decisione 57) e azzera la selezione. Il punto da estendere quando la selezione
@@ -1131,7 +1192,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const d = g.sheetDeltaToUser(dx, dy); // lo spostamento sul foglio, riportato nello spazio utente PDF
     if (d.x === 0 && d.y === 0) return;
     history.exec(new MoveObject(pageNo, o, d.x, d.y));
-    say(`${objectNoun(o).replace(/^./, (c) => c.toUpperCase())} spostat${fem(o)}. Annulla ${o.kind === 'text' ? 'lo' : 'la'} rimette a posto.`);
+    say(movedMessage(o));
   };
 
   // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
@@ -1638,6 +1699,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
             const p1 = u(sp.a);
             const p2 = sp.shape === 'square' ? squareUser(p1, u(sp.b), g) : u(sp.b);
             obj = { id: model.newId(), kind: 'cover', shape: sp.shape, p1, p2 };
+          } else if (sp.k === 'circle') {
+            obj = { id: model.newId(), kind: 'circle', p1: u(sp.a), p2: u(sp.b), stroke: { style: sp.style ?? 'solid', color: sp.color ?? '#D32F2F', widthPt: sp.w ?? 1 } };
+          } else if (sp.k === 'arc') {
+            obj = { id: model.newId(), kind: 'arc', p1: u(sp.a), p2: u(sp.b), p3: u(sp.c), stroke: { style: sp.style ?? 'solid', color: sp.color ?? '#D32F2F', widthPt: sp.w ?? 1 } };
           } else if (sp.k === 'text') {
             obj = { id: model.newId(), kind: 'text', at: u(sp.at), text: sp.text, textPt: sp.pt ?? 10, color: sp.color ?? '#D32F2F' };
           } else if (sp.k === 'dim') {
