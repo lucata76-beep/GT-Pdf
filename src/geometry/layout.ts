@@ -3,6 +3,7 @@
 // la scelta dell'oggetto da cancellare (`hit`) e, in CP5, l'esportazione (`exportRuns` riporta i testi nello spazio utente).
 // I testi sono SEMPRE orizzontali sul foglio mostrato (anche con /Rotate): nel PDF cio' vuol dire ruotarli di
 // `PageGeometry.uprightAngleDeg`. Proporzioni di frecce e badge: scelte di progetto (NON derivate da una norma), in docs/PIANO.md.
+import type { SheetArc } from './arc';
 import type { DimensionDef } from './dimension';
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
 import { ASCENT_EM, DESCENT_EM, textWidthPt } from './textMetrics';
@@ -42,11 +43,16 @@ export interface SheetCircle {
   c: SheetPoint;
   r: number;
 }
-/** Forma per scegliere l'oggetto con un tocco: spezzate, rettangoli e cerchi pieni nel foglio. */
+/**
+ * Forma per scegliere l'oggetto con un tocco: spezzate, rettangoli e cerchi PIENI nel foglio (`circles`: la Copertura circolare, distanza 0 dentro) e,
+ * dal V2b, cerchi e archi come LINEA (`arcs`: la distanza e' quella dalla circonferenza o dall'arco, mai 0 dentro: un disco pieno nasconderebbe gli
+ * oggetti che stanno sotto). Il cerchio e' un arco con `|sweep| = 2 pi`. `arcs` manca nelle forme che non ne hanno.
+ */
 export interface Shape {
   lines: SheetPoint[][];
   rects: SheetRect[];
   circles: SheetCircle[];
+  arcs?: SheetArc[];
 }
 export interface Layout {
   lines: LayoutLine[];

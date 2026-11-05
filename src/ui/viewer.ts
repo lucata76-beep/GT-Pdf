@@ -6,6 +6,7 @@
 // altrove sposta la vista. Durante il trascinamento l'oggetto segue il dito (solo a schermo); alla fine l'app crea UN comando.
 // Coordinate: gli oggetti sono nello spazio utente PDF; per lo schermo si passa da PageGeometry (src/geometry/page.ts),
 // che gestisce Rotate, CropBox e UserUnit come il viewport a scala 1 di PDF.js (confronto nei test).
+import type { SheetArc } from '../geometry/arc';
 import type { SheetCover } from '../geometry/cover';
 import type { Layout, Shape } from '../geometry/layout';
 import { PageGeometry, type SheetPoint, type UserPoint } from '../geometry/page';
@@ -258,6 +259,10 @@ export class PdfViewer {
   /** Linea in costruzione, disegnata con le proprieta' che avra'. */
   setPreview(points: readonly UserPoint[] | null, stroke?: Stroke): void {
     this.overlay.setPreview(points ? this.sheetPts(points) : null, stroke);
+  }
+  /** Cerchio o arco in costruzione (gia' nel foglio), disegnato con le proprieta' che avra'. Solo a schermo. */
+  setArcPreview(arc: SheetArc | null, stroke?: Stroke): void {
+    this.overlay.setPreview(arc, stroke);
   }
   /** Linea di costruzione di misura o calibrazione (colore `measure`). */
   setGuide(points: readonly UserPoint[] | null): void {

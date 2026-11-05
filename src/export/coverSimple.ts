@@ -43,12 +43,13 @@ import {
   setStrokingRgbColor,
   stroke,
 } from '@cantoo/pdf-lib';
+import { arcBeziers, curveOnSheet, isFullCircle } from '../geometry/arc';
 import { coverUserBox, coverUserRadius } from '../geometry/cover';
 import { dimensionLabel } from '../geometry/dimension';
 import { type Layout, exportRuns, layoutDimension, layoutText } from '../geometry/layout';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import type { PageScale } from '../geometry/scale';
-import { type PageObject, drawOrder, isLine } from '../model/model';
+import { type PageObject, drawOrder, isCurve, isLine } from '../model/model';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, dashPattern } from '../model/stroke';
 import { type ContentAnalysis, analyzeContent } from './contentState';
 import { ExportError, toExportError } from './errors';
@@ -119,6 +120,40 @@ function polylineOps(pts: readonly UserPoint[], color: string, widthUser: number
     setDashPattern([...dashUser], 0),
   ];
   pts.forEach((p, i) => ops.push(i === 0 ? moveTo(p.x, p.y) : lineTo(p.x, p.y)));
+  ops.push(stroke(), popGraphicsState());
+  return ops;
+}
+
+/**
+ * Cerchio o arco: curve di Bezier (non piu' di 90 gradi ciascuna, il cerchio intero 4) con il tratto della linea, SENZA riempimento. Le curve sono calcolate sul
+ * foglio mostrato, dove il cerchio e' un cerchio, e i punti riportati nello spazio utente con `sheetToUser`: la trasformazione foglio -> utente e' affine, quindi
+ * (le Bezier sono invarianti per trasformazioni affini) il risultato e' la stessa curva, con /Rotate, CropBox e UserUnit, senza flag di verso. Il cerchio
+ * e' un tracciato chiuso (`h`) che parte a destra del centro sul foglio, come il disegno a schermo.
+ */
+function curveOps(o: Extract<PageObject, { kind: 'circle' | 'arc' }>, geom: PageGeometry): PDFOperator[] {
+  const arc = curveOnSheet(o, geom);
+  if (!arc) return []; // punti che non danno una curva: non succede (costruzione e file lo escludono)
+  const u = geom.userUnit;
+  const [r, g, b] = colorOf(o.stroke.color);
+  const ops: PDFOperator[] = [
+    pushGraphicsState(),
+    setStrokingRgbColor(r, g, b),
+    setLineWidth(o.stroke.widthPt / u),
+    setLineCap(capOf()),
+    setLineJoin(joinOf()),
+    miterLimit(STROKE_MITER_LIMIT),
+    setDashPattern(dashPattern(o.stroke.style, o.stroke.widthPt).map((d) => d / u), 0),
+  ];
+  const segs = arcBeziers(arc);
+  const first = geom.sheetToUser((segs[0] as (typeof segs)[number]).p0);
+  ops.push(moveTo(first.x, first.y));
+  for (const sg of segs) {
+    const c1 = geom.sheetToUser(sg.c1);
+    const c2 = geom.sheetToUser(sg.c2);
+    const p1 = geom.sheetToUser(sg.p1);
+    ops.push(appendBezierCurve(c1.x, c1.y, c2.x, c2.y, p1.x, p1.y));
+  }
+  if (isFullCircle(arc)) ops.push(closePath());
   ops.push(stroke(), popGraphicsState());
   return ops;
 }
@@ -353,6 +388,8 @@ export async function exportCoverSimple(original: Uint8Array, pages: readonly Ex
               ),
             );
           }
+        } else if (isCurve(o)) {
+          page.pushOperators(...curveOps(o, geom));
         } else if (isLine(o)) {
           page.pushOperators(...polylineOps(o.points, o.stroke.color, o.stroke.widthPt / geom.userUnit, dashPattern(o.stroke.style, o.stroke.widthPt).map((d) => d / geom.userUnit)));
         } else {

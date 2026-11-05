@@ -2,11 +2,12 @@
 // Tutto in coordinate del foglio (pt fisici, origine in alto a sinistra): gli oggetti stanno in un gruppo SVG con
 // transform translate+scale(zoom), quindi spessori, pattern di tratteggio e corpo dei testi sono in pt come nell'esportazione.
 // Segni, mira e badge hanno dimensione fissa sullo schermo e vengono riposizionati a ogni cambio di vista.
+import { type SheetArc, svgArcPath } from '../geometry/arc';
 import { type SheetCover, coverShapeOf } from '../geometry/cover';
 import { gridVisible } from '../geometry/grid';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
-import { SNAP_LABEL, type SnapKind } from '../geometry/snap';
+import { SNAP_KINDS, SNAP_LABEL, type SnapKind } from '../geometry/snap';
 import { DRAWING_FONT, type DrawItem } from '../model/scene';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
 import { h } from './dom';
@@ -59,6 +60,7 @@ function shapeEls(shape: Shape): SVGElement[] {
   const els: SVGElement[] = shape.lines.map((pts) => svgEl('path', { d: pathData(pts), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
   for (const r of shape.rects) els.push(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, 'stroke-linejoin': 'round' }));
   for (const c of shape.circles) els.push(svgEl('circle', { cx: c.c.x, cy: c.c.y, r: c.r }));
+  for (const a of shape.arcs ?? []) els.push(svgEl('path', { d: svgArcPath(a), fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })); // cerchi e archi: solo la linea, mai il disco
   return els;
 }
 
@@ -82,11 +84,12 @@ export class SceneOverlay {
   private readonly gridEl = svgEl('path', { class: 'sc-grid', fill: 'none', display: 'none' });
   private grid: { stepPt: number; w: number; h: number } | null = null;
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
-  /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio) con il nome: solo a schermo, mai esportato. */
+  /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro) con il nome: solo a schermo, mai esportato. */
   private readonly snapG = svgEl('g', { class: 'snap-mark', display: 'none' });
   private readonly snapShape: Record<SnapKind, SVGElement> = {
     end: svgEl('rect', { x: -SNAP_HALF, y: -SNAP_HALF, width: 2 * SNAP_HALF, height: 2 * SNAP_HALF }),
     mid: svgEl('polygon', { points: `0,${-SNAP_HALF} ${SNAP_HALF},${SNAP_HALF} ${-SNAP_HALF},${SNAP_HALF}` }),
+    center: svgEl('circle', { cx: 0, cy: 0, r: SNAP_HALF }),
   };
   private readonly snapLabel = svgEl('text', { x: SNAP_HALF + 5, y: -SNAP_HALF - 2 });
   private readonly badgeEl = h('div', { class: 'measure-badge', hidden: true });
@@ -128,8 +131,13 @@ export class SceneOverlay {
   }
 
   private makeStroke(points: readonly SheetPoint[], stroke: Stroke): StrokeEl & { el: SVGPathElement } {
+    return this.makeStrokeD(pathData(points), stroke);
+  }
+
+  /** Tracciato con tratto, tipo di linea e spessore da `d` (spezzata o arco: lo stesso codice, cosi' tratteggio e spessore sono quelli dell'esportazione). */
+  private makeStrokeD(d: string, stroke: Stroke): StrokeEl & { el: SVGPathElement } {
     const el = svgEl('path', {
-      d: pathData(points),
+      d,
       fill: 'none',
       stroke: stroke.color,
       'stroke-linecap': STROKE_CAP,
@@ -153,8 +161,8 @@ export class SceneOverlay {
         const el = coverEl(it.cover);
         el.dataset.id = String(it.id);
         covers.push(el);
-      } else if (it.kind === 'line') {
-        const s = this.makeStroke(it.points, it.stroke);
+      } else if (it.kind === 'line' || it.kind === 'curve') {
+        const s = it.kind === 'line' ? this.makeStroke(it.points, it.stroke) : this.makeStrokeD(svgArcPath(it.arc), it.stroke);
         s.el.dataset.id = String(it.id);
         this.strokes.push(s);
         els.push(s.el);
@@ -234,15 +242,15 @@ export class SceneOverlay {
     this.hlG.replaceChildren(...(shape ? shapeEls(shape) : []));
   }
 
-  /** Linea in costruzione, con le proprieta' che avra' una volta finita. */
-  setPreview(points: readonly SheetPoint[] | null, stroke?: Stroke): void {
+  /** Linea, cerchio o arco in costruzione (spezzata di punti o `SheetArc`), con le proprieta' che avra' una volta finita. Solo a schermo: mai esportata. */
+  setPreview(shape: readonly SheetPoint[] | SheetArc | null, stroke?: Stroke): void {
     if (this.previewStroke) this.strokes = this.strokes.filter((s) => s !== this.previewStroke);
     this.previewStroke = null;
-    if (!points || points.length < 2 || !stroke) {
+    if (!shape || !stroke || (Array.isArray(shape) && shape.length < 2)) {
       this.previewG.replaceChildren();
       return;
     }
-    const s = this.makeStroke(points, stroke);
+    const s = Array.isArray(shape) ? this.makeStroke(shape as readonly SheetPoint[], stroke) : this.makeStrokeD(svgArcPath(shape as SheetArc), stroke);
     this.previewStroke = s;
     this.strokes.push(s);
     this.previewG.replaceChildren(s.el);
@@ -329,7 +337,7 @@ export class SceneOverlay {
     }
     this.snapG.dataset.kind = this.snap.kind;
     this.snapG.insertBefore(this.snapShape[this.snap.kind], this.snapLabel);
-    this.snapShape[this.snap.kind === 'end' ? 'mid' : 'end'].remove();
+    for (const k of SNAP_KINDS) if (k !== this.snap.kind) this.snapShape[k].remove();
     this.snapLabel.textContent = SNAP_LABEL[this.snap.kind];
     this.snapG.setAttribute('display', 'inline');
     this.placeScreenItems();

@@ -4,6 +4,7 @@
 // `DRAWING_FONT`. Il chiamante imposta la trasformazione: le coordinate sono in pt fisici del foglio (origine in alto a sinistra), quindi
 // con `scale(dpi / 72)` spessori, pattern e corpo dei testi sono quelli fisici (nessuno spessore minimo: a schermo c'e' MIN_SCREEN_STROKE_PX,
 // su carta no).
+import type { SheetArc } from '../geometry/arc';
 import { type DrawItem, DRAWING_FONT } from '../model/scene';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, dashPattern } from '../model/stroke';
 
@@ -24,7 +25,7 @@ export interface PaintContext {
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
   closePath(): void;
-  arc(x: number, y: number, r: number, a0: number, a1: number): void;
+  arc(x: number, y: number, r: number, a0: number, a1: number, anticlockwise?: boolean): void;
   fill(): void;
   stroke(): void;
   fillRect(x: number, y: number, w: number, h: number): void;
@@ -34,7 +35,7 @@ export interface PaintContext {
 
 const WHITE = '#ffffff';
 
-function strokePath(ctx: PaintContext, pts: readonly { x: number; y: number }[], color: string, widthPt: number, dash: number[]): void {
+function setStroke(ctx: PaintContext, color: string, widthPt: number, dash: number[]): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = widthPt;
   ctx.lineCap = STROKE_CAP;
@@ -42,8 +43,23 @@ function strokePath(ctx: PaintContext, pts: readonly { x: number; y: number }[],
   ctx.miterLimit = STROKE_MITER_LIMIT;
   ctx.setLineDash(dash);
   ctx.lineDashOffset = 0;
+}
+
+function strokePath(ctx: PaintContext, pts: readonly { x: number; y: number }[], color: string, widthPt: number, dash: number[]): void {
+  setStroke(ctx, color, widthPt, dash);
   ctx.beginPath();
   pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  ctx.stroke();
+}
+
+/**
+ * Cerchio o arco: `arc` del canvas con gli STESSI angoli e verso del foglio (Y in giu', angolo crescente = orario: `anticlockwise` = sweep negativo), quindi
+ * disegna esattamente quello che disegna lo schermo (`svgArcPath`); il tratteggio parte dall'inizio dell'arco, per il cerchio dall'angolo 0.
+ */
+function strokeArc(ctx: PaintContext, a: SheetArc, color: string, widthPt: number, dash: number[]): void {
+  setStroke(ctx, color, widthPt, dash);
+  ctx.beginPath();
+  ctx.arc(a.c.x, a.c.y, a.r, a.a0, a.a0 + a.sweep, a.sweep < 0);
   ctx.stroke();
 }
 
@@ -59,6 +75,8 @@ export function paintItems(ctx: PaintContext, items: readonly DrawItem[]): void 
       }
     } else if (it.kind === 'line') {
       strokePath(ctx, it.points, it.stroke.color, it.stroke.widthPt, dashPattern(it.stroke.style, it.stroke.widthPt));
+    } else if (it.kind === 'curve') {
+      strokeArc(ctx, it.arc, it.stroke.color, it.stroke.widthPt, dashPattern(it.stroke.style, it.stroke.widthPt));
     } else {
       const l = it.layout;
       for (const ln of l.lines) strokePath(ctx, ln.pts, ln.color, ln.widthPt, []);

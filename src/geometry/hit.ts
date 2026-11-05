@@ -1,5 +1,6 @@
 // Distanze punto-segmento, punto-spezzata e punto-forma, per scegliere l'oggetto da selezionare o cancellare con un tocco.
 // Si lavora nel foglio (pt fisici, isotropo): la tolleranza in pt = pixel di schermo / zoom.
+import { distToArc } from './arc';
 import type { Shape, SheetCircle, SheetRect } from './layout';
 import type { Pt } from './page';
 
@@ -40,6 +41,7 @@ export function distToShape(p: Pt, shape: Shape): number {
   for (const l of shape.lines) best = Math.min(best, distToPolyline(p, l));
   for (const r of shape.rects) best = Math.min(best, distToRect(p, r));
   for (const c of shape.circles) best = Math.min(best, distToCircle(p, c));
+  for (const a of shape.arcs ?? []) best = Math.min(best, distToArc(p, a)); // cerchi e archi: la linea, non l'area
   return best;
 }
 

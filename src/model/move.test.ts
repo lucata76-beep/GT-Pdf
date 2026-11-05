@@ -222,3 +222,57 @@ describe('Ordine di disegno e primo piano', () => {
     expect(items.map((o) => o.id)).toEqual([2, 1]);
   });
 });
+
+describe('cerchio e arco nel modello (V2b)', () => {
+  const circ = (id: number): PageObject => ({ id, kind: 'circle', p1: { x: 10.5, y: 20.25 }, p2: { x: 40.5, y: 20.25 }, stroke: { style: 'dashed', color: '#2E7D32', widthPt: 1.5 } });
+  const arcO = (id: number): PageObject => ({ id, kind: 'arc', p1: { x: 100, y: 100 }, p2: { x: 150, y: 140 }, p3: { x: 220, y: 100 }, stroke: { style: 'dashdot', color: '#E65100', widthPt: 0.5 } });
+  it('nomi: Cerchio, Arco, cerchio, arco', () => {
+    expect(objectLabel(circ(1))).toBe('Cerchio');
+    expect(objectLabel(arcO(2))).toBe('Arco');
+    expect(objectNoun(circ(1))).toBe('cerchio');
+    expect(objectNoun(arcO(2))).toBe('arco');
+  });
+  it('punti: i punti indicati nell\'ordine del tipo (2 e 3), copie', () => {
+    expect(pointsOf(circ(1))).toEqual([{ x: 10.5, y: 20.25 }, { x: 40.5, y: 20.25 }]);
+    expect(pointsOf(arcO(2))).toEqual([{ x: 100, y: 100 }, { x: 150, y: 140 }, { x: 220, y: 100 }]);
+    const o = arcO(2);
+    pointsOf(o)[0]!.x = -1;
+    expect(pointsOf(o)[0]!.x).toBe(100);
+  });
+  it('proprieta\': tipo di linea, colore, spessore (come la Retta); nessun corpo del testo', () => {
+    expect(propsOf(circ(1))).toEqual({ style: 'dashed', color: '#2E7D32', widthPt: 1.5 });
+    expect(propsOf(arcO(2))).toEqual({ style: 'dashdot', color: '#E65100', widthPt: 0.5 });
+    expect(patchedProps(arcO(2), { color: '#1565C0', textPt: 40 })).toEqual({ style: 'dashdot', color: '#1565C0', widthPt: 0.5 });
+  });
+  it('Aggiungi, Sposta, Proprieta\', Cancella e Annulla/Ripeti: un solo passo ciascuno, ripristino esatto', () => {
+    const m = new DocumentModel();
+    const h = new History<DocumentModel>(m);
+    const c = circ(m.newId());
+    const a = arcO(m.newId());
+    h.exec(new AddObject(1, c));
+    h.exec(new AddObject(1, a));
+    h.exec(new MoveObject(1, a, 12.5, -7.25));
+    expect(pointsOf(m.get(1, a.id)!)).toEqual([{ x: 112.5, y: 92.75 }, { x: 162.5, y: 132.75 }, { x: 232.5, y: 92.75 }]);
+    h.exec(new MoveObject(1, c, 1, 1));
+    h.exec(new SetProps(1, a.id, propsOf(a), { style: 'solid', color: '#D32F2F', widthPt: 2 }));
+    expect(propsOf(m.get(1, a.id)!)).toEqual({ style: 'solid', color: '#D32F2F', widthPt: 2 });
+    h.exec(new RemoveObject(1, m.get(1, c.id)!));
+    expect(m.objects(1).map((o) => o.id)).toEqual([a.id]);
+    h.undo();
+    expect(m.objects(1).map((o) => o.id)).toEqual([c.id, a.id]);
+    h.undo();
+    h.undo();
+    h.undo();
+    expect(pointsOf(m.get(1, a.id)!)).toEqual([{ x: 100, y: 100 }, { x: 150, y: 140 }, { x: 220, y: 100 }]);
+    expect(pointsOf(m.get(1, c.id)!)).toEqual([{ x: 10.5, y: 20.25 }, { x: 40.5, y: 20.25 }]);
+    h.redo();
+    h.redo();
+    h.redo();
+    h.redo();
+    expect(m.objects(1).map((o) => o.id)).toEqual([a.id]);
+  });
+  it('ordine di disegno: le coperture sotto, cerchi e archi con linee e testi nell\'ordine di creazione', () => {
+    const cov: CoverObject = { id: 3, kind: 'cover', shape: 'circle', p1: { x: 0, y: 0 }, p2: { x: 5, y: 0 } };
+    expect(drawOrder([circ(1), line(2), cov, arcO(4), text(5)]).map((o) => o.id)).toEqual([3, 1, 2, 4, 5]);
+  });
+});

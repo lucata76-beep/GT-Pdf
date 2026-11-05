@@ -56,9 +56,40 @@ export interface CoverObject extends CoverDef {
   kind: 'cover';
 }
 
-export type PageObject = LineObject | TextObject | DimensionObject | CoverObject;
+/**
+ * Cerchio (V2b, CP6c; NON la Copertura circolare bianca): oggetto a linea con lo stesso tratto della Retta. Si salvano i punti indicati, non centro, raggio o
+ * angoli (spostare = cambiare tutti i punti): `p1` e' il centro, `p2` un punto sul bordo (il raggio e' la distanza). Geometria in `geometry/arc`.
+ */
+export interface CircleObject {
+  id: number;
+  kind: 'circle';
+  p1: UserPoint;
+  p2: UserPoint;
+  stroke: Stroke;
+}
+
+/** Arco di cerchio per tre punti: `p1` inizio, `p2` un punto sull'arco (solo di passaggio: non e' un candidato dello snap), `p3` fine. Tratto come la Retta. */
+export interface ArcObject {
+  id: number;
+  kind: 'arc';
+  p1: UserPoint;
+  p2: UserPoint;
+  p3: UserPoint;
+  stroke: Stroke;
+}
+
+/**
+ * Perche' Cerchio e Arco sono tipi a se' e non due `kind` di `LineObject`: `isLine` (retta e linea) decide disegno, snap, selezione ed esportazione di una
+ * spezzata, e un cerchio che passasse da li' verrebbe disegnato e agganciato come una spezzata senza alcun errore di compilazione. Con tipi distinti
+ * `tsc` segnala ogni punto che li ignora; quello che hanno in comune (il tratto) e' `hasStroke`.
+ */
+export type PageObject = LineObject | CircleObject | ArcObject | TextObject | DimensionObject | CoverObject;
 
 export const isLine = (o: PageObject): o is LineObject => o.kind === 'segment' || o.kind === 'polyline';
+/** Cerchio o Arco. */
+export const isCurve = (o: PageObject): o is CircleObject | ArcObject => o.kind === 'circle' || o.kind === 'arc';
+/** Oggetti con un tratto (tipo di linea, colore, spessore): retta, linea, cerchio, arco. */
+export const hasStroke = (o: PageObject): o is LineObject | CircleObject | ArcObject => isLine(o) || isCurve(o);
 
 /** Nome breve per l'annulla/ripeti e i messaggi. */
 export function objectLabel(o: PageObject): string {
@@ -67,6 +98,10 @@ export function objectLabel(o: PageObject): string {
       return 'Retta';
     case 'polyline':
       return 'Linea';
+    case 'circle':
+      return 'Cerchio';
+    case 'arc':
+      return 'Arco';
     case 'text':
       return 'Testo';
     case 'cover':
@@ -75,10 +110,10 @@ export function objectLabel(o: PageObject): string {
       return dimInfo(o.dim).label;
   }
 }
-const KIND_NOUN: Record<PageObject['kind'], string> = { segment: 'retta', polyline: 'linea', text: 'testo', dim: 'quota', cover: 'copertura' };
+const KIND_NOUN: Record<PageObject['kind'], string> = { segment: 'retta', polyline: 'linea', circle: 'cerchio', arc: 'arco', text: 'testo', dim: 'quota', cover: 'copertura' };
 export const objectNoun = (o: PageObject): string => KIND_NOUN[o.kind];
 
-/** Proprieta' di un oggetto: ognuno ha solo le sue (linea: tipo, colore, spessore; testo: colore, corpo; quota: colore, spessore, corpo; copertura: nessuna). */
+/** Proprieta' di un oggetto: ognuno ha solo le sue (retta, linea, cerchio, arco: tipo, colore, spessore; testo: colore, corpo; quota: colore, spessore, corpo; copertura: nessuna). */
 export interface ObjectProps {
   style?: LineStyleId;
   color?: string;
@@ -87,7 +122,7 @@ export interface ObjectProps {
 }
 
 export function propsOf(o: PageObject): ObjectProps {
-  if (isLine(o)) return { style: o.stroke.style, color: o.stroke.color, widthPt: o.stroke.widthPt };
+  if (hasStroke(o)) return { style: o.stroke.style, color: o.stroke.color, widthPt: o.stroke.widthPt };
   if (o.kind === 'text') return { color: o.color, textPt: o.textPt };
   if (o.kind === 'cover') return {};
   return { color: o.color, widthPt: o.widthPt, textPt: o.textPt };
@@ -107,7 +142,7 @@ export function patchedProps(o: PageObject, patch: ObjectProps): ObjectProps {
 export const propsEqual = (a: ObjectProps, b: ObjectProps): boolean => a.style === b.style && a.color === b.color && a.widthPt === b.widthPt && a.textPt === b.textPt;
 
 function assignProps(o: PageObject, p: ObjectProps): void {
-  if (isLine(o)) {
+  if (hasStroke(o)) {
     o.stroke = { style: p.style ?? o.stroke.style, color: p.color ?? o.stroke.color, widthPt: p.widthPt ?? o.stroke.widthPt };
     return;
   }
@@ -124,7 +159,10 @@ export function pointsOf(o: PageObject): UserPoint[] {
     case 'text':
       return [{ ...o.at }];
     case 'cover':
+    case 'circle':
       return [{ ...o.p1 }, { ...o.p2 }];
+    case 'arc':
+      return [{ ...o.p1 }, { ...o.p2 }, { ...o.p3 }];
     default:
       return [{ ...o.p1 }, { ...o.p2 }, { ...o.a }, { ...o.b }];
   }
@@ -141,8 +179,14 @@ function assignPoints(o: PageObject, pts: readonly UserPoint[]): void {
       o.at = at(0);
       break;
     case 'cover':
+    case 'circle':
       o.p1 = at(0);
       o.p2 = at(1);
+      break;
+    case 'arc':
+      o.p1 = at(0);
+      o.p2 = at(1);
+      o.p3 = at(2);
       break;
     default:
       o.p1 = at(0);
@@ -153,8 +197,8 @@ function assignPoints(o: PageObject, pts: readonly UserPoint[]): void {
 }
 
 /**
- * Ordine di disegno, dal fondo al primo piano: prima le coperture (nell'ordine di creazione), poi linee, testi e quote
- * (nell'ordine di creazione). Cosi' una copertura sta sotto tutto, anche se e' stata disegnata dopo.
+ * Ordine di disegno, dal fondo al primo piano: prima le coperture (nell'ordine di creazione), poi linee, cerchi, archi, testi e quote
+ * (nell'ordine di creazione, tutti nello stesso strato). Cosi' una copertura sta sotto tutto, anche se e' stata disegnata dopo.
  */
 export function drawOrder(objects: readonly PageObject[]): PageObject[] {
   return [...objects.filter((o) => o.kind === 'cover'), ...objects.filter((o) => o.kind !== 'cover')];

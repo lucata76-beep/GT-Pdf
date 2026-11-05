@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildDimension } from '../geometry/dimension';
 import { type Layout, layoutDimension } from '../geometry/layout';
 import { PageGeometry, type PageSpec, type SheetPoint } from '../geometry/page';
-import type { CoverObject, DimensionObject, LineObject, PageObject, TextObject } from '../model/model';
+import { arcBeziers, arcThroughPoints, cubicAt } from '../geometry/arc';
+import type { ArcObject, CircleObject, CoverObject, DimensionObject, LineObject, PageObject, TextObject } from '../model/model';
 import { dashPattern } from '../model/stroke';
 import { type Matrix, IDENTITY, multiply } from './contentState';
 import { type ExportPage, exportCoverSimple } from './coverSimple';
@@ -47,6 +48,8 @@ interface Prim {
   paint: 'fill' | 'stroke' | 'fillStroke';
   /** Punti nello spazio utente dopo la matrice corrente; per i cerchi anche i punti di arrivo delle curve. */
   pts: SheetPoint[];
+  /** Punti di controllo delle curve (due per curva), nello spazio utente. */
+  ctrl: SheetPoint[];
   curves: number;
   closed: boolean;
   fill: string;
@@ -101,6 +104,7 @@ async function primitives(doc: PDFDocumentProxy, pageNo = 1): Promise<{ prims: P
         const paint = args[0] as number;
         const data = Array.from(Object.values((args[1] as Record<string, number>[])[0] as Record<string, number>));
         const pts: SheetPoint[] = [];
+        const ctrl: SheetPoint[] = [];
         let curves = 0;
         let closed = false;
         const tf = (x: number, y: number): SheetPoint => ({ x: st.ctm[0] * x + st.ctm[2] * y + st.ctm[4], y: st.ctm[1] * x + st.ctm[3] * y + st.ctm[5] });
@@ -108,7 +112,7 @@ async function primitives(doc: PDFDocumentProxy, pageNo = 1): Promise<{ prims: P
           const code = data[k++] as number;
           if (code === 0 || code === 1) pts.push(tf(data[k++] as number, data[k++] as number));
           else if (code === 2) {
-            k += 4;
+            ctrl.push(tf(data[k++] as number, data[k++] as number), tf(data[k++] as number, data[k++] as number));
             pts.push(tf(data[k++] as number, data[k++] as number));
             curves++;
           } else if (code === 3) {
@@ -118,7 +122,7 @@ async function primitives(doc: PDFDocumentProxy, pageNo = 1): Promise<{ prims: P
           } else if (code === 4) closed = true;
         }
         const kind = paint === OPS.fill ? 'fill' : paint === OPS.stroke ? 'stroke' : paint === OPS.fillStroke ? 'fillStroke' : null;
-        if (kind) prims.push({ paint: kind, pts, curves, closed, fill: st.fill, stroke: st.stroke, width: st.width, dash: st.dash, ctm: st.ctm });
+        if (kind) prims.push({ paint: kind, pts, ctrl, curves, closed, fill: st.fill, stroke: st.stroke, width: st.width, dash: st.dash, ctm: st.ctm });
         break;
       }
       default:
@@ -509,5 +513,115 @@ describe('errori: PDF che PDF.js apre ma la libreria di scrittura legge male (tr
     const err = await exportCoverSimple(broken, cannot(1, 2, 3)).catch((e: unknown) => e);
     expect((err as ExportError).code).toBe('mismatch');
     expect(describeExportError(err).message).toContain('3 pagine per la vista e 2 per la scrittura');
+  });
+});
+
+describe('cerchio e arco (V2b): curve di Bezier con tratto, senza riempimento', () => {
+  const circleObj = (p1: { x: number; y: number }, p2: { x: number; y: number }, style: LineObject['stroke']['style'] = 'solid', widthPt = 1, color = RED): CircleObject => ({ id: nextId++, kind: 'circle', p1, p2, stroke: { style, color, widthPt } });
+  const arcObj = (p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }, style: LineObject['stroke']['style'] = 'solid', widthPt = 1, color = RED): ArcObject => ({ id: nextId++, kind: 'arc', p1, p2, p3, stroke: { style, color, widthPt } });
+  const onCircle = (q: SheetPoint, c: { x: number; y: number }, r: number): number => Math.abs(Math.hypot(q.x - c.x, q.y - c.y) - r) / r;
+  /** Punti campionati su tutte le curve del tracciato (spazio utente). */
+  const sampled = (q: Prim, n = 400): SheetPoint[] => {
+    const out: SheetPoint[] = [];
+    for (let i = 0; i < q.curves; i++) {
+      const cb = { p0: q.pts[i] as SheetPoint, c1: q.ctrl[2 * i] as SheetPoint, c2: q.ctrl[2 * i + 1] as SheetPoint, p1: q.pts[i + 1] as SheetPoint };
+      for (let k = 0; k <= n; k++) out.push(cubicAt(cb, k / n));
+    }
+    return out;
+  };
+
+  it('cerchio: 4 curve, tracciato chiuso e solo tratto (nessun riempimento), tipo di linea, spessore e colore; centro e raggio giusti', async () => {
+    const bytes = await fx.dirtyPdf('clean');
+    const C = { x: 400, y: 300 };
+    const r = await exportCoverSimple(bytes, [page(FULL, [circleObj(C, { x: 430, y: 340 }, 'dashed', 2, BLUE)])]);
+    const doc = await open(r.bytes);
+    const { prims } = await primitives(doc);
+    const ring = prims.find((q) => q.stroke === '#1565c0');
+    expect(ring).toBeDefined();
+    if (!ring) return;
+    expect(ring.paint).toBe('stroke');
+    expect(ring.closed).toBe(true);
+    expect(ring.curves).toBe(4);
+    expect(ring.width).toBe(2);
+    expect(ring.dash).toEqual(dashPattern('dashed', 2));
+    // nessun riempimento di quel colore e nessun disco bianco: non e' una copertura
+    expect(prims.filter((q) => q.paint !== 'stroke' && (q.fill === '#1565c0' || q.fill === '#ffffff'))).toHaveLength(0);
+    const R = 50;
+    near(ring.pts[0] as SheetPoint, { x: C.x + R, y: C.y }); // parte a destra del centro sul foglio non ruotato (in user space: stessa X, Y capovolta)
+    for (const q of sampled(ring)) expect(onCircle(q, C, R)).toBeLessThan(2.8e-4);
+    expect(Math.max(...sampled(ring).map((q) => onCircle(q, C, R)))).toBeGreaterThan(1e-4); // e' un'approssimazione, l'errore misurato non e' zero
+  });
+
+  it('arco: da p1 a p3 passando da p2, curve da non piu\' di 90 gradi, solo tratto, aperto; con tutte le rotazioni, CropBox e UserUnit 1 e 2.5', async () => {
+    for (const rotate of [0, 90, 180, 270]) {
+      for (const userUnit of [1, 2.5]) {
+        const crop: [number, number, number, number] = [50, 50, 400, 550];
+        const bytes = await fx.build({ pages: [{ raw: '', rotate, userUnit, crop }] });
+        const spec: PageSpec = { view: [50, 50, 450, 600], rotate, userUnit };
+        const C = { x: 250, y: 330 };
+        const R = 80;
+        const q = (deg: number) => ({ x: C.x + R * Math.cos((deg * Math.PI) / 180), y: C.y + R * Math.sin((deg * Math.PI) / 180) });
+        // antiorario e orario, arco corto e arco lungo (oltre 180 gradi)
+        for (const [a, m, b, curves] of [[20, 70, 150, 2], [150, 70, 20, 2], [10, 200, 300, 4], [300, 200, 10, 4]] as const) {
+          const r = await exportCoverSimple(bytes, [page(spec, [arcObj(q(a), q(m), q(b), 'dashdot', 0.5, BLUE)])]);
+          const doc = await open(r.bytes);
+          const { prims } = await primitives(doc);
+          const arc = prims.find((p) => p.stroke === '#1565c0');
+          const tag = `rotate ${rotate} UserUnit ${userUnit} ${a}->${m}->${b}`;
+          expect(arc, tag).toBeDefined();
+          if (!arc) continue;
+          expect(arc.paint, tag).toBe('stroke');
+          expect(arc.closed, tag).toBe(false);
+          expect(arc.curves, tag).toBe(curves);
+          expect(arc.width * userUnit, tag).toBeCloseTo(0.5, 9);
+          expect(arc.dash.map((d) => d * userUnit), tag).toEqual(dashPattern('dashdot', 0.5).map((d) => expect.closeTo(d, 9)));
+          near(arc.pts[0] as SheetPoint, q(a)); // inizio
+          near(arc.pts[arc.pts.length - 1] as SheetPoint, q(b)); // fine
+          const pts = sampled(arc);
+          for (const p of pts) expect(onCircle(p, C, R), tag).toBeLessThan(2.8e-4);
+          // il punto di passaggio e' sull'arco (distanza dal campione piu' vicino piccola rispetto al passo di campionamento)
+          const mm = q(m);
+          expect(Math.min(...pts.map((p) => Math.hypot(p.x - mm.x, p.y - mm.y))), tag).toBeLessThan(0.15);
+        }
+      }
+    }
+  });
+
+  it('ordine: cerchi e archi nello stesso strato di linee, testi e quote (dopo le coperture, nell\'ordine di creazione)', async () => {
+    const bytes = await fx.dirtyPdf('clean');
+    const r = await exportCoverSimple(bytes, [
+      page(FULL, [
+        circleObj({ x: 100, y: 100 }, { x: 130, y: 100 }, 'solid', 1, '#111111'),
+        cover('rect', { x: 50, y: 50 }, { x: 300, y: 300 }),
+        arcObj({ x: 200, y: 100 }, { x: 250, y: 140 }, { x: 300, y: 100 }, 'solid', 1, '#222222'),
+        segment([{ x: 10, y: 10 }, { x: 90, y: 10 }], 'solid', 1, '#333333'),
+      ]),
+    ]);
+    const doc = await open(r.bytes);
+    const { prims } = await primitives(doc);
+    const order = prims.filter((p) => ['#ffffff', '#111111', '#222222', '#333333'].includes(p.fill === '#ffffff' ? '#ffffff' : p.stroke)).map((p) => (p.fill === '#ffffff' ? 'cover' : p.stroke));
+    expect(order).toEqual(['cover', '#111111', '#222222', '#333333']);
+  });
+
+  it('le curve del PDF coincidono con le primitive del foglio, riportate con sheetToUser (tutte le rotazioni)', async () => {
+    for (const rotate of [0, 90, 180, 270]) {
+      const bytes = await fx.build({ pages: [{ raw: '', rotate, crop: [50, 50, 400, 550] }] });
+      const spec: PageSpec = { view: [50, 50, 450, 600], rotate, userUnit: 1 };
+      const g = new PageGeometry(spec);
+      const p1 = { x: 120, y: 210 };
+      const p2 = { x: 170, y: 290 };
+      const p3 = { x: 260, y: 250 };
+      const r = await exportCoverSimple(bytes, [page(spec, [arcObj(p1, p2, p3, 'solid', 1, BLUE)])]);
+      const arc = (await primitives(await open(r.bytes))).prims.find((p) => p.stroke === '#1565c0') as Prim;
+      const sheetArc = arcThroughPoints(g.userToSheet(p1), g.userToSheet(p2), g.userToSheet(p3));
+      expect(sheetArc).not.toBeNull();
+      if (!sheetArc) continue;
+      arcBeziers(sheetArc).forEach((cb, i) => {
+        near(arc.pts[i] as SheetPoint, g.sheetToUser(cb.p0));
+        near(arc.pts[i + 1] as SheetPoint, g.sheetToUser(cb.p1));
+        near(arc.ctrl[2 * i] as SheetPoint, g.sheetToUser(cb.c1));
+        near(arc.ctrl[2 * i + 1] as SheetPoint, g.sheetToUser(cb.c2));
+      });
+    }
   });
 });

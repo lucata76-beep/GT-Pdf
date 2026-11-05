@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildDimension } from '../geometry/dimension';
 import { PageGeometry } from '../geometry/page';
-import type { CoverObject, DimensionObject, LineObject, TextObject } from './model';
+import { curveOnSheet } from '../geometry/arc';
+import type { ArcObject, CircleObject, CoverObject, DimensionObject, LineObject, TextObject } from './model';
 import { buildDrawItems, objectLayoutFor } from './scene';
 
 const g = new PageGeometry({ view: [0, 0, 400, 500], rotate: 90, userUnit: 1 });
@@ -31,3 +32,29 @@ describe('buildDrawItems: la scena che disegnano a schermo e l\'esportazione "Ap
     expect(objectLayoutFor(text, g, null).texts[0]?.text).toBe('FORO');
   });
 });
+
+describe('buildDrawItems: cerchi e archi (V2b)', () => {
+  const st = { style: 'solid', color: '#2E7D32', widthPt: 1 } as const;
+  const circle: CircleObject = { id: 10, kind: 'circle', p1: { x: 100, y: 100 }, p2: { x: 140, y: 100 }, stroke: st };
+  const arc: ArcObject = { id: 11, kind: 'arc', p1: { x: 100, y: 300 }, p2: { x: 150, y: 340 }, p3: { x: 220, y: 300 }, stroke: st };
+  it('stesso strato di linee, testi e quote, nell\'ordine di creazione; le coperture restano sotto', () => {
+    const items = buildDrawItems([line, circle, cover, text, arc, dim], g, { mmPerPt: 0.5 });
+    expect(items.map((i) => `${i.kind}:${i.id}`)).toEqual(['cover:2', 'line:1', 'curve:10', 'layout:3', 'curve:11', 'layout:4']);
+  });
+  it('sono archi sul foglio mostrato (con /Rotate) con il loro tratto; il cerchio e\' un giro intero', () => {
+    const [c, a] = buildDrawItems([circle, arc], g, null);
+    expect(c?.kind).toBe('curve');
+    expect(a?.kind).toBe('curve');
+    if (c?.kind !== 'curve' || a?.kind !== 'curve') return;
+    expect(c.arc).toEqual(curveOnSheet(circle, g));
+    expect(Math.abs(c.arc.sweep)).toBeCloseTo(2 * Math.PI, 12);
+    expect(c.arc.r).toBeCloseTo(40, 9);
+    expect(a.arc).toEqual(curveOnSheet(arc, g));
+    expect(a.stroke).toBe(st);
+  });
+  it('punti che non danno una curva (non puo\' succedere): nessuna voce, nessun errore', () => {
+    const bad: ArcObject = { id: 12, kind: 'arc', p1: { x: 0, y: 0 }, p2: { x: 5, y: 5 }, p3: { x: 10, y: 10 }, stroke: st };
+    expect(buildDrawItems([bad, line], g, null).map((i) => i.id)).toEqual([1]);
+  });
+});
+
