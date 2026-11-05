@@ -225,8 +225,8 @@ async function mouseSuite(browser) {
 
   // -- interruttori
   const tg = await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })));
-  check('barra di stato: interruttori Estremo, Punto medio, ORTO, Griglia (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['ortho', 'ORTO'], ['grid', 'Griglia']]), JSON.stringify(tg));
-  check('all\'avvio Estremo e Punto medio sono attivi, ORTO e Griglia spenti', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'false', 'false']), JSON.stringify(tg));
+  check('barra di stato: interruttori Estremo, Punto medio, Centro (dalla V2b), ORTO, Griglia (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['center', 'Centro'], ['ortho', 'ORTO'], ['grid', 'Griglia']]), JSON.stringify(tg));
+  check('all\'avvio Estremo, Punto medio e Centro sono attivi, ORTO e Griglia spenti', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'true', 'false', 'false']), JSON.stringify(tg));
 
   await tool(page, 'Retta');
   // -- Estremo
@@ -283,7 +283,9 @@ async function mouseSuite(browser) {
   // -- cerchio, quota (a/b), testo: niente
   for (const [name, u] of [['centro del cerchio', C.circD.center], ['punto sul bordo del cerchio', C.circD.edge], ['testo', C.textT]]) {
     m = await hoverMark(page, await clientOfUser(page, u), 2, 2);
-    check(`${name}: nessuno snap in V2a`, m === null, JSON.stringify(m));
+    // dalla V2b il centro del cerchio (Copertura circolare) e' un candidato: Centro (decisione 67); il punto sul bordo e il testo restano senza snap
+    if (name === 'centro del cerchio') check(`${name}: dalla V2b e' il Centro`, !!m && m.kind === 'center', JSON.stringify(m));
+    else check(`${name}: nessuno snap in V2a`, m === null, JSON.stringify(m));
   }
   for (const [name, u] of [['quota: primo punto misurato', C.dimE.p1], ['quota: secondo punto misurato', C.dimE.p2]]) {
     const s = await clientOfUser(page, u);
@@ -586,6 +588,8 @@ async function touchSuite(browser) {
   const rawS = await (async () => { const r = await canvasRect(page); const kk = r.width / G.width; return { x: (sA1b.x + 6 - r.left) / kk, y: (sA1b.y + 4 - r.top) / kk }; })();
   check('interruttori spenti (tocco): nessun marcatore e la lente e\' sul punto grezzo (come 40a01be)', m === null && !!lc3 && near(lc3.x, rawS.x * cs, 0.75) && near(lc3.y, rawS.y * cs, 0.75), JSON.stringify({ m, lc3, atteso: { x: rawS.x * cs, y: rawS.y * cs } }));
   await touch(cdp, 'touchCancel', []);
+  // dalla V2b il Centro della copertura circolare e' un candidato entro i 22 px del dito (a 932 x 430) e vince sulla griglia (decisione 50): per provare la griglia lo si spegne
+  await setToggle(page, 'center', false);
   // griglia con il dito: la lente e il punto inserito sono sul nodo (passo 20 mm: a 932 x 430 il foglio e' a 0.28 px/pt e 10 mm sarebbero 7.9 px, sotto la soglia di 8)
   await page.locator('.grid-ctl .grid-preset', { hasText: /^20$/ }).click();
   await setToggle(page, 'grid', true);
@@ -902,7 +906,7 @@ async function panelSuite(browser) {
     const { ctx, page } = await desktop(browser);
     await openDoc(page, 'A4 vettoriale', true);
     const ids = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => [e.dataset.panelToggle, e.textContent.trim(), e.getAttribute('aria-pressed')]));
-    check('desktop: il pannello "Aggancio e griglia" ha Estremo, Punto medio e Griglia', JSON.stringify(ids) === JSON.stringify([['end', 'Estremo', 'true'], ['mid', 'Punto medio', 'true'], ['grid', 'Griglia', 'false']]), JSON.stringify(ids));
+    check('desktop: il pannello "Aggancio e griglia" ha Estremo, Punto medio, Centro (dalla V2b) e Griglia', JSON.stringify(ids) === JSON.stringify([['end', 'Estremo', 'true'], ['mid', 'Punto medio', 'true'], ['center', 'Centro', 'true'], ['grid', 'Griglia', 'false']]), JSON.stringify(ids));
     await page.locator('.panel-toggle[data-panel-toggle="end"]').click();
     check('un interruttore del pannello cambia anche quello della barra di stato (stesso stato)', (await pressed(page, 'end')) === false && (await page.locator('.panel-toggle[data-panel-toggle="end"]').getAttribute('aria-pressed')) === 'false');
     await page.locator('.st-toggle[data-toggle="grid"]').click();
@@ -921,7 +925,7 @@ async function panelSuite(browser) {
       await page.locator('.insp-toggle').click();
       await page.waitForTimeout(150);
       const pv = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.panelToggle, w: r.width, h: r.height, vis: e.offsetParent !== null }; }));
-      check('verticale: nel pannello Estremo, Punto medio e Griglia ci sono e sono >= 44 px', pv.length === 3 && pv.every((b) => b.vis && b.w >= 43.5 && b.h >= 43.5), JSON.stringify(pv));
+      check('verticale: nel pannello Estremo, Punto medio, Centro e Griglia ci sono e sono >= 44 px', pv.length === 4 && pv.every((b) => b.vis && b.w >= 43.5 && b.h >= 43.5), JSON.stringify(pv));
       await page.locator('.panel-toggle[data-panel-toggle="mid"]').click();
       check('verticale: spegnere Punto medio dal pannello e\' effettivo (messaggio e stato)', (await page.locator('.panel-toggle[data-panel-toggle="mid"]').getAttribute('aria-pressed')) === 'false' && /Punto medio disattivato/.test(await status(page)), await status(page));
     }
