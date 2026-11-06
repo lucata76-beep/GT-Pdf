@@ -207,6 +207,11 @@ export function drawOrder(objects: readonly PageObject[]): PageObject[] {
 interface PageData {
   objects: PageObject[];
   scale: PageScale | null;
+  /**
+   * Origine delle coordinate relative (CP6d, decisione 58): un punto nello spazio utente, o null. Come la scala e' un dato della PAGINA e non un oggetto: non si
+   * seleziona, non si trascina, non si cancella con lo strumento Cancella, non entra nell'ordine di disegno e non si esporta.
+   */
+  origin: UserPoint | null;
 }
 
 export class DocumentModel {
@@ -226,7 +231,7 @@ export class DocumentModel {
   private data(page: number): PageData {
     let d = this.pages.get(page);
     if (!d) {
-      d = { objects: [], scale: null };
+      d = { objects: [], scale: null, origin: null };
       this.pages.set(page, d);
     }
     return d;
@@ -245,6 +250,11 @@ export class DocumentModel {
   scale(page: number): PageScale | null {
     return this.pages.get(page)?.scale ?? null;
   }
+  /** L'origine della pagina (copia), o null. */
+  origin(page: number): UserPoint | null {
+    const o = this.pages.get(page)?.origin;
+    return o ? { x: o.x, y: o.y } : null;
+  }
 
   objectCount(): number {
     let n = 0;
@@ -256,9 +266,14 @@ export class DocumentModel {
     for (const d of this.pages.values()) if (d.scale) n++;
     return n;
   }
-  /** Vero se c'e' qualcosa che andrebbe perso chiudendo il documento. */
+  originCount(): number {
+    let n = 0;
+    for (const d of this.pages.values()) if (d.origin) n++;
+    return n;
+  }
+  /** Vero se c'e' qualcosa che andrebbe perso chiudendo il documento: oggetti, scale e origini (anche la sola origine chiede conferma, come la sola scala). */
   get hasContent(): boolean {
-    return this.objectCount() > 0 || this.scaleCount() > 0;
+    return this.objectCount() > 0 || this.scaleCount() > 0 || this.originCount() > 0;
   }
 
   insert(page: number, obj: PageObject, index?: number): void {
@@ -291,6 +306,10 @@ export class DocumentModel {
     this.data(page).scale = scale ? { ...scale } : null;
     this.emit();
   }
+  setOrigin(page: number, origin: UserPoint | null): void {
+    this.data(page).origin = origin ? { x: origin.x, y: origin.y } : null;
+    this.emit();
+  }
 
   clear(): void {
     this.pages.clear();
@@ -301,12 +320,13 @@ export class DocumentModel {
    * Sostituisce tutto il contenuto con quello di un progetto letto da file (gia' validato). Un solo cambiamento. Il prossimo id diventa maggiore
    * del massimo letto (e mai minore di quello in uso: gli id non si riusano in una sessione).
    */
-  restore(pages: ReadonlyArray<{ page: number; scale: PageScale | null; objects: readonly PageObject[] }>): void {
+  restore(pages: ReadonlyArray<{ page: number; scale: PageScale | null; origin?: UserPoint | null; objects: readonly PageObject[] }>): void {
     this.pages.clear();
     let maxId = 0;
     for (const p of pages) {
-      if (p.objects.length === 0 && p.scale === null) continue;
-      this.pages.set(p.page, { objects: [...p.objects], scale: p.scale ? { ...p.scale } : null });
+      const origin = p.origin ?? null;
+      if (p.objects.length === 0 && p.scale === null && origin === null) continue; // una pagina con la sola origine si tiene
+      this.pages.set(p.page, { objects: [...p.objects], scale: p.scale ? { ...p.scale } : null, origin: origin ? { x: origin.x, y: origin.y } : null });
       for (const o of p.objects) if (o.id > maxId) maxId = o.id;
     }
     this.nextId = Math.max(this.nextId, maxId + 1);
@@ -411,5 +431,23 @@ export class SetScale implements Command<DocumentModel> {
   }
   revert(m: DocumentModel): void {
     m.setScale(this.page, this.before);
+  }
+}
+
+/** Imposta, sposta o toglie l'origine di una pagina (CP6d): un solo passo di Annulla e di Ripeti per ogni cambio. */
+export class SetOrigin implements Command<DocumentModel> {
+  readonly label: string;
+  constructor(
+    readonly page: number,
+    private readonly before: UserPoint | null,
+    private readonly after: UserPoint | null,
+  ) {
+    this.label = after === null ? 'Rimuovi origine' : before === null ? 'Imposta origine' : 'Sposta origine';
+  }
+  apply(m: DocumentModel): void {
+    m.setOrigin(this.page, this.after);
+  }
+  revert(m: DocumentModel): void {
+    m.setOrigin(this.page, this.before);
   }
 }

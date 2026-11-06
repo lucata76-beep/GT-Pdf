@@ -10,8 +10,10 @@
 //  - Numeri: `JSON.stringify` scrive il numero piu' breve che si rilegge identico (round-trip esatto dei double).
 //  - Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell'interfaccia, ORTO e interruttori di snap (Estremo, Punto medio,
 //    Centro) e la griglia (accesa e passo) (CP6a: stato della sessione, non del lavoro).
-//  - VERSIONE (V2b, decisione 65 di docs/PIANO.md): la scrittura e' sempre versione 2; la lettura accetta 1 e 2. La versione 2 aggiunge i tipi 'circle' e 'arc';
-//    un file di versione 1 che li contiene e' rifiutato (in 1 non esistono). Il resto del formato e' identico: un progetto salvato prima di V2b si apre uguale.
+//  - VERSIONE (decisioni 65 e 70 di docs/PIANO.md): la scrittura e' sempre versione 3; la lettura accetta 1, 2 e 3. La versione 2 aggiunge i tipi 'circle' e 'arc';
+//    un file di versione 1 che li contiene e' rifiutato (in 1 non esistono). La versione 3 (CP6d) aggiunge il campo di pagina `origin` ({x, y} nello spazio utente
+//    oppure null, OBBLIGATORIO come `scale`): un file di versione 1 o 2 che lo contiene e' rifiutato (in 1 e 2 non esiste). Il resto del formato e' identico:
+//    un progetto salvato prima si apre uguale e, riscritto, e' di versione 3 con `origin: null`.
 import { ARC_PROBLEM_TEXT, arcProblem } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind } from '../geometry/cover';
 import { type DimType, DIM_TYPES } from '../geometry/dimension';
@@ -24,9 +26,11 @@ import { LINE_STYLES, type LineStyleId, WIDTH_MAX_PT, WIDTH_MIN_PT, parseHexColo
 
 export const PROJECT_FORMAT = 'gt-pdf-project';
 /** La versione che si scrive (sempre questa). */
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 /** Le versioni che si leggono. */
-export const READABLE_VERSIONS: readonly number[] = [1, 2];
+export const READABLE_VERSIONS: readonly number[] = [1, 2, 3];
+/** Il campo di pagina `origin` esiste dalla versione 3. */
+const ORIGIN_SINCE = 3;
 /** Il file di versione 1 non ha cerchi e archi (introdotti dalla 2). */
 const V1_KINDS = ['segment', 'polyline', 'text', 'dim', 'cover'] as const;
 const V2_KINDS = [...V1_KINDS, 'circle', 'arc'] as const;
@@ -69,6 +73,8 @@ export interface ProjectPage {
   rotate: number;
   userUnit: number;
   scale: PageScale | null;
+  /** Origine delle coordinate relative (CP6d): punto nello spazio utente, o null. */
+  origin: UserPoint | null;
   /** Nell'ordine del modello (= ordine di creazione). */
   objects: PageObject[];
 }
@@ -117,6 +123,7 @@ export function serializeProject(p: Project): string {
       rotate: g.rotate,
       userUnit: g.userUnit,
       scale: g.scale ? { mmPerPt: g.scale.mmPerPt } : null,
+      origin: g.origin ? pt(g.origin) : null,
       objects: g.objects.map(objectToJson),
     })),
   });
@@ -125,7 +132,7 @@ export function serializeProject(p: Project): string {
 // ------------------------------------------------------------------------------------------------------------------------------------
 // Lettura stretta
 // ------------------------------------------------------------------------------------------------------------------------------------
-export type ParseResult = { ok: true; project: Project; objectCount: number; scaleCount: number; maxId: number } | { ok: false; error: string };
+export type ParseResult = { ok: true; project: Project; objectCount: number; scaleCount: number; originCount: number; maxId: number } | { ok: false; error: string };
 
 class Invalid extends Error {}
 const bad = (where: string, msg: string): never => {
@@ -292,7 +299,7 @@ function parseOrThrow(text: string): ParseResult {
   const version = own(root, 'version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return bad('', 'La versione del progetto non e\' un numero intero.');
   if (!READABLE_VERSIONS.includes(version)) {
-    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge le versioni 1 e 2. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1 e 2.`);
+    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge le versioni 1, 2 e 3. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1, 2 e 3.`);
   }
   const app = str(own(root, 'app'), '', 'app');
   if (app.length > LIMITS.appChars) bad('', `app: massimo ${LIMITS.appChars} caratteri.`);
@@ -314,6 +321,7 @@ function parseOrThrow(text: string): ParseResult {
   const pages: ProjectPage[] = [];
   let objectCount = 0;
   let scaleCount = 0;
+  let originCount = 0;
   let maxId = 0;
   pagesRaw.forEach((pr, i) => {
     const where = `pagina ${i + 1}`;
@@ -336,6 +344,19 @@ function parseOrThrow(text: string): ParseResult {
       scale = { mmPerPt: num(own(sr, 'mmPerPt'), where, 'scala (mmPerPt)', LIMITS.mmPerPtMin, LIMITS.mmPerPtMax) };
       scaleCount++;
     }
+    // origin: dalla versione 3 e' obbligatorio (oggetto o null, come scale); in 1 e 2 non esiste e un file che lo contiene e' rifiutato
+    let origin: UserPoint | null = null;
+    const hasOrigin = Object.prototype.hasOwnProperty.call(g, 'origin');
+    if (version < ORIGIN_SINCE) {
+      if (hasOrigin) bad(where, `un progetto di versione ${version} non ha l'origine: e' della versione ${ORIGIN_SINCE}.`);
+    } else {
+      const og = own(g, 'origin');
+      if (og === undefined) bad(where, 'manca origin (punto o null).');
+      if (og !== null) {
+        origin = point(og, where, 'origin');
+        originCount++;
+      }
+    }
     const list = arr(own(g, 'objects'), where, 'objects');
     if (list.length > LIMITS.objectsPerPage) bad(where, `troppi oggetti (${list.length}, massimo ${LIMITS.objectsPerPage} per pagina).`);
     objectCount += list.length;
@@ -345,20 +366,20 @@ function parseOrThrow(text: string): ParseResult {
       if (ob.id > maxId) maxId = ob.id;
       return ob;
     });
-    pages.push({ number, view, rotate: rotate as number, userUnit, scale, objects });
+    pages.push({ number, view, rotate: rotate as number, userUnit, scale, origin, objects });
   });
-  return { ok: true, project: { app, pdf: { name, size, sha256 }, pages }, objectCount, scaleCount, maxId };
+  return { ok: true, project: { app, pdf: { name, size, sha256 }, pages }, objectCount, scaleCount, originCount, maxId };
 }
 
 /**
  * Rilettura del file appena generato (stesso codice della riapertura): deve essere valido e, riscritto, dare ESATTAMENTE lo stesso testo
  * (la lettura non perde, non aggiunge e non cambia nulla). Restituisce null se tutto torna, altrimenti il motivo.
  */
-export function verifyProjectText(text: string, expected: { pages: number; objects: number; scales: number }): string | null {
+export function verifyProjectText(text: string, expected: { pages: number; objects: number; scales: number; origins: number }): string | null {
   const r = parseProject(text);
   if (!r.ok) return r.error;
-  if (r.project.pages.length !== expected.pages || r.objectCount !== expected.objects || r.scaleCount !== expected.scales) {
-    return `Riletto ${r.project.pages.length} pagine, ${r.objectCount} oggetti e ${r.scaleCount} scale invece di ${expected.pages}, ${expected.objects} e ${expected.scales}.`;
+  if (r.project.pages.length !== expected.pages || r.objectCount !== expected.objects || r.scaleCount !== expected.scales || r.originCount !== expected.origins) {
+    return `Riletto ${r.project.pages.length} pagine, ${r.objectCount} oggetti, ${r.scaleCount} scale e ${r.originCount} origini invece di ${expected.pages}, ${expected.objects}, ${expected.scales} e ${expected.origins}.`;
   }
   if (serializeProject(r.project) !== text) return 'Il file riletto e riscritto non e\' identico a quello generato.';
   return null;

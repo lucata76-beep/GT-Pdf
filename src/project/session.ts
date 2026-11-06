@@ -14,6 +14,7 @@ export function snapshotProject(model: DocumentModel, pages: readonly PageInfo[]
       rotate: p.rotate,
       userUnit: p.userUnit,
       scale: model.scale(i + 1) ? { mmPerPt: (model.scale(i + 1) as { mmPerPt: number }).mmPerPt } : null,
+      origin: model.origin(i + 1),
       objects: [...model.objects(i + 1)],
     })),
   };
@@ -21,7 +22,7 @@ export function snapshotProject(model: DocumentModel, pages: readonly PageInfo[]
 
 /** Applica un progetto gia' validato al modello (sostituisce tutto). */
 export function applyProject(model: DocumentModel, project: Project): void {
-  model.restore(project.pages.map((p) => ({ page: p.number, scale: p.scale, objects: p.objects })));
+  model.restore(project.pages.map((p) => ({ page: p.number, scale: p.scale, origin: p.origin, objects: p.objects })));
 }
 
 /** Riepilogo per i dialoghi. */
@@ -30,15 +31,18 @@ export interface ProjectSummary {
   pagesWithObjects: number;
   objects: number;
   scales: number;
+  origins: number;
 }
 export function summarize(p: Project): ProjectSummary {
   let pagesWithObjects = 0;
   let objects = 0;
   let scales = 0;
+  let origins = 0;
   for (const g of p.pages) {
     if (g.objects.length > 0) pagesWithObjects++;
     objects += g.objects.length;
     if (g.scale) scales++;
+    if (g.origin) origins++;
   }
-  return { pages: p.pages.length, pagesWithObjects, objects, scales };
+  return { pages: p.pages.length, pagesWithObjects, objects, scales, origins };
 }

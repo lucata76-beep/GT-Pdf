@@ -28,6 +28,7 @@ import {
   type ObjectProps,
   type PageObject,
   RemoveObject,
+  SetOrigin,
   SetProps,
   SetScale,
   type TextObject,
@@ -1313,9 +1314,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const parts: string[] = [];
     const n = model.objectCount();
     const s = model.scaleCount();
+    const o = model.originCount();
     if (n > 0) parts.push(n === 1 ? '1 oggetto disegnato' : `${n} oggetti disegnati`);
     if (s > 0) parts.push(s === 1 ? '1 scala calibrata' : `${s} scale calibrate`);
-    return parts.join(' e ');
+    if (o > 0) parts.push(o === 1 ? '1 origine impostata' : `${o} origini impostate`);
+    return parts.length <= 2 ? parts.join(' e ') : `${parts.slice(0, -1).join(', ')} e ${parts.at(-1)}`; // "a e b" con due voci, "a, b e c" con tre
   };
 
   /**
@@ -1370,6 +1373,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       pagesWithObjects,
       objectCount: model.objectCount(),
       scaleCount: model.scaleCount(),
+      originCount: model.originCount(),
       hashAvailable: hashAvailable(),
       run: () => generateProject(doc, outName),
       onDelivered: (version) => saved.markSaved(version),
@@ -1386,9 +1390,9 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const project = snapshotProject(model, doc.pages, __BUILD_ID__, { name: doc.name, size: doc.bytes.length, sha256 });
     const sum = summarize(project);
     const text = serializeProject(project);
-    const problem = verifyProjectText(text, { pages: sum.pages, objects: sum.objects, scales: sum.scales });
+    const problem = verifyProjectText(text, { pages: sum.pages, objects: sum.objects, scales: sum.scales, origins: sum.origins });
     if (problem !== null) throw new Error(`Il file generato non supera la rilettura: ${problem}`);
-    return { file: makeProjectFile(text, outName), version, pages: sum.pages, pagesWithObjects: sum.pagesWithObjects, objects: sum.objects, scales: sum.scales, hashed: sha256 !== null, hashMs, ms: performance.now() - t0 };
+    return { file: makeProjectFile(text, outName), version, pages: sum.pages, pagesWithObjects: sum.pagesWithObjects, objects: sum.objects, scales: sum.scales, origins: sum.origins, hashed: sha256 !== null, hashMs, ms: performance.now() - t0 };
   }
 
   // Gli input file del progetto si creano alla prima richiesta (non esistono a riposo: l'input dei PDF resta l'unico) e vivono nel DOM come quello dei PDF.
@@ -1714,6 +1718,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         }
       },
       setScale: (page: number, mmPerPt: number) => history.exec(new SetScale(page, model.scale(page), { mmPerPt })),
+      /** Imposta (o toglie, con null) l'origine di una pagina con lo stesso comando dell'interfaccia; il punto e' nello spazio utente PDF. */
+      setOrigin: (page: number, p: UserPoint | null) => history.exec(new SetOrigin(page, model.origin(page), p)),
       /**
        * Prestazioni dello snap (scripts/perf-cp6a.cjs): chiama `findSnap`, la stessa funzione dell'app, su oggetti sintetici di una pagina. Per ogni lotto di
        * `batch` chiamate misura il tempo del lotto; misura anche `singles` chiamate una per una (performance.now() ha risoluzione limitata).
@@ -1784,6 +1790,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           return {
             scale: sc ? { mmPerPt: sc.mmPerPt } : null,
             scaleLabel: sc ? scaleLabel(sc) : null,
+            origin: model.origin(i + 1),
             objects: model.objects(i + 1).map((o) => JSON.parse(JSON.stringify(o)) as unknown),
             texts: model.objects(i + 1).flatMap((o) => (o.kind === 'text' || o.kind === 'dim' ? [objectLayoutFor(o, g, sc).texts.map((t) => t.text)] : [])),
           };

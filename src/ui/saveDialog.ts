@@ -15,6 +15,8 @@ export interface SaveRunResult {
   pagesWithObjects: number;
   objects: number;
   scales: number;
+  /** Origini scritte (una per pagina al massimo, CP6d). */
+  origins: number;
   /** SHA-256 scritto nel file; false = il browser non lo calcola e il file ha `sha256: null`. */
   hashed: boolean;
   /** Tempo per calcolare l'impronta (ms), se calcolata. */
@@ -31,6 +33,8 @@ export interface SaveDialogInput {
   pagesWithObjects: number;
   objectCount: number;
   scaleCount: number;
+  /** Pagine con un'origine (CP6d). */
+  originCount: number;
   /** Il browser ha `crypto.subtle.digest`: se no lo si dice subito. */
   hashAvailable: boolean;
   /** Genera il file. Puo' lanciare: il dialogo mostra il messaggio e il lavoro resta intatto. */
@@ -84,10 +88,11 @@ export function showSaveDialog(input: SaveDialogInput): Promise<void> {
           kv('Pagine con oggetti', `${input.pagesWithObjects} di ${input.pageCount}`),
           kv('Oggetti', String(input.objectCount)),
           kv('Scale', String(input.scaleCount)),
+          ...(input.originCount > 0 ? [kv('Origini', String(input.originCount))] : []), // la riga compare solo se ce ne sono (CP6d)
         ),
         h('p', { class: 'hint' }, 'Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell’interfaccia e ORTO.'),
         input.hashAvailable ? null : h('p', { class: 'exp-warn exp-hash-warn', role: 'note' }, 'Questo browser non calcola l’impronta SHA-256 del PDF: il progetto si salva senza (sha256 = null) e alla riapertura non si potrà verificare che sia lo stesso PDF.'),
-        input.objectCount === 0 && input.scaleCount === 0 ? h('p', { class: 'hint' }, 'Non hai ancora disegnato nulla né calibrato nessuna scala: il progetto sarà vuoto.') : null,
+        input.objectCount === 0 && input.scaleCount === 0 && input.originCount === 0 ? h('p', { class: 'hint' }, 'Non hai ancora disegnato nulla né calibrato nessuna scala: il progetto sarà vuoto.') : null,
         h('div', { class: 'dialog-actions' }, h('button', { class: 'btn', type: 'button', onclick: close }, 'Annulla'), h('button', { class: 'btn primary', type: 'button', onclick: () => void generate() }, 'Salva')),
       );
       (box.querySelector('.btn.primary') as HTMLElement | null)?.focus();
@@ -154,6 +159,7 @@ export function showSaveDialog(input: SaveDialogInput): Promise<void> {
           kv('Pagine', `${r.pages} (${plural(r.pagesWithObjects, 'con oggetti', 'con oggetti')})`),
           kv('Oggetti', String(r.objects)),
           kv('Scale', String(r.scales)),
+          ...(r.origins > 0 ? [kv('Origini', String(r.origins))] : []),
           kv('Impronta SHA-256', r.hashed ? `calcolata${r.hashMs !== null ? ` in ${fmt(r.hashMs, 0)} ms` : ''}` : 'non disponibile (sha256 = null)'),
           kv('Controllo', 'riletto e validato con lo stesso codice della riapertura'),
           kv('Tempo', `${fmt(r.ms / 1000, 2)} s`),

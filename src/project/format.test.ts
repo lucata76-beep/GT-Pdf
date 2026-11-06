@@ -22,9 +22,9 @@ const sampleProject = (): Project => ({
   app: 'abc1234',
   pdf: { name: 'Disegno 1.pdf', size: 123456, sha256: 'ab'.repeat(32) },
   pages: [
-    { number: 1, view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1, scale: { mmPerPt: 0.5 }, objects: sampleObjects() },
-    { number: 2, view: [20, 30.5, 260, 360.25], rotate: 90, userUnit: 2.5, scale: null, objects: [] },
-    { number: 3, view: [0, 0, 841.89, 1190.551], rotate: 270, userUnit: 1, scale: { mmPerPt: 0.35277777777777775 }, objects: [] },
+    { number: 1, view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1, scale: { mmPerPt: 0.5 }, origin: { x: 123.456, y: 234.5 }, objects: sampleObjects() },
+    { number: 2, view: [20, 30.5, 260, 360.25], rotate: 90, userUnit: 2.5, scale: null, origin: null, objects: [] },
+    { number: 3, view: [0, 0, 841.89, 1190.551], rotate: 270, userUnit: 1, scale: { mmPerPt: 0.35277777777777775 }, origin: { x: -10, y: 5.25 }, objects: [] },
   ],
 });
 
@@ -106,13 +106,13 @@ describe('formato del progetto: scrittura e lettura', () => {
     for (const w of ['history', 'undo', 'redo', 'select', 'tool', 'zoom', 'uisize', 'ortho', 'orto']) expect(text, w).not.toContain(w);
   });
 
-  it('non si salvano gli interruttori di snap (Estremo, Punto medio, Centro) e la griglia (visibilita\' e passo): stato della sessione; le chiavi del file sono le stesse di sempre e la versione scritta e\' la 2', () => {
+  it('non si salvano gli interruttori di snap (Estremo, Punto medio, Centro) e la griglia (visibilita\' e passo): stato della sessione; le chiavi del file sono quelle di sempre piu\' `origin` e la versione scritta e\' la 3', () => {
     const text = serializeProject(sampleProject());
     for (const w of ['snap', 'estremo', 'punto medio', 'centro', 'center', 'griglia', 'grid', 'passo', 'step']) expect(text.toLowerCase(), w).not.toContain(w);
     const j = asJson();
     expect(Object.keys(j).sort()).toEqual(['app', 'format', 'pages', 'pdf', 'version']);
-    expect(Object.keys(j.pages[0]).sort()).toEqual(['number', 'objects', 'rotate', 'scale', 'userUnit', 'view']);
-    expect(j.version).toBe(2);
+    expect(Object.keys(j.pages[0]).sort()).toEqual(['number', 'objects', 'origin', 'rotate', 'scale', 'userUnit', 'view']);
+    expect(j.version).toBe(3);
   });
 
   it('i campi sconosciuti si ignorano senza copiarli; __proto__ e constructor non arrivano mai sugli oggetti ne\' inquinano i prototipi', () => {
@@ -171,7 +171,7 @@ const MUTATIONS: Mut[] = [
   // radice
   ['format diverso', (j) => (j.format = 'altro'), /non e' un progetto di GT-Pdf/],
   ['format mancante', (j) => delete j.format, /non e' un progetto di GT-Pdf/],
-  ['versione futura', (j) => (j.version = 3), /versione piu' recente \(3\).*legge le versioni 1 e 2.*Aggiorna l'app/],
+  ['versione futura', (j) => (j.version = 4), /versione piu' recente \(4\).*legge le versioni 1, 2 e 3.*Aggiorna l'app/],
   ['versione 0', (j) => (j.version = 0), /Versione del progetto 0 non supportata/],
   ['versione non intera', (j) => (j.version = 1.5), /non e' un numero intero/],
   ['versione testo', (j) => (j.version = '1'), /non e' un numero intero/],
@@ -344,19 +344,20 @@ describe('formato del progetto: una mutazione per ogni regola (file non valido, 
     expect(!r.ok && /troppi oggetti nel progetto/.test(r.error)).toBe(true);
   });
 
-  it('versione futura: messaggio chiaro (legge le versioni 1 e 2); le versioni 1 e 2 si leggono', () => {
+  it('versione futura: messaggio chiaro (legge le versioni 1, 2 e 3); le versioni 1, 2 e 3 si leggono', () => {
     const j = asJson();
     j.version = 7;
     const r = parseProject(JSON.stringify(j));
-    expect(!r.ok && r.error).toBe("Il progetto e' di una versione piu' recente (7): questa app legge le versioni 1 e 2. Aggiorna l'app.");
+    expect(!r.ok && r.error).toBe("Il progetto e' di una versione piu' recente (7): questa app legge le versioni 1, 2 e 3. Aggiorna l'app.");
     j.version = 0;
-    expect(parseProject(JSON.stringify(j))).toMatchObject({ ok: false, error: 'Versione del progetto 0 non supportata: questa app legge le versioni 1 e 2.' });
-    expect(READABLE_VERSIONS).toEqual([1, 2]);
-    expect(PROJECT_VERSION).toBe(2);
-    for (const v of [1, 2]) {
+    expect(parseProject(JSON.stringify(j))).toMatchObject({ ok: false, error: 'Versione del progetto 0 non supportata: questa app legge le versioni 1, 2 e 3.' });
+    expect(READABLE_VERSIONS).toEqual([1, 2, 3]);
+    expect(PROJECT_VERSION).toBe(3);
+    for (const v of [1, 2, 3]) {
       const k = asJson();
       k.version = v;
-      k.pages[0].objects = k.pages[0].objects.filter((o: Json) => o.kind !== 'circle' && o.kind !== 'arc');
+      if (v < 3) for (const pg of k.pages) delete pg.origin; // `origin` esiste dalla versione 3
+      if (v < 2) k.pages[0].objects = k.pages[0].objects.filter((o: Json) => o.kind !== 'circle' && o.kind !== 'arc');
       expect(parseProject(JSON.stringify(k)).ok, `versione ${v}`).toBe(true);
     }
   });
@@ -365,35 +366,45 @@ describe('formato del progetto: una mutazione per ogni regola (file non valido, 
 describe('rilettura immediata (verifyProjectText)', () => {
   it('torna per un progetto valido', () => {
     const p = sampleProject();
-    expect(verifyProjectText(serializeProject(p), { pages: 3, objects: sampleObjects().length, scales: 2 })).toBeNull();
+    expect(verifyProjectText(serializeProject(p), { pages: 3, objects: sampleObjects().length, scales: 2, origins: 2 })).toBeNull();
   });
   it('un numero non finito diventa null nel JSON: la rilettura lo intercetta', () => {
     const p = sampleProject();
     (p.pages[0]!.objects[0] as { p1: { x: number } }).p1.x = Number.NaN;
     const text = serializeProject(p);
     expect(text).toContain('null');
-    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2 })).toMatch(/p1\.x deve essere un numero/);
+    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2, origins: 2 })).toMatch(/p1\.x deve essere un numero/);
   });
   it('i conteggi attesi diversi da quelli riletti sono un errore', () => {
     const text = serializeProject(sampleProject());
-    expect(verifyProjectText(text, { pages: 3, objects: 1, scales: 2 })).toMatch(/Riletto 3 pagine/);
+    expect(verifyProjectText(text, { pages: 3, objects: 1, scales: 2, origins: 2 })).toMatch(/Riletto 3 pagine/);
   });
   it('un testo valido ma riscritto in modo diverso (non generato da serializeProject) non torna', () => {
     const text = JSON.stringify(asJson(), null, 2);
-    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2 })).toMatch(/non e' identico/);
+    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2, origins: 2 })).toMatch(/non e' identico/);
   });
 });
 
-describe('versioni 1 e 2 (V2b, decisione 65): lettura, riscrittura e rifiuti', () => {
+describe('versioni 1, 2 e 3 (decisioni 65 e 70): lettura, riscrittura e rifiuti', () => {
   // il progetto non ha i tipi di Node (nessun @types/node): il modulo si carica con un nome in variabile (come in testPdfs.test.ts)
   let v1Text = '';
+  let v2Text = '';
   beforeAll(async () => {
     const fsName = 'node:fs';
     const fs = (await import(/* @vite-ignore */ fsName)) as { readFileSync(url: URL, enc: string): string };
     v1Text = fs.readFileSync(new URL('./fixtures/project-v1-47a660e.json', import.meta.url), 'utf8');
+    v2Text = fs.readFileSync(new URL('./fixtures/project-v2-8575e69.json', import.meta.url), 'utf8');
   });
+  /** Un file di versione `v` (1 o 2) ricavato dal v3 dei test: senza `origin` (non esiste prima della 3) e, in 1, senza cerchi e archi. */
+  const downTo = (v: 1 | 2): Json => {
+    const j = asJson();
+    j.version = v;
+    for (const pg of j.pages) delete pg.origin;
+    if (v === 1) j.pages[0].objects = j.pages[0].objects.filter((o: Json) => o.kind !== 'circle' && o.kind !== 'arc');
+    return j;
+  };
 
-  it('un progetto salvato con 47a660e (versione 1, fixture scritto dal codice di quel commit) si apre, con gli stessi oggetti', () => {
+  it('un progetto salvato con 47a660e (versione 1, fixture scritto dal codice di quel commit) si apre, con gli stessi oggetti, senza origine', () => {
     const j = JSON.parse(v1Text) as Json;
     expect(j.version).toBe(1);
     expect(j.app).toBe('47a660e');
@@ -402,39 +413,94 @@ describe('versioni 1 e 2 (V2b, decisione 65): lettura, riscrittura e rifiuti', (
     if (!r.ok) return;
     expect(r.objectCount).toBe(11); // 3 coperture, retta, linea, testo, 5 quote
     expect(r.scaleCount).toBe(1);
+    expect(r.originCount).toBe(0);
     expect(r.project.pages).toHaveLength(2);
+    expect(r.project.pages.map((g) => g.origin)).toEqual([null, null]);
     // gli oggetti letti sono quelli del file, campo per campo (stessa forma di objectToJson)
     r.project.pages.forEach((pg, i) => expect(pg.objects.map(objectToJson)).toEqual(j.pages[i].objects));
   });
 
-  it('riscritto, diventa versione 2 con gli stessi oggetti, pagine e scale; rilegge identico', () => {
-    const r = parseProject(v1Text);
-    if (!r.ok) throw new Error(r.error);
-    const out = serializeProject(r.project);
-    const a = JSON.parse(v1Text) as Json;
-    const b = JSON.parse(out) as Json;
-    expect(b.version).toBe(2);
-    expect({ ...b, version: 1 }).toEqual(a); // l'unica differenza e' il numero di versione
-    const again = parseProject(out);
-    expect(again.ok && again.project).toEqual(r.project);
-    expect(verifyProjectText(out, { pages: 2, objects: 11, scales: 1 })).toBeNull();
+  it('un progetto salvato con 8575e69 (versione 2, fixture scritto dal codice di quel commit, con un cerchio e un arco) si apre, con gli stessi oggetti, senza origine', () => {
+    const j = JSON.parse(v2Text) as Json;
+    expect(j.version).toBe(2);
+    expect(j.app).toBe('8575e69');
+    expect(Object.keys(j.pages[0]).sort()).toEqual(['number', 'objects', 'rotate', 'scale', 'userUnit', 'view']); // nessun `origin`
+    const r = parseProject(v2Text);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.objectCount).toBe(13); // i 11 della versione 1, un cerchio e un arco
+    expect(r.scaleCount).toBe(1);
+    expect(r.originCount).toBe(0);
+    const kinds = r.project.pages[0]!.objects.map((o) => o.kind);
+    expect(kinds).toContain('circle');
+    expect(kinds).toContain('arc');
+    expect(r.project.pages.map((g) => g.origin)).toEqual([null, null]);
+    r.project.pages.forEach((pg, i) => expect(pg.objects.map(objectToJson)).toEqual(j.pages[i].objects));
   });
 
-  it('round-trip di tutti i tipi (retta, linea, testo, quota, tre coperture, cerchio, arco) in versione 2', () => {
+  it('versione 1 e versione 2 riscritte diventano versione 3 con `origin: null` in ogni pagina e per il resto lo stesso file; rileggono identiche', () => {
+    for (const [name, text, version, objects] of [['1', v1Text, 1, 11], ['2', v2Text, 2, 13]] as const) {
+      const r = parseProject(text);
+      if (!r.ok) throw new Error(r.error);
+      const out = serializeProject(r.project);
+      const a = JSON.parse(text) as Json;
+      const b = JSON.parse(out) as Json;
+      expect(b.version, name).toBe(3);
+      for (const pg of b.pages) {
+        expect(pg.origin, name).toBeNull();
+        delete pg.origin;
+      }
+      expect({ ...b, version }, name).toEqual(a); // le uniche differenze sono il numero di versione e il campo `origin`
+      const again = parseProject(out);
+      expect(again.ok && again.project, name).toEqual(r.project);
+      expect(verifyProjectText(out, { pages: 2, objects, scales: 1, origins: 0 }), name).toBeNull();
+    }
+  });
+
+  it('round-trip di tutti i tipi (retta, linea, testo, quota, tre coperture, cerchio, arco) e delle origini in versione 3', () => {
     const p = sampleProject();
     const text = serializeProject(p);
-    expect(JSON.parse(text).version).toBe(2);
+    expect(JSON.parse(text).version).toBe(3);
     const r = parseProject(text);
     expect(r.ok && r.project).toEqual(p);
+    expect(r.ok && r.originCount).toBe(2);
     const kinds = p.pages[0]!.objects.map((o) => o.kind);
     for (const k of ['segment', 'polyline', 'text', 'dim', 'cover', 'circle', 'arc']) expect(kinds, k).toContain(k);
-    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2 })).toBeNull();
+    expect(verifyProjectText(text, { pages: 3, objects: sampleObjects().length, scales: 2, origins: 2 })).toBeNull();
+    // l'origine si rilegge con la stessa precisione (round-trip esatto dei double)
+    const q = sampleProject();
+    q.pages[0]!.origin = { x: 0.1 + 0.2, y: -1 / 3 };
+    const r2 = parseProject(serializeProject(q));
+    expect(r2.ok && r2.project.pages[0]!.origin).toEqual({ x: 0.1 + 0.2, y: -1 / 3 });
+  });
+
+  it('la versione 3 richiede `origin` in ogni pagina (oggetto o null, come `scale`)', () => {
+    const j = asJson();
+    delete j.pages[1].origin;
+    const r = parseProject(JSON.stringify(j));
+    expect(!r.ok && r.error).toBe('pagina 2: manca origin (punto o null).');
+    const k = asJson();
+    k.pages[0].origin = null;
+    expect(parseProject(JSON.stringify(k)).ok).toBe(true);
+  });
+
+  it('un file di versione 1 o 2 che contiene `origin` e\' rifiutato (prima della 3 non esiste), con la posizione', () => {
+    for (const v of [1, 2] as const) {
+      for (const origin of [null, { x: 1, y: 2 }]) {
+        const j = downTo(v);
+        j.pages[1].origin = origin;
+        const r = parseProject(JSON.stringify(j));
+        expect(r.ok, `v${v} ${JSON.stringify(origin)}`).toBe(false);
+        expect(!r.ok && r.error).toBe(`pagina 2: un progetto di versione ${v} non ha l'origine: e' della versione 3.`);
+      }
+    }
   });
 
   it('un file di versione 1 che contiene un cerchio o un arco e\' rifiutato (in 1 non esistono), con la posizione', () => {
     for (const kind of ['circle', 'arc'] as const) {
       const j = asJson();
       j.version = 1;
+      for (const pg of j.pages) delete pg.origin;
       j.pages[0].objects = j.pages[0].objects.filter((o: Json) => (o.kind !== 'circle' && o.kind !== 'arc') || o.kind === kind); // solo il tipo provato: il primo fuori posto e' quello segnalato
       const bad = j.pages[0].objects.findIndex((o: Json) => o.kind === kind);
       const r = parseProject(JSON.stringify(j));
@@ -443,9 +509,46 @@ describe('versioni 1 e 2 (V2b, decisione 65): lettura, riscrittura e rifiuti', (
     }
   });
 
+  it('`origin` non valida e\' rifiutata con messaggi in italiano nella forma "pagina N: ..." (tipi, mancanti, fuori limite)', () => {
+    const cases: [string, unknown, RegExp][] = [
+      ['testo', 'qui', /^pagina 1: origin deve essere un oggetto\.$/],
+      ['numero', 5, /^pagina 1: origin deve essere un oggetto\.$/],
+      ['elenco', [1, 2], /^pagina 1: origin deve essere un oggetto\.$/],
+      ['x mancante', { y: 1 }, /^pagina 1: origin\.x deve essere un numero\.$/],
+      ['y mancante', { x: 1 }, /^pagina 1: origin\.y deve essere un numero\.$/],
+      ['x testo', { x: '1', y: 1 }, /^pagina 1: origin\.x deve essere un numero\.$/],
+      ['y nullo', { x: 1, y: null }, /^pagina 1: origin\.y deve essere un numero\.$/],
+      ['x fuori limite', { x: LIMITS.coordAbs + 1, y: 0 }, /^pagina 1: origin\.x \(1000001\) fuori dall'intervallo -1000000–1000000 pt\.$/],
+      ['y fuori limite', { x: 0, y: -LIMITS.coordAbs - 1 }, /^pagina 1: origin\.y \(-1000001\) fuori dall'intervallo -1000000–1000000 pt\.$/],
+    ];
+    for (const [name, origin, re] of cases) {
+      const j = asJson();
+      j.pages[0].origin = origin;
+      const r = parseProject(JSON.stringify(j));
+      expect(r.ok, name).toBe(false);
+      expect(!r.ok && r.error, name).toMatch(re);
+    }
+    // i limiti stessi sono ammessi; un numero non finito diventa null nel JSON e non e' un numero
+    const edge = asJson();
+    edge.pages[0].origin = { x: LIMITS.coordAbs, y: -LIMITS.coordAbs };
+    expect(parseProject(JSON.stringify(edge)).ok).toBe(true);
+    const nan = sampleProject();
+    nan.pages[0]!.origin = { x: Number.NaN, y: 0 };
+    expect(verifyProjectText(serializeProject(nan), { pages: 3, objects: sampleObjects().length, scales: 2, origins: 2 })).toMatch(/origin\.x deve essere un numero/);
+  });
+
+  it('i campi sconosciuti dentro `origin` si ignorano senza copiarli', () => {
+    const j = asJson();
+    j.pages[0].origin.extra = 1;
+    j.pages[0].origin['__proto__'] = { polluted: true };
+    const r = parseProject(JSON.stringify(j));
+    expect(r.ok && r.project.pages[0]!.origin).toEqual({ x: 123.456, y: 234.5 });
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
   it('cerchio e arco rilettura: le coordinate non cambiano (round-trip esatto dei double)', () => {
     const o = { id: 1, kind: 'arc', p1: { x: 0.1, y: 0.2 }, p2: { x: 99.9, y: 40.30000000000001 }, p3: { x: 200.123456789, y: 0.2 }, stroke: { style: 'solid', color: '#D32F2F', widthPt: 1 } } as const;
-    const p: Project = { app: 'x', pdf: { name: 'a.pdf', size: 1, sha256: null }, pages: [{ number: 1, view: [0, 0, 300, 300], rotate: 0, userUnit: 1, scale: null, objects: [o] }] };
+    const p: Project = { app: 'x', pdf: { name: 'a.pdf', size: 1, sha256: null }, pages: [{ number: 1, view: [0, 0, 300, 300], rotate: 0, userUnit: 1, scale: null, origin: null, objects: [o] }] };
     const r = parseProject(serializeProject(p));
     expect(r.ok && r.project.pages[0]?.objects[0]).toEqual(o);
   });

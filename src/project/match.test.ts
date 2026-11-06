@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { VIEW_TOLERANCE_PT, comparePageGeometry, decideOutcome } from './match';
 import type { ProjectPage } from './format';
 
-const page = (n: number, over: Partial<ProjectPage> = {}): ProjectPage => ({ number: n, view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1, scale: null, objects: [], ...over });
+const page = (n: number, over: Partial<ProjectPage> = {}): ProjectPage => ({ number: n, view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1, scale: null, origin: null, objects: [], ...over });
 const geo = (over: Partial<{ view: [number, number, number, number]; rotate: number; userUnit: number }> = {}) => ({ view: [0, 0, 595.276, 841.89] as [number, number, number, number], rotate: 0, userUnit: 1, ...over });
 
 describe('comparePageGeometry', () => {

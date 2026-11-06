@@ -23,11 +23,11 @@ describe('modello <-> progetto', () => {
     m.setScale(3, { mmPerPt: 2 });
     const proj = snapshotProject(m, pages, 'abc1234', pdf);
     const text = serializeProject(proj);
-    expect(verifyProjectText(text, { pages: 3, objects: 3, scales: 2 })).toBeNull();
+    expect(verifyProjectText(text, { pages: 3, objects: 3, scales: 2, origins: 0 })).toBeNull();
     const r = parseProject(text);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(summarize(r.project)).toEqual({ pages: 3, pagesWithObjects: 2, objects: 3, scales: 2 });
+    expect(summarize(r.project)).toEqual({ pages: 3, pagesWithObjects: 2, objects: 3, scales: 2, origins: 0 });
     const n = new DocumentModel();
     applyProject(n, r.project);
     expect(n.objects(1)).toEqual(m.objects(1));
@@ -41,10 +41,37 @@ describe('modello <-> progetto', () => {
     expect(n.newId()).toBe(43);
   });
 
+  it('le origini si salvano con la pagina, si riapplicano uguali e si contano; una pagina con la sola origine non si perde', () => {
+    const m = new DocumentModel();
+    m.setOrigin(1, { x: 123.456, y: 0.1 + 0.2 });
+    m.setOrigin(3, { x: -10, y: 5.25 });
+    m.insert(2, seg(5, 0));
+    const proj = snapshotProject(m, pages, 'abc1234', pdf);
+    expect(proj.pages.map((p) => p.origin)).toEqual([{ x: 123.456, y: 0.1 + 0.2 }, null, { x: -10, y: 5.25 }]);
+    const text = serializeProject(proj);
+    expect(verifyProjectText(text, { pages: 3, objects: 1, scales: 0, origins: 2 })).toBeNull();
+    expect(verifyProjectText(text, { pages: 3, objects: 1, scales: 0, origins: 1 })).toMatch(/2 origini invece di .* 1\./);
+    const r = parseProject(text);
+    if (!r.ok) throw new Error(r.error);
+    expect(summarize(r.project)).toEqual({ pages: 3, pagesWithObjects: 1, objects: 1, scales: 0, origins: 2 });
+    const n = new DocumentModel();
+    applyProject(n, r.project);
+    expect(n.origin(1)).toEqual({ x: 123.456, y: 0.1 + 0.2 });
+    expect(n.origin(2)).toBeNull();
+    expect(n.origin(3)).toEqual({ x: -10, y: 5.25 });
+    expect(n.hasContent).toBe(true);
+    // un modello senza altro che le origini: il file ha comunque le origini
+    const only = new DocumentModel();
+    only.setOrigin(2, { x: 1, y: 2 });
+    const t2 = serializeProject(snapshotProject(only, pages, 'a', pdf));
+    const r2 = parseProject(t2);
+    expect(r2.ok && r2.originCount).toBe(1);
+  });
+
   it('il prossimo id non scende mai sotto quello gia\' in uso nella sessione', () => {
     const n = new DocumentModel();
     for (let i = 0; i < 99; i++) n.newId(); // 99 id gia' dati
-    applyProject(n, { app: 'x', pdf, pages: [{ number: 1, view: [0, 0, 1, 1], rotate: 0, userUnit: 1, scale: null, objects: [seg(3, 0)] }] });
+    applyProject(n, { app: 'x', pdf, pages: [{ number: 1, view: [0, 0, 1, 1], rotate: 0, userUnit: 1, scale: null, origin: null, objects: [seg(3, 0)] }] });
     expect(n.newId()).toBe(100);
   });
 
@@ -58,7 +85,7 @@ describe('modello <-> progetto', () => {
     const m = new DocumentModel();
     m.insert(1, seg(1, 0));
     const before = m.version;
-    applyProject(m, { app: 'x', pdf, pages: [{ number: 2, view: [0, 0, 1, 1], rotate: 0, userUnit: 1, scale: { mmPerPt: 1 }, objects: [] }] });
+    applyProject(m, { app: 'x', pdf, pages: [{ number: 2, view: [0, 0, 1, 1], rotate: 0, userUnit: 1, scale: { mmPerPt: 1 }, origin: null, objects: [] }] });
     expect(m.version).toBe(before + 1);
     expect(m.objectCount()).toBe(0);
     expect(m.scale(2)).toEqual({ mmPerPt: 1 });

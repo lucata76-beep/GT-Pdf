@@ -77,7 +77,7 @@ export function showOpenProjectDialog(input: OpenProjectInput): Promise<void> {
       const s = input.summary;
       show(
         h('h2', { id: 'exp-title', class: 'dialog-title' }, title),
-        h('p', { class: 'dialog-msg' }, `Progetto di ${input.pdfName}: ${plural(s.pages, 'pagina', 'pagine')}, ${plural(s.objects, 'oggetto', 'oggetti')}, ${plural(s.scales, 'scala', 'scale')}.`),
+        h('p', { class: 'dialog-msg' }, `Progetto di ${input.pdfName}: ${plural(s.pages, 'pagina', 'pagine')}, ${plural(s.objects, 'oggetto', 'oggetti')}, ${plural(s.scales, 'scala', 'scale')}${s.origins > 0 ? `, ${plural(s.origins, 'origine', 'origini')}` : ''}.`),
         h(
           'div',
           { class: 'exp-summary', 'aria-label': 'Riepilogo del progetto' },
@@ -86,6 +86,7 @@ export function showOpenProjectDialog(input: OpenProjectInput): Promise<void> {
           kv('Pagine con oggetti', `${s.pagesWithObjects} di ${s.pages}`),
           kv('Oggetti', String(s.objects)),
           kv('Scale', String(s.scales)),
+          ...(s.origins > 0 ? [kv('Origini', String(s.origins))] : []),
           kv('Impronta SHA-256', input.hasHash ? 'presente' : 'assente'),
         ),
         h('p', { class: 'hint' }, 'Il progetto non contiene il PDF: scegli lo stesso PDF con cui l’hai salvato. Il documento attuale resta com’è finché non confermi.'),
