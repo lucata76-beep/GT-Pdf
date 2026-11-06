@@ -1319,6 +1319,26 @@ body.app-mode {
   font-size: 0.75rem;
   line-height: 1rem;
 }
+/* Shell (CP6d): la casella per digitare i punti relativi all'origine sta nella parte centrale della barra, tra il testo guida e i pulsanti; solo desktop (app.ts). Nell'elenco
+   dei figli sta dopo i gruppi di scelta (Cerchio/Arco, quote, coperture, che occupano una riga intera) e prima dei pulsanti: cosi' sta nella riga dei pulsanti, che e' gia' alta. */
+.ctx-shell {
+  display: flex;
+  align-items: center;
+  gap: var(--gutter);
+  flex: 0 1 13rem;
+  min-width: 0;
+}
+.ctx-shell-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--hit); /* come i pulsanti della barra: comparire non cambia l'altezza della riga */
+  font-size: 0.875rem;
+}
+.ctx-shell-unit {
+  color: var(--cad-text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
 .ctx-actions {
   display: flex;
   align-items: center;
@@ -1345,7 +1365,8 @@ body.app-mode {
   display: block;
 }
 @media (max-width: 719.98px) {
-  .ctx-hint {
+  .ctx-hint,
+  .ctx-shell {
     flex-basis: 100%;
   }
   .ctx-actions {

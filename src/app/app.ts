@@ -1,5 +1,5 @@
 // Guscio dell'app (CP4): barra con menu, palette, vista del documento, inspector, barra contestuale, tastierino, barra di stato.
-// Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella. Oggetti e scala sono in memoria
+// Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella (e Origine, dal menu). Oggetti, scala e origine sono in memoria
 // nella sessione, nello spazio utente PDF; si salvano in un file progetto (.json) con File > Salva con nome e si riaprono con File > Apri progetto.
 // Ogni modifica passa da un comando (annulla/ripeti).
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo } from '../geometry/dimension';
@@ -10,6 +10,7 @@ import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
 import { fmt, fmtTrim } from '../geometry/numbers';
+import { type OriginFrame, inPageWithEps, originFrame, relToSheet, relUnitLabel, sheetToRel } from '../geometry/origin';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
@@ -70,11 +71,14 @@ import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } fr
 import { TouchReadout } from '../ui/touchReadout';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
 import { Construction, type ConstructionTool } from './construction';
+import { OUTSIDE_MESSAGE, SHELL_MAX_LENGTH, parseShellPoint, parseShellRadius } from './shell';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 
 // Percorsi relativi alla pagina: l'app sta sotto /GT-Pdf/ su GitHub Pages.
 const assetUrl = (path: string): string => new URL(path, document.baseURI).href;
 const CSS_PX_PER_PT = 96 / 72; // 100 % = 96 px CSS per pollice; non e' la dimensione fisica sullo schermo
+const COORD_TITLE_SHEET = 'X e Y dal bordo sinistro e dal bordo inferiore della pagina, in mm del foglio';
+const COORD_TITLE_ORIGIN = 'X e Y relative all\'origine di questa pagina (Y verso l\'alto), nell\'unità indicata';
 
 type ToolId = 'pan' | 'select' | ConstructionTool | 'erase';
 interface Tool {
@@ -85,6 +89,8 @@ interface Tool {
   cp?: string;
   mode?: ViewerMode;
   needsDoc?: boolean;
+  /** Strumento che non sta nella palette (si arma da un menu): l'Origine (CP6d). */
+  hidden?: boolean;
 }
 const TOOLS: Tool[] = [
   { id: 'pan', label: 'Sposta vista', icon: 'hand', mode: 'pan' },
@@ -98,6 +104,8 @@ const TOOLS: Tool[] = [
   { id: 'dim', label: 'Quota', icon: 'ruler', mode: 'pick', needsDoc: true },
   { id: 'text', label: 'Testo', icon: 'type', mode: 'pick', needsDoc: true },
   { id: 'cover', label: 'Copertura', icon: 'square', mode: 'pick', needsDoc: true },
+  // Origine (CP6d): strumento a un colpo armato dal menu Origine, NON in palette (la palette e' misurata per l'iPhone); dopo il clic si torna allo strumento di prima.
+  { id: 'origin', label: 'Origine', icon: 'scaling', mode: 'pick', needsDoc: true, hidden: true },
 ];
 const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase' && id !== 'select';
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
@@ -146,6 +154,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let coverKind: CoverKind = 'rect';
   /** Cerchio o arco che si sta per disegnare. */
   let curveKind: CurveKind = 'circle';
+  /** Lo strumento a cui tornare dopo il clic dell'Origine (strumento a un colpo, CP6d) o dopo averla disarmata; null se l'Origine non e' armata. */
+  let originReturn: ToolId | null = null;
   /** Oggetto selezionato (id) nella pagina corrente, solo con lo strumento Seleziona. */
   let selected: number | null = null;
   /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
@@ -169,7 +179,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Costruzione per punti ----------
   const construction = new Construction(
-    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch, pending) => snapAt(raw, touch, pending), grid: () => gridActiveStepPt() },
+    { geometry: () => viewer.geometry, zoom: () => viewer.zoomValue, ortho: () => ortho, snap: (raw, touch, pending) => snapAt(raw, touch, pending), grid: () => gridActiveStepPt(), gridOrigin: () => originSheet() },
     {
       line: (kind, points) => {
         const obj: LineObject = { id: model.newId(), kind, points: points.map((p) => ({ ...p })), stroke: { ...stroke } };
@@ -196,9 +206,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const arc = g ? curveOnSheet(obj, g) : null;
         say(addedMessage(obj, arc ? `raggio ${mmText(arc.r)}` : undefined));
       },
+      origin: (at) => onOriginPoint(at),
       reject: say,
     },
   );
+
+  /** L'origine della pagina corrente sul foglio mostrato (pt fisici), o null. */
+  function originSheet(): SheetPoint | null {
+    const g = viewer.geometry;
+    const o = pdf ? model.origin(pageNo) : null;
+    return g && o ? g.userToSheet(o) : null;
+  }
+  /** Il riferimento delle coordinate relative della pagina corrente (origine e unita'), o null se la pagina non ha un'origine. */
+  function currentFrame(): OriginFrame | null {
+    const g = viewer.geometry;
+    const o = pdf ? model.origin(pageNo) : null;
+    return g && o ? originFrame(g, o, model.scale(pageNo)) : null;
+  }
 
   /** Snap sugli oggetti della pagina corrente: il candidato piu' vicino al punto grezzo (foglio) entro il raggio (px CSS / zoom), tra i tipi attivi. */
   function snapAt(raw: SheetPoint, touch: boolean, pending: readonly UserPoint[]): SnapHit | null {
@@ -221,9 +245,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const gridHiddenNote = (): string => (gridOn && pdf && !gridVisible(gridStepNow(), viewer.zoomValue) ? ` Ma a questo zoom il passo è sotto ${GRID_MIN_SCREEN_PX} px: la griglia non si vede e non arrotonda.` : '');
   /** Rimanda al visore il passo della pagina corrente e rilegge il controllo del pannello. */
   function refreshGrid(): void {
+    viewer.setOrigin(pdf ? model.origin(pageNo) : null); // simbolo e nodi della griglia: l'origine e' un dato della pagina corrente
     viewer.setGrid(gridOn && pdf ? gridStepNow() : null);
     gridWasVisible = gridActiveStepPt() !== null;
     gridCtl.refresh();
+    renderCursor(); // X e Y della barra di stato dipendono da origine, scala e pagina
   }
   /**
    * Nota per il messaggio di stato dopo un cambio di scala (ricalibrazione, annulla/ripeti di una scala): il passo in mm non cambia ma quello in pt del foglio si'.
@@ -255,6 +281,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   // ---------- Barra di stato ----------
   const stX = h('span', { class: 'num' }, '—');
   const stY = h('span', { class: 'num' }, '—');
+  // Con un'origine sulla pagina X e Y sono relative all'origine, nell'unita' della shell (mm reali con la scala, mm del foglio senza): l'etichetta dell'unita' lo dice (CP6d).
+  const stUnitX = h('span', { class: 'unit' }, 'mm');
+  const stUnitY = h('span', { class: 'unit' }, 'mm');
+  const stCoord = h('span', { class: 'st-coord', title: COORD_TITLE_SHEET }, h('span', { class: 'lbl' }, 'X:'), stX, stUnitX, h('span', { class: 'lbl' }, 'Y:'), stY, stUnitY);
   const stPage = h('span', { class: 'num st-page' }, '');
   const prevBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina precedente', disabled: true, onclick: () => void goTo(pageNo - 1) }, icon('chevron-left'));
   const nextBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina successiva', disabled: true, onclick: () => void goTo(pageNo + 1) }, icon('chevron-right'));
@@ -282,7 +312,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const statusbar = h(
     'footer',
     { class: 'statusbar' },
-    h('span', { class: 'st-coord' }, h('span', { class: 'lbl' }, 'X:'), stX, h('span', { class: 'unit' }, 'mm'), h('span', { class: 'lbl' }, 'Y:'), stY, h('span', { class: 'unit' }, 'mm')),
+    stCoord,
     h('span', { class: 'st-scale' }, h('span', { class: 'lbl' }, 'SCALA:'), scaleBtn),
     endBtn,
     midBtn,
@@ -292,14 +322,32 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     statusMsg,
     pager,
   );
-  const setCursor = (p: { x: number; y: number } | null): void => {
+  /** Ultima posizione del cursore sul foglio (pt fisici), o null se e' fuori dalla pagina: serve a rifare i valori quando cambiano origine, scala, zoom o pagina. */
+  let lastCursor: SheetPoint | null = null;
+  function renderCursor(): void {
+    const f = currentFrame();
+    const unit = f ? relUnitLabel(model.scale(pageNo)) : 'mm';
+    stUnitX.textContent = unit;
+    stUnitY.textContent = unit;
+    stCoord.title = f ? COORD_TITLE_ORIGIN : COORD_TITLE_SHEET;
+    const p = lastCursor;
     if (!p) {
       stX.textContent = '—';
       stY.textContent = '—';
       return;
     }
+    if (f) {
+      const r = sheetToRel(f, p); // relative all'origine: X a destra, Y verso l'alto, anche a sinistra e sotto l'origine (valori negativi)
+      stX.textContent = fmt(r.x);
+      stY.textContent = fmt(r.y);
+      return;
+    }
     stX.textContent = fmt(ptToMm(p.x));
     stY.textContent = fmt(ptToMm(viewer.sheetSize.h - p.y)); // Y verso l'alto dal bordo inferiore della pagina mostrata
+  }
+  const setCursor = (p: { x: number; y: number } | null): void => {
+    lastCursor = p;
+    renderCursor();
   };
   function setOrtho(on: boolean): void {
     ortho = on;
@@ -379,6 +427,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ...COVER_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCoverKind(t.id) })),
     { label: 'Raccordo', hint: 'V2c', disabled: true },
   ];
+  const originMenu = (): MenuEntry[] => [
+    { label: 'Imposta origine', disabled: !pdf, onSelect: () => armOrigin() },
+    { label: 'Rimuovi origine', disabled: !pdf || model.origin(pageNo) === null, onSelect: () => removeOrigin() },
+  ];
   const zoomMenu = (): MenuEntry[] => [
     { label: 'Zoom avanti', disabled: !pdf, onSelect: () => viewer.zoomBy(1.25) },
     { label: 'Zoom indietro', disabled: !pdf, onSelect: () => viewer.zoomBy(1 / 1.25) },
@@ -402,7 +454,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       }),
       h('span', { class: 'sr-only' }, 'GT-Pdf'),
     ),
-    h('nav', { class: 'menus', 'aria-label': 'Menu' }, menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Zoom', zoomMenu)),
+    h('nav', { class: 'menus', 'aria-label': 'Menu' }, menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Origine', originMenu), menuButton('Zoom', zoomMenu)),
     docName,
     h('div', { class: 'bar-right' }, h('div', { class: 'undo-ctl' }, undoBtn, redoBtn), h('div', { class: 'size-ctl' }, sizeDown, sizeUp), h('div', { class: 'zoom-ctl' }, zoomOutBtn, zoomLabel, zoomInBtn), inspectorBtn),
   );
@@ -411,6 +463,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const toolBtns = new Map<string, HTMLButtonElement>();
   const palette = h('nav', { class: 'palette', 'aria-label': 'Strumenti' });
   for (const t of TOOLS) {
+    if (t.hidden) continue;
     const enabled = !t.cp;
     const b = h(
       'button',
@@ -511,7 +564,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Barra contestuale ----------
   const ctxHint = h('p', { class: 'ctx-hint', 'aria-live': 'polite' });
-  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => cancelConstruction() }, 'Annulla');
+  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => (tool === 'origin' ? disarmOrigin() : cancelConstruction()) }, 'Annulla');
   const finishBtn = h('button', { class: 'btn primary ctx-act', type: 'button', onclick: () => finishLine() }, icon('check'), 'Fine');
   const dimTypeBtns = new Map<DimType, HTMLButtonElement>();
   const dimTypes = h('div', { class: 'ctx-types seg', role: 'group', 'aria-label': 'Tipo di quota', hidden: true });
@@ -534,8 +587,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     curveTypeBtns.set(t.id, b);
     curveTypes.append(b);
   }
+  // Shell (CP6d, decisioni 59 e 71): casella per digitare i punti relativi all'origine, nella parte centrale della barra (tra il testo guida e i pulsanti). Compare solo con
+  // un'origine sulla pagina, uno strumento che la usa (Retta, Linea, Cerchio) e un puntatore preciso con hover (desktop): vedi `shellStepNow`.
+  const shellInput = h('input', {
+    class: 'field num ctx-shell-input',
+    type: 'text',
+    autocomplete: 'off',
+    autocapitalize: 'off',
+    spellcheck: 'false',
+    maxlength: SHELL_MAX_LENGTH,
+    placeholder: 'X;Y',
+    'aria-label': 'Coordinate X;Y relative all\'origine',
+  });
+  const shellUnit = h('span', { class: 'ctx-shell-unit num' }, 'mm');
+  const shellBox = h('div', { class: 'ctx-shell', hidden: true }, shellInput, shellUnit);
   const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, shellBox, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -713,6 +780,9 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (!def || def.cp) return;
     if (def.needsDoc && !pdf) return;
     cancelEntry();
+    if (id !== 'origin') originReturn = null; // l'Origine armata si disarma scegliendo un altro strumento
+    shellInput.value = '';
+    shellInput.removeAttribute('aria-invalid');
     tool = id;
     selected = null; // la selezione vale solo con lo strumento Seleziona
     viewer.setSelection(null);
@@ -731,6 +801,37 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     renderInspector();
     renderConstruction();
     revealTool(id); // per ultimo: la barra contestuale appena comparsa o sparita cambia l'altezza della palette
+  }
+
+  // ---------- Origine (CP6d, decisioni 58 e 72) ----------
+  /**
+   * "Imposta origine" arma l'Origine come strumento a UN COLPO: il clic imposta (o sposta) l'origine e si torna allo strumento di prima (motivo: l'origine si imposta una volta
+   * per pagina e poi si disegna; restare armati farebbe spostare l'origine a ogni clic successivo e il disegno ripartirebbe da zero). Esc o Annulla la disarmano.
+   */
+  function armOrigin(): void {
+    if (!pdf || tool === 'origin') return;
+    const back = tool;
+    selectTool('origin');
+    originReturn = back; // dopo selectTool, che azzera `originReturn` per gli altri strumenti
+    say(model.origin(pageNo) ? 'Un nuovo clic sposta l\'origine di questa pagina' : '');
+  }
+  /** Disarma l'Origine senza cambiarla e torna allo strumento di prima. */
+  function disarmOrigin(): void {
+    if (tool !== 'origin') return;
+    selectTool(originReturn ?? 'pan');
+  }
+  /** Il clic dell'Origine: imposta o sposta l'origine della pagina corrente (un solo passo di Annulla) e torna allo strumento di prima. */
+  function onOriginPoint(at: UserPoint): void {
+    const before = model.origin(pageNo);
+    history.exec(new SetOrigin(pageNo, before, at));
+    selectTool(originReturn ?? 'pan');
+    say(before ? 'Origine spostata. Annulla la rimette a posto.' : 'Origine impostata. Annulla la toglie.');
+  }
+  function removeOrigin(): void {
+    const before = model.origin(pageNo);
+    if (!before) return;
+    history.exec(new SetOrigin(pageNo, before, null));
+    say('Origine rimossa. Annulla la ripristina.');
   }
 
   /**
@@ -895,6 +996,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
             ? selectedText(so) // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
             : 'Seleziona: tocca un oggetto, poi trascinalo'
           : '';
+    const shellStep = shellStepNow();
+    shellBox.hidden = shellStep === null;
+    if (shellStep !== null) {
+      ctxHint.textContent = construction.shellPrompt ?? ctxHint.textContent; // con la shell il testo guida dice anche che cosa digitare (una riga)
+      shellInput.placeholder = shellStep === 'radius' ? 'raggio' : 'X;Y';
+      shellInput.setAttribute('aria-label', shellStep === 'radius' ? 'Raggio del cerchio' : 'Coordinate X;Y relative all\'origine');
+      shellUnit.textContent = relUnitLabel(model.scale(pageNo));
+    }
     dimTypes.hidden = tool !== 'dim';
     for (const [id, b] of dimTypeBtns) b.setAttribute('aria-pressed', String(id === dimType));
     coverTypes.hidden = tool !== 'cover';
@@ -906,7 +1015,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     // solo con un oggetto selezionato, selezionare farebbe cambiare altezza alla barra e il foglio si ridimensionerebbe sotto il dito.
     styleChip.classList.toggle('ghost', tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'));
     cancelBtn.hidden = !constructing;
-    cancelBtn.disabled = !(construction.pending || construction.done || construction.locked);
+    cancelBtn.disabled = tool !== 'origin' && !(construction.pending || construction.done || construction.locked); // con l'Origine armata Annulla la disarma
     finishBtn.hidden = tool !== 'polyline';
     finishBtn.disabled = pts.length < 2 || construction.done;
     if (!active) toggleProps(false);
@@ -923,6 +1032,76 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     construction.finish();
     renderConstruction();
   }
+
+  // ---------- Shell (CP6d, decisioni 59 e 71) ----------
+  /**
+   * Criterio "solo desktop" (scelta dell'assistente, da confermare): il puntatore PRINCIPALE e' preciso e puo' passare sopra gli elementi (`(hover: hover) and (pointer: fine)`:
+   * mouse e trackpad). Su iPhone e iPad (touch) la tastiera di sistema coprirebbe il foglio: la shell non c'e'. Lo stesso criterio che l'app gia' usa per i bersagli di tocco
+   * (`pointer: coarse`, app.css). NON VERIFICATO: come lo riportano un iPad con tastiera o un trackpad, e Safari.
+   */
+  const desktopPointer = (): boolean => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  /** Che cosa aspetta la shell adesso: un punto, il raggio, o niente (null: la casella non si vede). Serve un'origine sulla pagina e un puntatore da desktop. */
+  function shellStepNow(): 'point' | 'radius' | null {
+    if (!pdf || entry || model.origin(pageNo) === null || !desktopPointer()) return null;
+    return construction.shellStep;
+  }
+  function shellError(message: string): void {
+    say(message);
+    shellInput.setAttribute('aria-invalid', 'true');
+  }
+  /** Invio nella casella: il valore digitato diventa un punto della costruzione in corso, esatto (nessuno snap, griglia, ORTO o squadratura). */
+  function submitShell(): void {
+    const step = shellStepNow();
+    const g = viewer.geometry;
+    const f = currentFrame();
+    if (!step || !g || !f) return;
+    const text = shellInput.value;
+    // Linea: Invio a casella vuota termina la linea (come Invio sul foglio)
+    if (text.trim() === '' && tool === 'polyline' && construction.points.length >= 2) {
+      finishLine();
+      return;
+    }
+    let user: UserPoint;
+    if (step === 'radius') {
+      const r = parseShellRadius(text);
+      const centre = construction.points[0];
+      if (!r.ok || !centre) return shellError(r.ok ? 'Indica prima il centro.' : r.error);
+      // il punto sul bordo e' centro + (raggio, 0) lungo +X del foglio mostrato: lo stesso dato di un clic a quel punto
+      const cs = g.userToSheet(centre);
+      user = g.sheetToUser({ x: cs.x + r.value * f.unitPt, y: cs.y });
+      if (!(Math.abs(user.x) <= LIMITS.coordAbs && Math.abs(user.y) <= LIMITS.coordAbs)) return shellError('Raggio troppo grande: il cerchio esce dai limiti del foglio.');
+    } else {
+      const p = parseShellPoint(text);
+      if (!p.ok) return shellError(p.error);
+      const sheet = relToSheet(f, p.value);
+      if (!inPageWithEps(g, sheet)) return shellError(OUTSIDE_MESSAGE); // lo stesso rifiuto di un clic fuori dalla pagina
+      user = g.sheetToUser(sheet);
+    }
+    say(''); // il messaggio di un errore precedente; un rifiuto o il completamento della figura ne scrivono uno nuovo
+    if (!construction.placeExact(user)) {
+      shellInput.setAttribute('aria-invalid', 'true'); // il messaggio l'ha gia' dato la costruzione (punti coincidenti)
+      return;
+    }
+    shellInput.value = '';
+    shellInput.removeAttribute('aria-invalid');
+    renderConstruction();
+  }
+  shellInput.addEventListener('input', () => shellInput.removeAttribute('aria-invalid'));
+  shellInput.addEventListener('keydown', (e) => {
+    // La casella gestisce i suoi tasti: il gestore globale della tastiera esce per ogni campo di testo, quindi Backspace, Canc e Ctrl+Z modificano il TESTO della casella
+    // (e non l'ultimo punto, la selezione o la cronologia), come in "Passo griglia".
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitShell();
+    } else if (e.key === 'Escape') {
+      // Esc svuota la casella; a casella vuota annulla la costruzione in corso (come Esc sul foglio). Il fuoco resta nella casella.
+      e.preventDefault();
+      if (shellInput.value !== '') {
+        shellInput.value = '';
+        shellInput.removeAttribute('aria-invalid');
+      } else if (construction.pending) cancelConstruction();
+    }
+  });
 
   async function calibrateFlow(a: UserPoint, b: UserPoint): Promise<void> {
     const geom = viewer.geometry;
@@ -1233,6 +1412,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     } else if (e.key === 'Escape') {
       if (propsOpen) toggleProps(false);
       else if (selected !== null) setSelected(null);
+      else if (tool === 'origin') disarmOrigin();
       else if (construction.pending || construction.done) cancelConstruction();
     } else if (e.key === 'Enter' && tool === 'polyline' && onCanvas) {
       e.preventDefault();

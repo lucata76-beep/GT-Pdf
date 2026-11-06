@@ -8,12 +8,13 @@ import { COINCIDENT_PX, Construction, type ConstructionEnv, type ConstructionEve
 const flat = new PageGeometry({ view: [0, 0, 595.276, 841.89], rotate: 0, userUnit: 1 });
 const rot = new PageGeometry({ view: [50, 50, 450, 600], rotate: 90, userUnit: 1 }); // Rotate 90 + CropBox
 
-function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap?: ConstructionEnv['snap']; grid?: ConstructionEnv['grid'] } = {}) {
+function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap?: ConstructionEnv['snap']; grid?: ConstructionEnv['grid']; gridOrigin?: ConstructionEnv['gridOrigin'] } = {}) {
   const log: string[] = [];
   const lines: { kind: string; points: UserPoint[] }[] = [];
   const dims: DimensionDef[] = [];
   const covers: CoverDef[] = [];
   const texts: UserPoint[] = [];
+  const origins: UserPoint[] = [];
   const state = { ortho: opts.ortho ?? false };
   const ev: ConstructionEvents = {
     line: (kind, points) => {
@@ -35,10 +36,14 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; snap
       covers.push(def);
     },
     curve: (kind) => log.push(`curve:${kind}`),
+    origin: (at) => {
+      log.push('origin');
+      origins.push(at);
+    },
     reject: () => log.push('reject'),
   };
-  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap, grid: opts.grid }, ev);
-  return { c, log, lines, dims, covers, texts, state };
+  const c = new Construction({ geometry: () => opts.geom ?? flat, zoom: () => opts.zoom ?? 1, ortho: () => state.ortho, snap: opts.snap, grid: opts.grid, gridOrigin: opts.gridOrigin }, ev);
+  return { c, log, lines, dims, covers, texts, origins, state };
 }
 const P = (x: number, y: number): UserPoint => ({ x, y });
 

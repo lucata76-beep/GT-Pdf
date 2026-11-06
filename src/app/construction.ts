@@ -1,4 +1,4 @@
-// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota, Copertura e Cerchio/Arco.
+// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota, Copertura, Cerchio/Arco e Origine.
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
 // Testo e Copertura non usano l'ortogonale: una copertura con ORTO sarebbe un rettangolo senza altezza e il quadrato ha il suo vincolo (`squareSheet`).
 // Cerchio e Arco (V2b) non lo usano: sono scelte dell'assistente da confermare (decisione 67); snap e griglia valgono come per ogni punto indicato.
@@ -9,6 +9,8 @@
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
 // acceso lo snap puo' portare il punto fuori asse e si vede. I punti gia' indicati nella costruzione in corso sono candidati dello snap (Estremo): V2b.
+// Origine (CP6d): un solo punto, indicato come ogni altro (snap e griglia attivi, nessun ORTO). Shell (CP6d, decisione 59): i punti digitati sono ESATTI (`placeExact`):
+// non passano da snap, griglia, squadratura ne' ORTO, e si rifiutano per distanza in pt (non per i pixel di `COINCIDENT_PX`, che dipendono dallo zoom).
 import { ARC_PROBLEM_TEXT, type CurveKind, arcProblem, curveInfo } from '../geometry/arc';
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
@@ -18,7 +20,7 @@ import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
 
-export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve';
+export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin';
 
 export interface ConstructionEnv {
   geometry(): PageGeometry | null;
@@ -36,6 +38,10 @@ export interface ConstructionEnv {
    * L'origine e' l'angolo in basso a sinistra della pagina mostrata (`snapToGrid`).
    */
   grid?(): number | null;
+  /**
+   * Origine di pagina sul foglio mostrato (CP6d), o null: i nodi della griglia sono in origine + k * passo. Facoltativa: senza, i nodi partono dall'angolo in basso a sinistra.
+   */
+  gridOrigin?(): SheetPoint | null;
 }
 
 export interface ConstructionEvents {
@@ -53,11 +59,18 @@ export interface ConstructionEvents {
   cover(def: CoverDef): void;
   /** Cerchio (centro, punto sul bordo) o Arco (inizio, punto sull'arco, fine) completato. */
   curve(kind: CurveKind, points: UserPoint[]): void;
+  /** Origine (CP6d): il punto e' stato indicato. */
+  origin(at: UserPoint): void;
   reject(reason: string): void;
 }
 
 /** Due punti piu' vicini di cosi' (pixel CSS) sono lo stesso punto: sulla Linea vale come "fine". */
 export const COINCIDENT_PX = 6;
+/**
+ * Due punti DIGITATI (shell) piu' vicini di cosi' (pt del foglio) sono lo stesso punto e si rifiutano. Volutamente minuscolo (0.001 pt = 0.00035 mm): con la shell
+ * la distanza non dipende dallo zoom e un segmento corto ma voluto (2 mm) e' valido anche se a schermo e' sotto i 6 px di `COINCIDENT_PX`.
+ */
+export const EXACT_MIN_DISTANCE_PT = 0.001;
 
 export const TOOL_NAME: Record<ConstructionTool, string> = {
   segment: 'Retta',
@@ -68,6 +81,7 @@ export const TOOL_NAME: Record<ConstructionTool, string> = {
   dim: 'Quota',
   cover: 'Copertura',
   curve: 'Cerchio e arco',
+  origin: 'Origine',
 };
 
 export class Construction {
@@ -121,6 +135,7 @@ export class Construction {
       case 'cover':
         return 2;
       case 'text':
+      case 'origin':
         return 1;
       case 'dim':
         return dimInfo(this.dimType).points;
@@ -147,7 +162,7 @@ export class Construction {
    * Quota: solo il secondo punto di Allineata, Ø e R (con un punto gia' indicato); null per Orizzontale e Verticale e per il terzo punto (posizione della linea di quota).
    */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.done || this.locked) return null;
     if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
   }
@@ -167,10 +182,11 @@ export class Construction {
     }
     const step = geom && this.tool && !this.locked ? (this.env.grid?.() ?? null) : null;
     const a = this.anchor;
-    if (!geom || !a || !this.env.ortho()) return { point: step && geom ? snapToGrid(raw, step, geom) : raw, snap: null };
+    const gridOrigin = step ? (this.env.gridOrigin?.() ?? null) : null;
+    if (!geom || !a || !this.env.ortho()) return { point: step && geom ? snapToGrid(raw, step, geom, undefined, gridOrigin) : raw, snap: null };
     const sa = geom.userToSheet(a);
     const o = orthoSheet(sa, raw);
-    return { point: step ? snapToGrid(o, step, geom, orthoFreeAxis(sa, raw)) : o, snap: null };
+    return { point: step ? snapToGrid(o, step, geom, orthoFreeAxis(sa, raw), gridOrigin) : o, snap: null };
   }
 
   /** Il solo punto effettivo di `resolve`. */
@@ -225,8 +241,18 @@ export class Construction {
         }
       }
     }
+    this.commit(geom, p);
+  }
+
+  /** Aggiunge il punto `p` (gia' validato) e, se la costruzione e' completa, la consegna all'app. */
+  private commit(geom: PageGeometry, p: UserPoint): void {
     this.points.push(p);
     switch (this.tool) {
+      case 'origin': {
+        this.reset();
+        this.ev.origin(p);
+        break;
+      }
       case 'segment':
         if (this.points.length === 2) {
           const pts = this.points;
@@ -300,6 +326,40 @@ export class Construction {
     return true;
   }
 
+  /**
+   * Che cosa si aspetta la shell (CP6d, decisioni 59 e 71) al passo corrente: un punto "X;Y" (Retta, Linea, centro del Cerchio), il raggio del Cerchio, o niente
+   * (Arco, Copertura, Testo, Quota, Scala, Distanza, Origine, strumento fermo o bloccato).
+   */
+  get shellStep(): 'point' | 'radius' | null {
+    if (this.locked || this.done) return null;
+    switch (this.tool) {
+      case 'segment':
+      case 'polyline':
+        return 'point';
+      case 'curve':
+        return this.curveKind === 'circle' ? (this.points.length === 0 ? 'point' : this.points.length === 1 ? 'radius' : null) : null;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Un punto DIGITATO (shell): esatto, quindi non passa da snap, griglia, squadratura ne' ORTO. Si rifiuta (con `reject`) se coincide con l'ultimo punto, per distanza in
+   * pt del foglio (`EXACT_MIN_DISTANCE_PT`): sulla Linea NON termina la linea in silenzio, come invece fa `place` con i 6 px. Falso se non c'e' un passo che aspetti un punto.
+   */
+  placeExact(p: UserPoint): boolean {
+    const geom = this.env.geometry();
+    const step = this.shellStep;
+    if (!geom || step === null) return false;
+    const last = this.points.at(-1);
+    if (last && geom.distancePt(last, p) < EXACT_MIN_DISTANCE_PT) {
+      this.ev.reject(step === 'radius' ? 'Il raggio è troppo piccolo: digita un numero più grande.' : 'I due punti coincidono: digita un punto diverso.');
+      return false;
+    }
+    this.commit(geom, p);
+    return true;
+  }
+
   /** Testo guida per il passo corrente. */
   get prompt(): string {
     const n = this.points.length;
@@ -320,6 +380,8 @@ export class Construction {
         return this.coverPrompt(n);
       case 'curve':
         return this.curvePrompt(n);
+      case 'origin':
+        return 'Origine: indica il punto da cui contare X e Y';
       default:
         return '';
     }
@@ -342,6 +404,23 @@ export class Construction {
   private curvePrompt(n: number): string {
     if (this.curveKind === 'circle') return n === 0 ? 'Cerchio: indica il centro' : 'Cerchio: indica un punto sul bordo';
     return n === 0 ? 'Arco: indica l\'inizio' : n === 1 ? 'Arco: indica un punto sull\'arco' : 'Arco: indica la fine';
+  }
+
+  /**
+   * Testo guida con la shell visibile (una riga): dice che si puo' indicare col mouse o digitare. Null se la shell non aspetta niente (si usa `prompt`).
+   */
+  get shellPrompt(): string | null {
+    const step = this.shellStep;
+    if (step === null) return null;
+    const n = this.points.length;
+    switch (this.tool) {
+      case 'segment':
+        return n === 0 ? 'Retta: indica o digita X;Y del punto iniziale' : 'Retta: indica o digita X;Y del punto finale';
+      case 'polyline':
+        return n === 0 ? 'Linea: indica o digita X;Y del primo punto' : n === 1 ? 'Linea: indica o digita X;Y del punto successivo' : 'Linea: indica o digita X;Y; Invio vuoto o Fine termina';
+      default:
+        return step === 'point' ? 'Cerchio: indica o digita X;Y del centro' : 'Cerchio: indica un punto sul bordo o digita il raggio';
+    }
   }
 
   private dimPrompt(n: number): string {

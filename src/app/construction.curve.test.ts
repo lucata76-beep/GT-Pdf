@@ -33,6 +33,7 @@ function setup(opts: { geom?: PageGeometry; ortho?: boolean; zoom?: number; obje
       log.push(`curve:${kind}:${points.length}`);
       curves.push({ kind, points });
     },
+    origin: () => log.push('origin'),
     reject: (reason) => {
       log.push('reject');
       rejects.push(reason);
