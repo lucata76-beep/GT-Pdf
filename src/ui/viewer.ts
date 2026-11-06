@@ -129,6 +129,8 @@ export class PdfViewer {
   private lastHover: Pt | null = null;
   /** Passo della griglia in pt del foglio, o null se spenta: si riapplica a ogni pagina (le dimensioni cambiano). */
   private gridStep: number | null = null;
+  /** Origine della pagina mostrata (spazio utente), o null: serve al simbolo e ai nodi della griglia. Vale per UNA pagina: `setPage` la toglie e l'app la rimette. */
+  private originUser: UserPoint | null = null;
 
   private renderTimer = 0;
   private renderToken = 0;
@@ -207,6 +209,8 @@ export class PdfViewer {
     this.lastError = null;
     this.logNext = page !== null;
     this.clearScene();
+    this.originUser = null;
+    this.overlay.setOrigin(null);
     if (!page) {
       this.overlay.setGrid(null);
       this.geom = null;
@@ -279,7 +283,18 @@ export class PdfViewer {
   /** Griglia: passo in pt del foglio della pagina mostrata (null = spenta). La disegna solo se il passo a schermo e' abbastanza grande (vedi `geometry/grid`). */
   setGrid(stepPt: number | null): void {
     this.gridStep = stepPt;
-    this.overlay.setGrid(stepPt !== null && this.page ? { stepPt, w: this.pageW, h: this.pageH } : null);
+    this.applyGrid();
+  }
+  private applyGrid(): void {
+    const stepPt = this.gridStep;
+    const o = this.originUser && this.geom ? this.geom.userToSheet(this.originUser) : null;
+    this.overlay.setGrid(stepPt !== null && this.page ? { stepPt, w: this.pageW, h: this.pageH, origin: o } : null);
+  }
+  /** L'origine della pagina mostrata (spazio utente) o null: disegna il simbolo e sposta i nodi della griglia (CP6d). */
+  setOrigin(origin: UserPoint | null): void {
+    this.originUser = this.page ? origin : null;
+    this.overlay.setOrigin(this.originUser && this.geom ? this.geom.userToSheet(this.originUser) : null);
+    this.applyGrid();
   }
   /** Svuota il livello di disegno (cambio pagina o documento). */
   clearScene(): void {
@@ -315,6 +330,7 @@ export class PdfViewer {
     this.ty = (r.height - this.pageH * this.zoom) / 2;
     this.atFit = true;
     this.applyTransform();
+    this.refreshCursor();
     this.scheduleRender(0);
   }
 
@@ -383,6 +399,15 @@ export class PdfViewer {
     this.zoom = z;
     this.atFit = false;
     this.applyTransform();
+    this.refreshCursor();
+  }
+
+  /**
+   * Rilegge la posizione del cursore dopo uno zoom, un adattamento o un cambio di pagina fatti SENZA muovere il mouse: il punto del foglio sotto il cursore e' cambiato e la
+   * barra di stato (X e Y, relative all'origine se c'e') deve dirlo subito. Vale solo se il mouse sta sopra il visore senza tasti premuti.
+   */
+  refreshCursor(): void {
+    if (this.lastHover && this.page) this.reportCursor(this.lastHover);
   }
 
   // ---- Coordinate ----

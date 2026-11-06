@@ -511,6 +511,33 @@ body.app-mode {
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
+/* Simbolo dell'origine di pagina (CP6d, decisione 58): due assi con le etichette X e Y, 32 px fissi, solo a schermo (mai esportato). Colore `accent-stroke` per i tratti e
+   `accent-fill` per le lettere (il testo piccolo usa accent-fill: DESIGN.md), diversi dal blu di `measure` (costruzione, selezione) e dal verde di `snap-topology`.
+   Sotto ogni tratto un alone bianco piu' largo (come le etichette dello snap): resta leggibile anche su una scansione scura. L'interfaccia non ha un tema scuro (nessun
+   `prefers-color-scheme` nei CSS): il simbolo sta sul foglio, non sulla cornice. Il livello e' `pointer-events: none`: non intercetta clic. */
+.origin-mark .origin-halo path,
+.origin-mark .origin-halo circle {
+  fill: none;
+  stroke: var(--cad-sheet);
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.origin-mark .origin-ink path,
+.origin-mark .origin-ink circle {
+  fill: none;
+  stroke: var(--cad-accent-stroke);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.origin-mark .origin-label {
+  fill: var(--cad-accent-fill);
+  stroke: var(--cad-sheet);
+  stroke-width: 3;
+  paint-order: stroke;
+  font: 600 11px var(--font-mono);
+}
 /* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro (V2b); etichetta col nome.
    Dimensioni in px CSS fissi (non scalano con lo zoom). Solo a schermo: sta nel livello di sovrapposizione, non nel disegno esportato. */
 .snap-mark rect,

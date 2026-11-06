@@ -4,7 +4,7 @@
 // Segni, mira e badge hanno dimensione fissa sullo schermo e vengono riposizionati a ogni cambio di vista.
 import { type SheetArc, svgArcPath } from '../geometry/arc';
 import { type SheetCover, coverShapeOf } from '../geometry/cover';
-import { gridVisible } from '../geometry/grid';
+import { gridIndexRange, gridVisible } from '../geometry/grid';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
 import { SNAP_KINDS, SNAP_LABEL, type SnapKind } from '../geometry/snap';
@@ -30,6 +30,22 @@ export interface Badge {
 /** Marcatore di snap: mezzo lato in px CSS (8 x 8 px di DESIGN.md) e larghezza stimata di un carattere dell'etichetta (11 px, spaziatura fissa). */
 const SNAP_HALF = 4;
 const SNAP_CHAR_PX = 6.6;
+
+/** Simbolo dell'origine: lunghezza degli assi e punta (px CSS, fissi). */
+export const ORIGIN_ARM_PX = 32;
+const ORIGIN_HEAD_PX = 5;
+
+/**
+ * Il simbolo dell'origine nelle coordinate dello schermo, con l'origine in (0, 0): asse X verso destra, asse Y verso l'ALTO (y negative), punte aperte, un
+ * cerchietto sull'origine e le etichette "X" e "Y". Ogni tratto e' disegnato due volte: sotto un alone bianco largo (leggibile su una scansione scura), sopra il
+ * tratto colorato. Colori e spessori da CSS (`.origin-mark`): vedi app.css.
+ */
+function originSymbolMarkup(): string {
+  const L = ORIGIN_ARM_PX;
+  const a = ORIGIN_HEAD_PX;
+  const strokes = `<path d="M0 0H${L}M${L - a} ${-a}L${L} 0L${L - a} ${a}"/><path d="M0 0V${-L}M${-a} ${-L + a}L0 ${-L}L${a} ${-L + a}"/><circle cx="0" cy="0" r="3"/>`;
+  return `<g class="origin-halo">${strokes}</g><g class="origin-ink">${strokes}</g><text class="origin-label" x="${L + 5}" y="4">X</text><text class="origin-label" x="-3.5" y="${-L - 6}">Y</text>`;
+}
 
 const svgEl = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] => {
   const el = document.createElementNS(SVG_NS, tag);
@@ -82,7 +98,13 @@ export class SceneOverlay {
   private readonly markersG = svgEl('g', { class: 'sc-markers' });
   /** Griglia (CP6a): linee sottili di 1 px CSS, sotto gli oggetti e sopra il PDF, nelle coordinate dello schermo; si ridisegna a ogni cambio di vista (solo le linee visibili). */
   private readonly gridEl = svgEl('path', { class: 'sc-grid', fill: 'none', display: 'none' });
-  private grid: { stepPt: number; w: number; h: number } | null = null;
+  private grid: { stepPt: number; w: number; h: number; origin: SheetPoint | null } | null = null;
+  /**
+   * Simbolo dell'origine di pagina (CP6d, decisione 58): due assi con le etichette X e Y, SOLO a schermo (mai esportato: l'esportazione parte dal modello, non da
+   * questo livello), di dimensione fissa in px CSS, sopra gli oggetti e sotto mira e snap. Il livello non riceve il puntatore (`pointer-events: none`).
+   */
+  private readonly originG = svgEl('g', { class: 'origin-mark', display: 'none' });
+  private origin: SheetPoint | null = null;
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
   /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro) con il nome: solo a schermo, mai esportato. */
   private readonly snapG = svgEl('g', { class: 'snap-mark', display: 'none' });
@@ -110,7 +132,8 @@ export class SceneOverlay {
     this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.outlineG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
     this.snapG.append(this.snapLabel);
-    svg.append(this.gridEl, this.sheetG, this.markersG, this.aimG, this.snapG);
+    this.originG.innerHTML = originSymbolMarkup();
+    svg.append(this.gridEl, this.sheetG, this.originG, this.markersG, this.aimG, this.snapG);
     this.el = h('div', { class: 'viewer-layer' }, svg, this.badgeEl);
   }
 
@@ -287,9 +310,16 @@ export class SceneOverlay {
    * Griglia: passo in pt del foglio e dimensioni della pagina mostrata (l'origine e' l'angolo in basso a sinistra); null la toglie. Si disegna solo se il passo a
    * schermo e' almeno `GRID_MIN_SCREEN_PX`.
    */
-  setGrid(g: { stepPt: number; w: number; h: number } | null): void {
-    this.grid = g;
+  setGrid(g: { stepPt: number; w: number; h: number; origin?: SheetPoint | null } | null): void {
+    this.grid = g ? { stepPt: g.stepPt, w: g.w, h: g.h, origin: g.origin ?? null } : null;
     this.drawGrid();
+  }
+
+  /** Il simbolo dell'origine di pagina sul foglio (pt fisici); null lo toglie. */
+  setOrigin(p: SheetPoint | null): void {
+    this.origin = p;
+    this.originG.setAttribute('display', p ? 'inline' : 'none');
+    this.placeScreenItems();
   }
 
   private drawGrid(): void {
@@ -301,26 +331,28 @@ export class SceneOverlay {
     const stepPx = g.stepPt * this.zoom;
     const vw = this.el.clientWidth;
     const vh = this.el.clientHeight;
-    const left = this.tx;
-    const right = this.tx + g.w * this.zoom;
     const top = this.ty;
     const bottom = this.ty + g.h * this.zoom;
-    const maxI = Math.floor(g.w / g.stepPt + 1e-9);
-    const maxJ = Math.floor(g.h / g.stepPt + 1e-9);
+    const left = this.tx;
+    const right = this.tx + g.w * this.zoom;
+    // Nodi: x = ox + i * passo e y = oy - j * passo. Senza origine di pagina (ox = 0, oy = H) `left0` e `base` sono `tx` e `bottom`, e le espressioni sono quelle di V2a.
+    const r = gridIndexRange(g.stepPt, { width: g.w, height: g.h }, g.origin);
+    const left0 = this.tx + r.ox * this.zoom;
+    const base = this.ty + r.oy * this.zoom;
     // solo le linee dentro il riquadro visibile (con un margine di una linea)
-    const i0 = Math.max(0, Math.floor((0 - left) / stepPx));
-    const i1 = Math.min(maxI, Math.ceil((vw - left) / stepPx));
+    const i0 = Math.max(r.iMin, Math.floor((0 - left0) / stepPx));
+    const i1 = Math.min(r.iMax, Math.ceil((vw - left0) / stepPx));
     const yTop = Math.max(top, 0);
     const yBottom = Math.min(bottom, vh);
     const parts: string[] = [];
-    if (yBottom > yTop) for (let i = i0; i <= i1; i++) parts.push(`M${left + i * stepPx} ${yTop}V${yBottom}`);
-    // linea j: y = ty + (H - j * passo) * zoom, l'origine e' in basso
+    if (yBottom > yTop) for (let i = i0; i <= i1; i++) parts.push(`M${left0 + i * stepPx} ${yTop}V${yBottom}`);
+    // linea j: y = ty + (oy - j * passo) * zoom
     const xL = Math.max(left, 0);
     const xR = Math.min(right, vw);
-    const j0 = Math.max(0, Math.floor((bottom - vh) / stepPx));
-    const j1 = Math.min(maxJ, Math.ceil((bottom - 0) / stepPx));
+    const j0 = Math.max(r.jMin, Math.floor((base - vh) / stepPx));
+    const j1 = Math.min(r.jMax, Math.ceil((base - 0) / stepPx));
     if (xR > xL) for (let j = j0; j <= j1; j++) {
-      const y = bottom - j * stepPx;
+      const y = base - j * stepPx;
       if (y >= top - 0.5 && y <= vh + 0.5) parts.push(`M${xL} ${y}H${xR}`);
     }
     this.gridEl.setAttribute('d', parts.join(''));
@@ -356,6 +388,7 @@ export class SceneOverlay {
 
   private placeScreenItems(): void {
     for (const m of this.markers) m.g.setAttribute('transform', `translate(${this.tx + m.p.x * this.zoom} ${this.ty + m.p.y * this.zoom})`);
+    if (this.origin) this.originG.setAttribute('transform', `translate(${this.tx + this.origin.x * this.zoom} ${this.ty + this.origin.y * this.zoom})`);
     if (this.aim) this.aimG.setAttribute('transform', `translate(${this.tx + this.aim.x * this.zoom} ${this.ty + this.aim.y * this.zoom})`);
     if (this.snap) {
       const sx = this.tx + this.snap.p.x * this.zoom;
