@@ -218,6 +218,19 @@ body.app-mode {
     flex: 1 0 100%;
     gap: 0.25rem;
     padding-bottom: 0.125rem;
+    /* Con cinque menu (CP6d: Origine) a 390 px e A+ al massimo non entrano tutti: la riga scorre in orizzontale, come intestazione e barra di stato (decisione 39), senza barra
+       visibile, e il bordo di fuoco e' disegnato dentro (altrimenti lo taglierebbe l'overflow). I pannelli dei menu sono `fixed`: non vengono tagliati. */
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .menus::-webkit-scrollbar {
+    display: none;
+  }
+  .menus .menu-btn {
+    flex: none;
+  }
+  .menus .menu-btn:focus-visible {
+    outline-offset: -2px;
   }
   .zoom-ctl {
     display: none;

@@ -1039,7 +1039,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
    * mouse e trackpad). Su iPhone e iPad (touch) la tastiera di sistema coprirebbe il foglio: la shell non c'e'. Lo stesso criterio che l'app gia' usa per i bersagli di tocco
    * (`pointer: coarse`, app.css). NON VERIFICATO: come lo riportano un iPad con tastiera o un trackpad, e Safari.
    */
-  const desktopPointer = (): boolean => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const desktopMq = window.matchMedia('(hover: hover) and (pointer: fine)'); // un solo oggetto: `matches` e' sempre aggiornato (si rilegge a ogni disegno della barra)
+  const desktopPointer = (): boolean => desktopMq.matches;
   /** Che cosa aspetta la shell adesso: un punto, il raggio, o niente (null: la casella non si vede). Serve un'origine sulla pagina e un puntatore da desktop. */
   function shellStepNow(): 'point' | 'radius' | null {
     if (!pdf || entry || model.origin(pageNo) === null || !desktopPointer()) return null;
@@ -1456,6 +1457,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     selected = null;
     pageNo = Math.min(Math.max(1, n), pdf.pages.length);
     construction.reset();
+    shellInput.value = ''; // quello che si stava digitando era per la pagina di prima
+    shellInput.removeAttribute('aria-invalid');
     currentAim = null;
     updateChrome();
     try {
