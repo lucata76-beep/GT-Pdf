@@ -648,7 +648,7 @@ async function exportSuite(browser) {
   const proj1 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   check('file progetto identico dopo aver cambiato gli interruttori di snap e la griglia (stesso formato, nessun campo nuovo)', proj1 === proj0);
   const keys = (t) => { const j = JSON.parse(t); return { root: Object.keys(j), page: Object.keys(j.pages[0]), version: j.version, format: j.format }; };
-  check('chiavi e versione del progetto invariate (format "gt-pdf-project", version 2: dalla V2b la scrittura e\' sempre la 2)', JSON.stringify(keys(proj0)) === JSON.stringify(keys(proj1)) && keys(proj1).version === 2 && keys(proj1).format === 'gt-pdf-project', JSON.stringify(keys(proj1)));
+  check('chiavi e versione del progetto invariate (format "gt-pdf-project", version 3: dalla CP6d la scrittura e\' sempre la 3, con il campo di pagina origin)', JSON.stringify(keys(proj0)) === JSON.stringify(keys(proj1)) && keys(proj1).version === 3 && keys(proj1).format === 'gt-pdf-project', JSON.stringify(keys(proj1)));
   check('nel progetto non compaiono parole di snap o griglia', !/snap|grid|griglia|estremo|punto medio/i.test(proj1));
   await ctx.close();
 }
