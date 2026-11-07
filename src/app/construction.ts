@@ -418,7 +418,7 @@ export class Construction {
       case 'mirror':
         return n === 0 ? 'Specchio: indica il primo punto dell\'asse' : 'Specchio: indica il secondo punto dell\'asse';
       case 'rotate':
-        return n === 0 ? 'Rotazione: indica il centro' : 'Rotazione: digita l\'angolo in gradi (+ antiorario) e premi Invio';
+        return n === 0 ? 'Rotazione: indica il centro' : 'Rotazione: digita l\'angolo (+ antiorario), Invio';
       default:
         return '';
     }

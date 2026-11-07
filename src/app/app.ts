@@ -581,7 +581,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   };
   const refreshStyleChip = (): void => {
     const multi = selection.size >= 2;
-    const kind = multi ? 'none' : styleKind();
+    const kind = styleKind(); // il contenuto del riquadro non cambia con piu' oggetti (resta nascosto ma tiene il suo posto: la barra non cambia altezza)
     const o = selObj();
     const s = styleBinding.get();
     const aa = (): HTMLElement => {
@@ -594,7 +594,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       ...(kind === 'line' || kind === 'none' ? [] : [aa(), h('span', { class: 'num' }, `${fmtTrim(styleBinding.getTextPt(), 3)} pt`)]),
     );
     styleChip.setAttribute('aria-label', o ? "Proprietà dell'oggetto selezionato" : 'Proprietà del nuovo oggetto');
-    popoverStyle.setKind(kind);
+    popoverStyle.setKind(multi ? 'none' : kind);
     inspectorStyle.setKind(o ? kind : multi ? 'none' : 'all');
   };
   function onStyleChanged(): void {
@@ -1081,10 +1081,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
             ? selectedText(so) // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
             : nSel >= 2
               ? selectedManyText(nSel)
-              : desktopPointer()
-                ? 'Seleziona: clic su un oggetto, Ctrl + clic per più oggetti'
-                : 'Seleziona: tocca un oggetto, poi trascinalo'
+              : 'Seleziona: tocca un oggetto, poi trascinalo' // invariato (le prove storiche lo controllano): il Ctrl + clic sta nel suggerimento sotto
           : '';
+    // Suggerimento (tooltip) del testo guida: con Seleziona dice come scegliere piu' oggetti, senza allungare la riga (la barra non deve cambiare altezza).
+    ctxHint.title = tool === 'select' ? 'Ctrl + clic (o Cmd + clic) aggiunge un oggetto alla selezione o lo toglie; trascinando uno degli oggetti selezionati si sposta tutta la selezione' : '';
     const shellStep = shellStepNow();
     shellBox.hidden = shellStep === null;
     if (shellStep !== null) {
@@ -1099,10 +1099,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     for (const [id, b] of coverTypeBtns) b.setAttribute('aria-pressed', String(id === coverKind));
     curveTypes.hidden = tool !== 'curve';
     for (const [id, b] of curveTypeBtns) b.setAttribute('aria-pressed', String(id === curveKind));
-    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'curve' || tool === 'text' || tool === 'dim' || tool === 'select');
+    styleChip.hidden = !(tool === 'segment' || tool === 'polyline' || tool === 'curve' || tool === 'text' || tool === 'dim' || tool === 'select' || (inTransform && tool !== 'rotate')); // con la Rotazione il riquadro sparisce davvero: la casella dell'angolo ha bisogno del posto (tra 720 e 899 px)
     // Con Seleziona il riquadro occupa sempre il suo posto (invisibile se non c'e' nulla da cambiare): se comparisse
     // solo con un oggetto selezionato, selezionare farebbe cambiare altezza alla barra e il foglio si ridimensionerebbe sotto il dito.
-    styleChip.classList.toggle('ghost', tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'));
+    styleChip.classList.toggle('ghost', inTransform || (tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'))); // anche durante una trasformazione: il posto resta, la barra non cambia altezza
     // Trasformazioni (CP6e): con Seleziona i tre pulsanti (attivi se c'e' una selezione; la Rotazione anche solo con un puntatore preciso); durante la trasformazione
     // l'interruttore "Mantieni l'originale", per la Rotazione la casella dell'angolo e il pulsante Origine.
     for (const b of [trMoveBtn, trMirrorBtn, trRotateBtn]) b.hidden = tool !== 'select';

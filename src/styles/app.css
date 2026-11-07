@@ -1789,7 +1789,7 @@ body.app-mode {
   display: flex;
   align-items: center;
   gap: var(--gutter);
-  flex: 0 1 16rem;
+  flex: 0 1 11rem;
   min-width: 0;
 }
 .ctx-angle-input {
