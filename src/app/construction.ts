@@ -1,4 +1,4 @@
-// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota, Copertura, Cerchio/Arco e Origine.
+// Costruzione per punti successivi degli strumenti Retta, Linea, Scala, Distanza, Testo, Quota, Copertura, Cerchio/Arco, Origine e (CP6e) Sposta, Specchio, Rotazione.
 // Logica senza DOM: i punti sono nello spazio utente PDF; il vincolo ortogonale e' calcolato nel foglio mostrato.
 // Testo e Copertura non usano l'ortogonale: una copertura con ORTO sarebbe un rettangolo senza altezza e il quadrato ha il suo vincolo (`squareSheet`).
 // Cerchio e Arco (V2b) non lo usano: sono scelte dell'assistente da confermare (decisione 67); snap e griglia valgono come per ogni punto indicato.
@@ -9,6 +9,9 @@
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
 // acceso lo snap puo' portare il punto fuori asse e si vede. I punti gia' indicati nella costruzione in corso sono candidati dello snap (Estremo): V2b.
+// Sposta, Specchio, Rotazione (CP6e): strumenti a punti che non disegnano ma trasformano la selezione; riusano `resolve` (snap, griglia, ORTO sul secondo punto di Sposta e
+// dell'asse dello Specchio), `place`, `undoLast` e la mira (mirino e lente sul tocco). Sposta e Specchio hanno 2 punti, la Rotazione 1 (il centro: l'angolo si digita).
+// Due punti coincidenti NON si rifiutano qui con i 6 px di `place` (dipendono dallo zoom): li rifiuta l'app con la soglia in pt di `geometry/transform`.
 // Origine (CP6d): un solo punto, indicato come ogni altro (snap e griglia attivi, nessun ORTO). Shell (CP6d, decisione 59): i punti digitati sono ESATTI (`placeExact`):
 // non passano da snap, griglia, squadratura ne' ORTO, e si rifiutano per distanza in pt (non per i pixel di `COINCIDENT_PX`, che dipendono dallo zoom).
 import { ARC_PROBLEM_TEXT, type CurveKind, arcProblem, curveInfo } from '../geometry/arc';
@@ -20,7 +23,9 @@ import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
 
-export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin';
+export type TransformTool = 'move' | 'mirror' | 'rotate';
+export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin' | TransformTool;
+export const isTransformTool = (t: string | null): t is TransformTool => t === 'move' || t === 'mirror' || t === 'rotate';
 
 export interface ConstructionEnv {
   geometry(): PageGeometry | null;
@@ -61,6 +66,12 @@ export interface ConstructionEvents {
   curve(kind: CurveKind, points: UserPoint[]): void;
   /** Origine (CP6d): il punto e' stato indicato. */
   origin(at: UserPoint): void;
+  /**
+   * Sposta (base, arrivo), Specchio (due punti dell'asse) o Rotazione (il centro) (CP6e): i punti sono stati indicati. Risponde se l'app li ACCETTA: con `true` la costruzione
+   * di Sposta e Specchio si azzera (l'app ha eseguito); con `false` (trasformazione non ammessa, l'app ha gia' detto perche') l'ultimo punto si scarta e il primo resta.
+   * Per la Rotazione il centro resta (l'angolo si digita) e `true`/`false` non cambiano nulla: un nuovo clic lo sostituisce. Facoltativa.
+   */
+  transform?(kind: TransformTool, points: UserPoint[]): boolean;
   reject(reason: string): void;
 }
 
@@ -82,6 +93,9 @@ export const TOOL_NAME: Record<ConstructionTool, string> = {
   cover: 'Copertura',
   curve: 'Cerchio e arco',
   origin: 'Origine',
+  move: 'Sposta',
+  mirror: 'Specchio',
+  rotate: 'Rotazione',
 };
 
 export class Construction {
@@ -133,9 +147,12 @@ export class Construction {
       case 'calibrate':
       case 'distance':
       case 'cover':
+      case 'move':
+      case 'mirror':
         return 2;
       case 'text':
       case 'origin':
+      case 'rotate':
         return 1;
       case 'dim':
         return dimInfo(this.dimType).points;
@@ -162,7 +179,7 @@ export class Construction {
    * Quota: solo il secondo punto di Allineata, Ø e R (con un punto gia' indicato); null per Orizzontale e Verticale e per il terzo punto (posizione della linea di quota).
    */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.tool === 'rotate' || this.done || this.locked) return null;
     if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
   }
@@ -199,11 +216,12 @@ export class Construction {
     const geom = this.env.geometry();
     if (!geom || !this.tool || this.locked) return;
     if (this.done) this.reset(); // nuova misura
+    if (this.tool === 'rotate') this.points = []; // un nuovo clic sostituisce il centro
     const last = this.points.at(-1);
     // Quadrato: il secondo punto e' sempre l'angolo squadrato (idempotente se il vincolo l'ha gia' applicato).
     const p = this.tool === 'cover' && this.coverKind === 'square' && last ? squareUser(last, placed, geom) : placed;
     // Il terzo punto di una quota e' la posizione della linea di quota: puo' coincidere con l'ultimo.
-    if (last && !(this.tool === 'dim' && this.points.length >= 2)) {
+    if (last && !(this.tool === 'dim' && this.points.length >= 2) && !isTransformTool(this.tool)) {
       const sa = geom.userToSheet(last);
       const sb = geom.userToSheet(p);
       const tooClose = Math.hypot(sb.x - sa.x, sb.y - sa.y) * this.env.zoom() < COINCIDENT_PX;
@@ -253,6 +271,19 @@ export class Construction {
         this.ev.origin(p);
         break;
       }
+      case 'move':
+      case 'mirror':
+        if (this.points.length === 2) {
+          const pts = this.points;
+          const kind = this.tool;
+          const accepted = this.ev.transform?.(kind, [...pts]) ?? true;
+          if (accepted) this.reset();
+          else this.points.pop(); // non ammessa: il primo punto resta, si sceglie un altro secondo punto
+        }
+        break;
+      case 'rotate':
+        this.ev.transform?.('rotate', [...this.points]);
+        break;
       case 'segment':
         if (this.points.length === 2) {
           const pts = this.points;
@@ -382,6 +413,12 @@ export class Construction {
         return this.curvePrompt(n);
       case 'origin':
         return 'Origine: indica il punto da cui contare X e Y';
+      case 'move':
+        return n === 0 ? 'Sposta: indica il punto base' : 'Sposta: indica il punto di arrivo';
+      case 'mirror':
+        return n === 0 ? 'Specchio: indica il primo punto dell\'asse' : 'Specchio: indica il secondo punto dell\'asse';
+      case 'rotate':
+        return n === 0 ? 'Rotazione: indica il centro' : 'Rotazione: digita l\'angolo in gradi (+ antiorario) e premi Invio';
       default:
         return '';
     }

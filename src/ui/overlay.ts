@@ -92,6 +92,12 @@ export class SceneOverlay {
   /** Oggetto selezionato e contorno sottile della copertura in costruzione (non fanno parte del disegno esportato). */
   private readonly selG = svgEl('g', { class: 'sc-sel' });
   private readonly outlineG = svgEl('g', { class: 'sc-outline' });
+  /** Anteprima di una trasformazione (CP6e): gli oggetti come diventerebbero, semitrasparenti e con le coperture solo in contorno. Solo a schermo, mai esportata. */
+  private readonly ghostG = svgEl('g', { class: 'sc-ghost' });
+  private ghostStrokes: StrokeEl[] = [];
+  /** Elementi che il trascinamento di piu' oggetti sta spostando (cercati una volta per gesto, non a ogni movimento) e gli id per cui sono stati cercati. */
+  private dragEls: Element[] | null = null;
+  private dragKey = '';
   private readonly hlG = svgEl('g', { class: 'sc-hl' });
   private readonly previewG = svgEl('g', { class: 'sc-preview' });
   private readonly guide = svgEl('path', { class: 'sc-guide', fill: 'none' });
@@ -129,7 +135,7 @@ export class SceneOverlay {
   constructor() {
     this.aimG.innerHTML = '<line x1="-10" x2="10" y1="0" y2="0"/><line x1="0" x2="0" y1="-10" y2="10"/>';
     this.guide.setAttribute('display', 'none');
-    this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.outlineG, this.hlG, this.previewG, this.guide);
+    this.sheetG.append(this.coversG, this.coverDraftG, this.objectsG, this.draftG, this.selG, this.ghostG, this.outlineG, this.hlG, this.previewG, this.guide);
     const svg = svgEl('svg', { class: 'viewer-overlay', 'aria-hidden': 'true' });
     this.snapG.append(this.snapLabel);
     this.originG.innerHTML = originSymbolMarkup();
@@ -144,7 +150,7 @@ export class SceneOverlay {
     this.ty = ty;
     this.zoom = zoom;
     this.sheetG.setAttribute('transform', `translate(${tx} ${ty}) scale(${zoom})`);
-    if (zoomChanged) for (const s of [...this.strokes, ...this.draftStrokes]) this.applyWidth(s);
+    if (zoomChanged) for (const s of [...this.strokes, ...this.draftStrokes, ...this.ghostStrokes]) this.applyWidth(s);
     this.placeScreenItems();
     this.drawGrid();
   }
@@ -175,28 +181,54 @@ export class SceneOverlay {
   }
 
   // ---- Oggetti ----
-  setObjects(items: readonly DrawItem[]): void {
-    this.strokes = this.previewStroke ? [this.previewStroke] : [];
+  /** Gli elementi SVG di una scena: coperture (sotto) e resto (sopra), con i tratti da ridimensionare registrati in `track`. `ghost`: coperture solo in contorno. */
+  private itemEls(items: readonly DrawItem[], track: StrokeEl[], ghost: boolean): { covers: SVGElement[]; els: SVGElement[] } {
     const els: SVGElement[] = [];
     const covers: SVGElement[] = [];
     for (const it of items) {
       if (it.kind === 'cover') {
         const el = coverEl(it.cover);
+        if (ghost) {
+          el.setAttribute('fill', 'none');
+          el.setAttribute('stroke', 'currentColor');
+          el.setAttribute('stroke-width', '1.5');
+          el.setAttribute('vector-effect', 'non-scaling-stroke');
+        }
         el.dataset.id = String(it.id);
         covers.push(el);
       } else if (it.kind === 'line' || it.kind === 'curve') {
         const s = it.kind === 'line' ? this.makeStroke(it.points, it.stroke) : this.makeStrokeD(svgArcPath(it.arc), it.stroke);
         s.el.dataset.id = String(it.id);
-        this.strokes.push(s);
+        track.push(s);
         els.push(s.el);
       } else {
-        const g = this.layoutGroup(it.layout, this.strokes);
+        const g = this.layoutGroup(it.layout, track);
         g.dataset.id = String(it.id);
         els.push(g);
       }
     }
+    return { covers, els };
+  }
+
+  setObjects(items: readonly DrawItem[]): void {
+    this.strokes = this.previewStroke ? [this.previewStroke] : [];
+    const { covers, els } = this.itemEls(items, this.strokes, false);
     this.coversG.replaceChildren(...covers);
     this.objectsG.replaceChildren(...els);
+  }
+
+  /**
+   * Anteprima di una trasformazione (CP6e): gli oggetti come sarebbero dopo, nello stesso disegno degli oggetti veri ma semitrasparenti, sopra la scena. Vuoto = nessuna
+   * anteprima. Solo a schermo: non fa parte della scena che si esporta.
+   */
+  setGhost(items: readonly DrawItem[]): void {
+    this.ghostStrokes = [];
+    if (items.length === 0) {
+      this.ghostG.replaceChildren();
+      return;
+    }
+    const { covers, els } = this.itemEls(items, this.ghostStrokes, true);
+    this.ghostG.replaceChildren(...covers, ...els);
   }
 
   /** Copertura in costruzione: riempimento bianco nello strato delle coperture (sotto gli oggetti) e contorno sottile sopra. */
@@ -211,19 +243,35 @@ export class SceneOverlay {
     this.selG.replaceChildren(...(shape ? shapeEls(shape) : []));
   }
 
-  /** Durante il trascinamento: sposta (dx, dy pt del foglio) l'oggetto `id` e la sua evidenziazione, senza ridisegnare. Null = rimette a posto. */
-  setDragOffset(id: number | null, dx: number, dy: number): void {
-    const tr = id === null ? null : `translate(${dx} ${dy})`;
+  /**
+   * Durante il trascinamento: sposta (dx, dy pt del foglio) l'oggetto `id`, o tutti gli oggetti di un elenco (selezione multipla, CP6e), e la loro evidenziazione, senza
+   * ridisegnare. Gli elementi si cercano una volta sola per gesto (con 1.000 oggetti una ricerca a ogni movimento del mouse sarebbe quadratica). Null = rimette a posto.
+   */
+  setDragOffset(ids: number | readonly number[] | null, dx: number, dy: number): void {
+    const list = ids === null ? null : typeof ids === 'number' ? [ids] : ids;
+    const tr = list === null ? null : `translate(${dx} ${dy})`;
     const apply = (el: Element | null): void => {
       if (!el) return;
       if (tr) el.setAttribute('transform', tr);
       else el.removeAttribute('transform');
     };
     apply(this.selG);
-    for (const g of [this.coversG, this.objectsG]) {
-      for (const el of g.querySelectorAll('[transform]')) el.removeAttribute('transform');
-      if (id !== null) apply(g.querySelector(`[data-id="${id}"]`));
+    if (list === null) {
+      for (const el of this.dragEls ?? []) el.removeAttribute('transform');
+      this.dragEls = null;
+      this.dragKey = '';
+      return;
     }
+    const key = list.join(',');
+    if (this.dragEls === null || key !== this.dragKey) {
+      for (const el of this.dragEls ?? []) el.removeAttribute('transform');
+      const want = new Set(list.map(String));
+      const found: Element[] = [];
+      for (const g of [this.coversG, this.objectsG]) for (const el of Array.from(g.children)) if (want.has((el as SVGElement).dataset.id ?? '')) found.push(el);
+      this.dragEls = found;
+      this.dragKey = key;
+    }
+    for (const el of this.dragEls) apply(el);
   }
 
   /** Testo o quota in corso di scrittura (bozza): stesso disegno degli oggetti, non ancora nel documento. */

@@ -59,11 +59,14 @@ export interface ViewerHooks {
   onErase?: (sheet: SheetPoint, tolPt: number) => void;
   /** Modo 'erase': posizione di dito o mouse per evidenziare l'oggetto che verrebbe cancellato; null quando finisce. */
   onErasePreview?: (sheet: SheetPoint | null, tolPt: number) => void;
-  /** Modo 'select': tocco o clic fermo, anche fuori dalla pagina. `tolPt` = tolleranza in pt del foglio (pixel di schermo / zoom). */
-  onSelect?: (sheet: SheetPoint, tolPt: number) => void;
-  /** Modo 'select': il punto premuto e' sull'oggetto selezionato (entro la tolleranza)? Se si', trascinare lo sposta. */
+  /**
+   * Modo 'select': tocco o clic fermo, anche fuori dalla pagina. `tolPt` = tolleranza in pt del foglio (pixel di schermo / zoom). `additive` (CP6e): Ctrl (o Cmd) era premuto
+   * quando il clic e' cominciato, quindi l'oggetto si AGGIUNGE alla selezione o se ne TOGLIE; senza, la selezione diventa quell'oggetto. Parametro facoltativo: le chiamate di prima restano valide.
+   */
+  onSelect?: (sheet: SheetPoint, tolPt: number, additive?: boolean) => void;
+  /** Modo 'select': il punto premuto e' su uno degli oggetti selezionati (entro la tolleranza)? Se si', trascinare sposta tutta la selezione. */
   canGrab?: (sheet: SheetPoint, tolPt: number) => boolean;
-  /** Modo 'select': trascinamento dell'oggetto selezionato, spostamento dall'inizio in pt del foglio. */
+  /** Modo 'select': trascinamento della selezione (uno o piu' oggetti), spostamento dall'inizio in pt del foglio. */
   onDragMove?: (dx: number, dy: number) => void;
   onDragEnd?: (dx: number, dy: number) => void;
   /** Trascinamento interrotto (secondo dito, annullamento del sistema, cambio di modo): l'oggetto torna dov'era. */
@@ -124,7 +127,7 @@ export class PdfViewer {
   /** Tocco in corso in modo 'erase': diventa trascinamento se il dito si muove oltre TAP_SLOP_PX. */
   private tap: { id: number; start: Pt; moved: boolean; touch: boolean } | null = null;
   /** Tocco in corso in modo 'select': `grab` = e' partito sull'oggetto selezionato, quindi trascinare lo sposta. */
-  private sel: { id: number; start: Pt; moved: boolean; grab: boolean; touch: boolean } | null = null;
+  private sel: { id: number; start: Pt; moved: boolean; grab: boolean; touch: boolean; additive: boolean } | null = null;
   /** Ultima posizione del mouse senza tasti (per rifare l'anteprima). */
   private lastHover: Pt | null = null;
   /** Passo della griglia in pt del foglio, o null se spenta: si riapplica a ogni pagina (le dimensioni cambiano). */
@@ -252,9 +255,13 @@ export class PdfViewer {
   setCoverDraft(cover: SheetCover | null): void {
     this.overlay.setCoverDraft(cover);
   }
-  /** Sposta a schermo (pt del foglio) l'oggetto `id` mentre lo si trascina; `null` rimette tutto a posto. */
-  setDragOffset(id: number | null, dx: number, dy: number): void {
-    this.overlay.setDragOffset(id, dx, dy);
+  /** Sposta a schermo (pt del foglio) l'oggetto `id` (o tutti quelli dell'elenco) mentre li si trascina; `null` rimette tutto a posto. */
+  setDragOffset(ids: number | readonly number[] | null, dx: number, dy: number): void {
+    this.overlay.setDragOffset(ids, dx, dy);
+  }
+  /** Anteprima di una trasformazione (CP6e): gli oggetti come diventerebbero, semitrasparenti; elenco vuoto = nessuna anteprima. Solo a schermo. */
+  setGhost(items: readonly DrawItem[]): void {
+    this.overlay.setGhost(items);
   }
   /** Testo o quota in corso di scrittura. */
   setDraft(layout: Layout | null): void {
@@ -304,6 +311,7 @@ export class PdfViewer {
     this.overlay.setSelection(null);
     this.overlay.setCoverDraft(null);
     this.overlay.setDragOffset(null, 0, 0);
+    this.overlay.setGhost([]);
     this.overlay.setPreview(null);
     this.overlay.setGuide(null);
     this.overlay.setMarkers([]);
@@ -486,8 +494,11 @@ export class PdfViewer {
       this.clearTap();
     }
     if (this.mode === 'select' && primary) {
-      const grab = this.hooks.canGrab?.(this.toSheet(pos), this.hitTol(touch)) ?? false;
-      this.sel = { id: e.pointerId, start: pos, moved: false, grab, touch };
+      // Ctrl (o Cmd) premuto all'inizio del gesto: e' un clic additivo sulla selezione, quindi NON si avvia il trascinamento anche se il punto e' su un oggetto selezionato
+      // (Ctrl + clic su un oggetto selezionato lo toglie anche se il puntatore si muove di poco, entro TAP_SLOP_PX; oltre, il gesto sposta la vista).
+      const additive = e.ctrlKey || e.metaKey;
+      const grab = !additive && (this.hooks.canGrab?.(this.toSheet(pos), this.hitTol(touch)) ?? false);
+      this.sel = { id: e.pointerId, start: pos, moved: false, grab, touch, additive };
     } else {
       this.cancelSelect(); // un secondo dito annulla un eventuale trascinamento: si passa al pinch
     }
@@ -580,7 +591,7 @@ export class PdfViewer {
       const pos = this.local(e);
       if (e.type !== 'pointerup') {
         if (sel.moved && sel.grab) this.hooks.onDragCancel?.();
-      } else if (!sel.moved) this.hooks.onSelect?.(this.toSheet(pos), this.hitTol(sel.touch));
+      } else if (!sel.moved) this.hooks.onSelect?.(this.toSheet(pos), this.hitTol(sel.touch), sel.additive);
       else if (sel.grab) this.hooks.onDragEnd?.((pos.x - sel.start.x) / this.zoom, (pos.y - sel.start.y) / this.zoom);
     }
     this.resetBaseline();

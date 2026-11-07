@@ -1768,3 +1768,9 @@ body.app-mode {
     padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
   }
 }
+
+/* Anteprima di una trasformazione (CP6e): gli oggetti come diventerebbero, semitrasparenti, sopra la scena e sotto i contorni; solo a schermo, mai esportata. */
+.sc-ghost {
+  opacity: 0.6;
+  color: var(--cad-measure); /* contorno delle coperture (`currentColor`) */
+}
