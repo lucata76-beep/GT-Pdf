@@ -7,7 +7,7 @@ import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText
 import { CURVE_TYPES, type CurveKind, arcProblem, curveOnSheet } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
 import { distToShape, pickTop } from '../geometry/hit';
-import { type Layout, type Shape, layoutDimension, layoutText } from '../geometry/layout';
+import { type Layout, type Shape, layoutDimension, layoutText, unionShapes } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
 import { fmt, fmtTrim } from '../geometry/numbers';
 import { type OriginFrame, inPageWithEps, originFrame, relToSheet, relUnitLabel, sheetToRel } from '../geometry/origin';
@@ -16,9 +16,11 @@ import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { GRID_DEFAULT_MM, GRID_MIN_SCREEN_PX, gridStepPt, gridVisible } from '../geometry/grid';
 import { SNAP_LABEL, type SnapHit, type SnapKind, findSnap, snapRadiusPt } from '../geometry/snap';
+import { type PlannedMove, type TransformSpec, planTransform, specProblem } from '../geometry/transform';
 import { type Command, History } from '../model/history';
 import {
   AddObject,
+  AddObjects,
   type ArcObject,
   type CircleObject,
   type CoverObject,
@@ -29,10 +31,14 @@ import {
   type ObjectProps,
   type PageObject,
   RemoveObject,
+  RemoveObjects,
   SetOrigin,
   SetProps,
   SetScale,
   type TextObject,
+  TransformObjects,
+  cloneObject,
+  countLabel,
   drawOrder,
   hasStroke,
   isCurve,
@@ -40,12 +46,14 @@ import {
   objectLabel,
   objectNoun,
   patchedProps,
+  pointsOf,
   propsEqual,
   propsOf,
 } from '../model/model';
 import { type DrawItem, buildDrawItems, objectLayoutFor, sheetLine } from '../model/scene';
 import { DEFAULT_STROKE, type Stroke } from '../model/stroke';
-import { addedMessage, deletedMessage, movedMessage, selectedText } from './messages';
+import { VERB_LABEL, addedMessage, copiedMessage, deletedManyMessage, deletedMessage, duplicatedMessage, movedMessage, selectedManyText, selectedText, transformedManyMessage, transformedMessage } from './messages';
+import { ANGLE_MAX_LENGTH, parseAngle } from './angle';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile, makeProjectFile } from '../export/deliver';
 import { exportFileName, projectFileName } from '../export/fileName';
@@ -70,7 +78,7 @@ import { type MenuEntry, menuButton } from '../ui/menu';
 import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
 import { TouchReadout } from '../ui/touchReadout';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
-import { Construction, type ConstructionTool } from './construction';
+import { Construction, type ConstructionTool, type TransformTool, isTransformTool } from './construction';
 import { OUTSIDE_MESSAGE, SHELL_MAX_LENGTH, parseShellPoint, parseShellRadius } from './shell';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 
@@ -106,6 +114,11 @@ const TOOLS: Tool[] = [
   { id: 'cover', label: 'Copertura', icon: 'square', mode: 'pick', needsDoc: true },
   // Origine (CP6d): strumento a un colpo armato dal menu Origine, NON in palette (la palette e' misurata per l'iPhone); dopo il clic si torna allo strumento di prima.
   { id: 'origin', label: 'Origine', icon: 'scaling', mode: 'pick', needsDoc: true, hidden: true },
+  // Sposta, Specchio, Rotazione (CP6e): strumenti a punti che trasformano la SELEZIONE; si armano dai pulsanti della barra contestuale o dal menu Modifica con lo strumento
+  // Seleziona, NON stanno in palette (come l'Origine: la palette e' misurata per l'iPhone). La selezione resta mentre sono armati.
+  { id: 'move', label: 'Sposta', icon: 'mouse-pointer', mode: 'pick', needsDoc: true, hidden: true },
+  { id: 'mirror', label: 'Specchio', icon: 'mouse-pointer', mode: 'pick', needsDoc: true, hidden: true },
+  { id: 'rotate', label: 'Rotazione', icon: 'mouse-pointer', mode: 'pick', needsDoc: true, hidden: true },
 ];
 const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase' && id !== 'select';
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
@@ -156,8 +169,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let curveKind: CurveKind = 'circle';
   /** Lo strumento a cui tornare dopo il clic dell'Origine (strumento a un colpo, CP6d) o dopo averla disarmata; null se l'Origine non e' armata. */
   let originReturn: ToolId | null = null;
-  /** Oggetto selezionato (id) nella pagina corrente, solo con lo strumento Seleziona. */
-  let selected: number | null = null;
+  /**
+   * Oggetti selezionati (id) nella pagina corrente: uno o piu' (CP6e, Ctrl + clic), solo con lo strumento Seleziona (e mentre Sposta, Specchio o Rotazione sono armati).
+   * Si sostituisce sempre con un nuovo insieme (mai modificato sul posto). Si azzera con cambio di pagina, cambio di strumento, Esc e chiusura del documento.
+   */
+  let selection: ReadonlySet<number> = new Set();
+  /** "Mantieni l'originale" (decisione 77): spento di partenza; stato della sessione, NON si salva nel progetto. */
+  let keepOriginal = false;
+  /** Gli id che sta spostando il trascinamento in corso (calcolati una volta per gesto). */
+  let dragIds: number[] | null = null;
+  /** L'anteprima di una trasformazione e' sul foglio / l'ultimo motivo di rifiuto mostrato (per dirlo una volta sola e non a ogni movimento del mouse). */
+  let ghostShown = false;
+  let lastTransformProblem: string | null = null;
   /** Punto che verrebbe inserito adesso (mira o passaggio del mouse), nello spazio utente. */
   let currentAim: UserPoint | null = null;
   /** Testo o valore di quota in corso di scrittura con il tastierino (non e' ancora nel documento). */
@@ -207,6 +230,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         say(addedMessage(obj, arc ? `raggio ${mmText(arc.r)}` : undefined));
       },
       origin: (at) => onOriginPoint(at),
+      transform: (kind, points) => onTransformPoints(kind, points),
       reject: say,
     },
   );
@@ -408,15 +432,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     'separator',
     { label: 'Diagnostica', onSelect: opts.openDiagnostics },
   ];
-  const editMenu = (): MenuEntry[] => [
-    { label: 'Annulla', hint: construction.pending ? 'ultimo punto' : (history.nextUndo ?? undefined), disabled: !canUndo(), onSelect: () => undoAction() },
-    { label: 'Ripeti', hint: history.nextRedo ?? undefined, disabled: !history.canRedo, onSelect: () => redoAction() },
-    'separator',
-    { label: 'Seleziona / sposta', disabled: !pdf, onSelect: () => selectTool('select') },
-    { label: 'Copia', hint: 'V2', disabled: true },
-    { label: 'Duplica', hint: 'V2', disabled: true },
-    { label: 'Cancella', disabled: !pdf, onSelect: () => selectTool('erase') },
-  ];
+  const editMenu = (): MenuEntry[] => {
+    // Le voci sulla selezione (CP6e) valgono con lo strumento Seleziona e almeno un oggetto selezionato; la Rotazione anche solo con mouse o trackpad (l'angolo si digita).
+    const hasSel = !!pdf && tool === 'select' && selection.size > 0;
+    return [
+      { label: 'Annulla', hint: construction.pending ? 'ultimo punto' : (history.nextUndo ?? undefined), disabled: !canUndo(), onSelect: () => undoAction() },
+      { label: 'Ripeti', hint: history.nextRedo ?? undefined, disabled: !history.canRedo || isTransformTool(tool), onSelect: () => redoAction() },
+      'separator',
+      { label: 'Seleziona / sposta', disabled: !pdf, onSelect: () => selectTool('select') },
+      { label: 'Sposta selezione', disabled: !hasSel, onSelect: () => armTransform('move') },
+      { label: 'Specchia selezione', disabled: !hasSel, onSelect: () => armTransform('mirror') },
+      { label: 'Ruota selezione', hint: desktopPointer() ? undefined : 'mouse', disabled: !hasSel || !desktopPointer(), onSelect: () => armTransform('rotate') },
+      { label: 'Duplica selezione', disabled: !hasSel, onSelect: () => duplicateSelected() },
+      { label: 'Cancella selezione', disabled: !hasSel, onSelect: () => deleteSelected() },
+      { label: 'Cancella', disabled: !pdf, onSelect: () => selectTool('erase') },
+    ];
+  };
   const insertMenu = (): MenuEntry[] => [
     { label: 'Retta', disabled: !pdf, onSelect: () => selectTool('segment') },
     { label: 'Linea', disabled: !pdf, onSelect: () => selectTool('polyline') },
@@ -483,9 +514,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
 
   // ---------- Proprieta' ----------
-  /** L'oggetto selezionato, se c'e' (solo con lo strumento Seleziona). */
+  /** L'oggetto selezionato se ce n'e' UNO solo (solo con lo strumento Seleziona): con piu' oggetti le proprieta' non lavorano sul gruppo (CP6e). */
   function selObj(): PageObject | undefined {
-    return selected === null ? undefined : model.get(pageNo, selected);
+    if (selection.size !== 1) return undefined;
+    const [id] = selection;
+    return id === undefined ? undefined : model.get(pageNo, id);
+  }
+  /** Gli oggetti selezionati, nell'ordine dell'elenco del modello (le copie e i comandi usano questo ordine). */
+  function selectedObjects(): PageObject[] {
+    if (selection.size === 0) return [];
+    const out: PageObject[] = [];
+    for (const o of model.objects(pageNo)) if (selection.has(o.id)) out.push(o);
+    return out;
   }
   /** Quali controlli servono a un oggetto: quelli delle sue proprieta' (la copertura non ne ha). */
   const kindOfObject = (o: PageObject): StyleKind => (hasStroke(o) ? 'line' : o.kind === 'text' ? 'text' : o.kind === 'dim' ? 'dim' : 'none');
@@ -509,6 +549,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       return o ? propsView(o).stroke : stroke;
     },
     set: (patch) => {
+      if (selection.size >= 2) return; // con piu' oggetti selezionati i controlli non lavorano sul gruppo e NON devono cambiare le proprieta' dei nuovi oggetti
       const o = selObj();
       if (o) editSelected(o, patch);
       else {
@@ -521,6 +562,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       return o ? propsView(o).textPt : textPt;
     },
     setTextPt: (pt) => {
+      if (selection.size >= 2) return;
       const o = selObj();
       if (o) editSelected(o, { textPt: pt });
       else {
@@ -538,7 +580,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return o ? kindOfObject(o) : tool === 'text' ? 'text' : tool === 'dim' ? 'dim' : 'line';
   };
   const refreshStyleChip = (): void => {
-    const kind = styleKind();
+    const multi = selection.size >= 2;
+    const kind = multi ? 'none' : styleKind();
     const o = selObj();
     const s = styleBinding.get();
     const aa = (): HTMLElement => {
@@ -552,7 +595,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     );
     styleChip.setAttribute('aria-label', o ? "Proprietà dell'oggetto selezionato" : 'Proprietà del nuovo oggetto');
     popoverStyle.setKind(kind);
-    inspectorStyle.setKind(o ? kind : 'all');
+    inspectorStyle.setKind(o ? kind : multi ? 'none' : 'all');
   };
   function onStyleChanged(): void {
     inspectorStyle.refresh();
@@ -564,7 +607,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Barra contestuale ----------
   const ctxHint = h('p', { class: 'ctx-hint', 'aria-live': 'polite' });
-  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => (tool === 'origin' ? disarmOrigin() : cancelConstruction()) }, 'Annulla');
+  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => (tool === 'origin' ? disarmOrigin() : isTransformTool(tool) ? cancelTransform() : cancelConstruction()) }, 'Annulla');
   const finishBtn = h('button', { class: 'btn primary ctx-act', type: 'button', onclick: () => finishLine() }, icon('check'), 'Fine');
   const dimTypeBtns = new Map<DimType, HTMLButtonElement>();
   const dimTypes = h('div', { class: 'ctx-types seg', role: 'group', 'aria-label': 'Tipo di quota', hidden: true });
@@ -601,8 +644,30 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   });
   const shellUnit = h('span', { class: 'ctx-shell-unit num' }, 'mm');
   const shellBox = h('div', { class: 'ctx-shell', hidden: true }, shellInput, shellUnit);
+  // Trasformazioni (CP6e): pulsanti Sposta, Specchio, Rotazione con lo strumento Seleziona (sempre presenti, disattivati senza selezione: la barra non cambia altezza
+  // selezionando), e durante la trasformazione l'interruttore "Mantieni l'originale" e, per la Rotazione, la casella dell'angolo (come la shell: solo con un puntatore
+  // preciso con hover) e il pulsante "Origine" come centro.
+  const trBtn = (kind: TransformTool, label: string, title: string): HTMLButtonElement =>
+    h('button', { class: 'btn ctx-act ctx-tr', type: 'button', 'data-transform': kind, title, onclick: () => armTransform(kind) }, label);
+  const trMoveBtn = trBtn('move', 'Sposta', 'Sposta la selezione: punto base e punto di arrivo');
+  const trMirrorBtn = trBtn('mirror', 'Specchio', 'Specchia la selezione rispetto a un asse indicato con due punti');
+  const trRotateBtn = trBtn('rotate', 'Rotazione', 'Ruota la selezione attorno a un centro: digita l\'angolo in gradi (solo con mouse o trackpad)');
+  const keepBtn = h('button', { class: 'btn ctx-act ctx-keep', type: 'button', 'aria-pressed': 'false', hidden: true, title: 'Acceso: gli originali restano e la trasformazione crea copie', onclick: () => setKeepOriginal(!keepOriginal) }, 'Mantieni l\'originale');
+  const angleInput = h('input', {
+    class: 'field num ctx-angle-input',
+    type: 'text',
+    autocomplete: 'off',
+    autocapitalize: 'off',
+    spellcheck: 'false',
+    maxlength: ANGLE_MAX_LENGTH,
+    placeholder: 'gradi',
+    title: 'Angolo in gradi decimali con il punto; positivo = antiorario, negativo = orario',
+    'aria-label': 'Angolo di rotazione in gradi (positivo antiorario)',
+  });
+  const originCenterBtn = h('button', { class: 'btn ctx-act ctx-origin-center', type: 'button', title: 'Usa l\'origine della pagina come centro', onclick: () => useOriginAsCenter() }, 'Origine');
+  const angleBox = h('div', { class: 'ctx-angle', hidden: true }, angleInput, h('span', { class: 'ctx-angle-unit num' }, '°'), originCenterBtn);
   const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, shellBox, h('div', { class: 'ctx-actions' }, styleChip, cancelBtn, finishBtn), popover);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, shellBox, angleBox, h('div', { class: 'ctx-actions' }, styleChip, trMoveBtn, trMirrorBtn, trRotateBtn, keepBtn, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -677,10 +742,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     secs.push(section('Aggancio e griglia', snapPanelToggles, gridCtl.el));
     const so = selObj();
+    const nSel = selection.size;
     secs.push(
       section(
-        so ? 'Proprietà (oggetto selezionato)' : 'Proprietà (nuovi oggetti)',
+        so ? 'Proprietà (oggetto selezionato)' : nSel >= 2 ? `Proprietà (${nSel} oggetti selezionati)` : 'Proprietà (nuovi oggetti)',
         ...(so ? [kv('Selezionato', objectLabel(so))] : []),
+        ...(nSel >= 2 ? [h('p', { class: 'hint' }, 'Le proprietà non si cambiano a gruppo: seleziona un solo oggetto. Le proprietà dei nuovi oggetti non cambiano.')] : []),
         ...(so && kindOfObject(so) === 'none' ? [h('p', { class: 'hint' }, 'Le coperture sono bianche e senza bordo: non hanno proprietà da cambiare.')] : []),
         inspectorStyle.el,
       ),
@@ -775,7 +842,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   root.replaceChildren(app);
 
   // ---------- Strumenti ----------
-  function selectTool(id: ToolId): void {
+  /** `keepSelection`: la selezione resta (fine o annullamento di una trasformazione); Sposta, Specchio e Rotazione la tengono sempre. */
+  function selectTool(id: ToolId, opts: { keepSelection?: boolean } = {}): void {
     const def = TOOLS.find((t) => t.id === id);
     if (!def || def.cp) return;
     if (def.needsDoc && !pdf) return;
@@ -783,9 +851,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (id !== 'origin') originReturn = null; // l'Origine armata si disarma scegliendo un altro strumento
     shellInput.value = '';
     shellInput.removeAttribute('aria-invalid');
+    angleInput.value = '';
+    angleInput.removeAttribute('aria-invalid');
     tool = id;
-    selected = null; // la selezione vale solo con lo strumento Seleziona
-    viewer.setSelection(null);
+    if (!(opts.keepSelection || isTransformTool(id))) selection = new Set(); // la selezione vale solo con lo strumento Seleziona
+    renderSelection();
     toggleProps(false);
     construction.setTool(isConstructionTool(id) ? id : null);
     if (id === 'dim') construction.setDimType(dimType);
@@ -794,7 +864,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     currentAim = null;
     viewer.setMode(def.mode ?? 'pan');
     viewer.setHighlight(null);
-    for (const [tid, b] of toolBtns) b.setAttribute('aria-pressed', String(tid === id));
+    clearGhost();
+    for (const [tid, b] of toolBtns) b.setAttribute('aria-pressed', String(tid === (isTransformTool(id) ? 'select' : id))); // durante una trasformazione resta acceso Seleziona
     floatDist.setAttribute('aria-pressed', String(id === 'distance'));
     say('');
     refreshStyleChip();
@@ -879,13 +950,16 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
 
   // ---------- Selezione ----------
+  /** Evidenzia la selezione: l'unione delle forme degli oggetti selezionati, con lo stesso alone e la stessa cornice di un oggetto solo (nessun riquadro complessivo). */
   function renderSelection(): void {
-    const o = selObj();
-    viewer.setSelection(o ? shapeOf(o) : null);
+    const objs = selectedObjects();
+    viewer.setSelection(objs.length > 0 ? unionShapes(objs.map(shapeOf)) : null);
   }
-  function setSelected(id: number | null): void {
-    selected = id;
+  /** Sostituisce la selezione (anche con nessun oggetto). */
+  function setSelection(ids: Iterable<number>): void {
+    selection = new Set(ids);
     viewer.setDragOffset(null, 0, 0);
+    if (selection.size >= 2) toggleProps(false); // con piu' oggetti non ci sono proprieta' da cambiare
     renderSelection();
     refreshStyleChip();
     renderInspector();
@@ -912,6 +986,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const aim = construction.done || construction.locked ? null : currentAim;
     viewer.setDraft(null);
     viewer.setCoverDraft(null);
+    if (!isTransformTool(t)) clearGhost();
     if (!geom || !pdf) {
       viewer.setMarkers([]);
       viewer.setPreview(null);
@@ -958,6 +1033,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       else if (a && aim && pts.length === 1) viewer.setPreview([a, aim], stroke);
       else if (a && b && aim && pts.length === 2 && arcProblem(a, b, aim) === null) viewer.setArcPreview(curveOnSheet({ kind: 'arc', p1: a, p2: b, p3: aim }, geom), stroke);
       else viewer.setPreview(null);
+    } else if (isTransformTool(t)) {
+      // Sposta, Specchio, Rotazione (CP6e): punti indicati, guida dal primo punto al cursore e anteprima di come diventerebbe la selezione (solo a schermo, mai esportata)
+      viewer.setMarkers(pts.map((p, i) => ({ p, label: t === 'rotate' ? undefined : String(i + 1) })));
+      viewer.setPreview(null);
+      viewer.setBadge(null);
+      const line = t !== 'rotate' && aim && pts.length === 1 ? [...pts, aim] : null;
+      viewer.setGuide(line);
+      updateGhost(geom);
     } else if (t === 'segment' || t === 'polyline') {
       const line = aim && pts.length > 0 ? [...pts, aim] : pts;
       viewer.setMarkers(pts.map((p) => ({ p })));
@@ -987,6 +1070,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ctxBar.dataset.tool = tool;
     const constructing = isConstructionTool(tool);
     const so = selObj();
+    const nSel = selection.size;
+    const inTransform = isTransformTool(tool);
     ctxHint.textContent = constructing
       ? construction.prompt
       : tool === 'erase'
@@ -994,7 +1079,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         : tool === 'select'
           ? so
             ? selectedText(so) // testi brevi: la barra contestuale non deve cambiare altezza selezionando un oggetto
-            : 'Seleziona: tocca un oggetto, poi trascinalo'
+            : nSel >= 2
+              ? selectedManyText(nSel)
+              : desktopPointer()
+                ? 'Seleziona: clic su un oggetto, Ctrl + clic per più oggetti'
+                : 'Seleziona: tocca un oggetto, poi trascinalo'
           : '';
     const shellStep = shellStepNow();
     shellBox.hidden = shellStep === null;
@@ -1014,8 +1103,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     // Con Seleziona il riquadro occupa sempre il suo posto (invisibile se non c'e' nulla da cambiare): se comparisse
     // solo con un oggetto selezionato, selezionare farebbe cambiare altezza alla barra e il foglio si ridimensionerebbe sotto il dito.
     styleChip.classList.toggle('ghost', tool === 'select' && !(so !== undefined && kindOfObject(so) !== 'none'));
+    // Trasformazioni (CP6e): con Seleziona i tre pulsanti (attivi se c'e' una selezione; la Rotazione anche solo con un puntatore preciso); durante la trasformazione
+    // l'interruttore "Mantieni l'originale", per la Rotazione la casella dell'angolo e il pulsante Origine.
+    for (const b of [trMoveBtn, trMirrorBtn, trRotateBtn]) b.hidden = tool !== 'select';
+    trMoveBtn.disabled = nSel === 0;
+    trMirrorBtn.disabled = nSel === 0;
+    trRotateBtn.disabled = nSel === 0 || !desktopPointer();
+    keepBtn.hidden = !inTransform;
+    keepBtn.setAttribute('aria-pressed', String(keepOriginal));
+    angleBox.hidden = tool !== 'rotate';
+    originCenterBtn.disabled = !pdf || model.origin(pageNo) === null;
     cancelBtn.hidden = !constructing;
-    cancelBtn.disabled = tool !== 'origin' && !(construction.pending || construction.done || construction.locked); // con l'Origine armata Annulla la disarma
+    cancelBtn.disabled = tool !== 'origin' && !inTransform && !(construction.pending || construction.done || construction.locked); // con l'Origine armata (o una trasformazione) Annulla la disarma
     finishBtn.hidden = tool !== 'polyline';
     finishBtn.disabled = pts.length < 2 || construction.done;
     if (!active) toggleProps(false);
@@ -1103,6 +1202,172 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       } else if (construction.pending) cancelConstruction();
     }
   });
+
+  // ---------- Selezione multipla e trasformazioni (CP6e, decisioni 60 e 75-81) ----------
+  /** Toglie l'anteprima di una trasformazione (se c'era) e dimentica l'ultimo rifiuto mostrato. */
+  function clearGhost(): void {
+    if (ghostShown) {
+      viewer.setGhost([]);
+      ghostShown = false;
+    }
+    lastTransformProblem = null;
+  }
+  function setKeepOriginal(on: boolean): void {
+    keepOriginal = on;
+    say(on ? 'Mantieni l\'originale: acceso. La trasformazione crea copie e gli originali restano.' : 'Mantieni l\'originale: spento. La trasformazione modifica gli oggetti selezionati.');
+    renderConstruction();
+  }
+  /** La trasformazione che si otterrebbe adesso (per l'anteprima), nel foglio, o null se mancano punti o angolo. */
+  function transformSpecNow(g: PageGeometry): TransformSpec | null {
+    const t = construction.tool;
+    const pts = construction.points;
+    if (t === 'move' || t === 'mirror') {
+      const p0 = pts[0];
+      if (!p0 || pts.length !== 1 || !currentAim || construction.locked) return null;
+      const a = g.userToSheet(p0);
+      const b = g.userToSheet(currentAim);
+      return t === 'move' ? { kind: 'move', dx: b.x - a.x, dy: b.y - a.y } : { kind: 'mirror', a, b };
+    }
+    if (t === 'rotate') {
+      const c = pts[0];
+      if (!c) return null;
+      const r = parseAngle(angleInput.value);
+      return r.ok ? { kind: 'rotate', center: g.userToSheet(c), deg: r.value } : null;
+    }
+    return null;
+  }
+  /** Mostra come diventerebbe la selezione; se la trasformazione non e' ammessa (tipo escluso, fuori dai limiti) niente anteprima e il motivo nella riga di stato, una volta. */
+  function updateGhost(g: PageGeometry): void {
+    const spec = transformSpecNow(g);
+    const objs = spec ? selectedObjects() : [];
+    // uno spostamento nullo o un asse di due punti coincidenti e' naturale mentre il mouse si muove: niente anteprima e niente messaggio (li dice il clic)
+    const plan = spec && objs.length > 0 && specProblem(spec) === null ? planTransform(objs, spec, g) : null;
+    if (plan && plan.ok) {
+      const moved = objs.map((o, i) => cloneObject(o, o.id, (plan.moves[i] as PlannedMove).after));
+      viewer.setGhost(buildDrawItems(moved, g, model.scale(pageNo)));
+      ghostShown = true;
+    } else if (ghostShown) {
+      viewer.setGhost([]);
+      ghostShown = false;
+    }
+    const problem = plan && !plan.ok ? plan.reason : null;
+    if (problem !== lastTransformProblem) {
+      if (problem || lastTransformProblem) say(problem ?? '');
+      lastTransformProblem = problem;
+    }
+  }
+
+  /** Arma Sposta, Specchio o Rotazione per la selezione (solo con lo strumento Seleziona e almeno un oggetto). La selezione resta. */
+  function armTransform(kind: TransformTool): void {
+    if (!pdf || tool !== 'select' || selection.size === 0) return;
+    if (kind === 'rotate' && !desktopPointer()) {
+      say('Rotazione: serve un mouse o un trackpad, perché l\'angolo si digita (sul tocco non c\'è in questa versione).');
+      return;
+    }
+    selectTool(kind);
+  }
+  /** Fine di una trasformazione: si torna a Seleziona con la selezione data (gli oggetti trasformati, o le copie). */
+  function endTransform(ids: Iterable<number>): void {
+    selectTool('select', { keepSelection: true });
+    setSelection(ids);
+  }
+  /** Esc, Annulla o un altro modo di lasciar perdere: nessuna modifica, la selezione resta com'e'. */
+  function cancelTransform(): void {
+    if (!isTransformTool(tool)) return;
+    selectTool('select', { keepSelection: true });
+    say('Trasformazione annullata: la selezione resta.');
+  }
+  /**
+   * Esegue la trasformazione sulla selezione: TUTTO O NIENTE (un oggetto non ammesso o un risultato fuori dai limiti rifiuta tutto, con la ragione), UN comando (un solo
+   * Annulla). Con "Mantieni l'originale" acceso crea copie nuove (id nuovi) e gli originali restano. Dopo, la selezione passa agli oggetti trasformati (o alle copie).
+   */
+  function applyTransform(spec: TransformSpec): boolean {
+    const g = viewer.geometry;
+    const objs = selectedObjects();
+    if (!g || !pdf || objs.length === 0) return false;
+    const plan = planTransform(objs, spec, g);
+    if (!plan.ok) {
+      say(plan.reason);
+      return false;
+    }
+    const label = `${VERB_LABEL[spec.kind]} ${countLabel(objs)}`;
+    let next: number[];
+    let msg: string;
+    if (keepOriginal) {
+      const copies = objs.map((o, i) => cloneObject(o, model.newId(), (plan.moves[i] as PlannedMove).after));
+      history.exec(new AddObjects(pageNo, `${label} (copia)`, copies));
+      next = copies.map((c) => c.id);
+      msg = copiedMessage(spec.kind, objs.length);
+    } else {
+      history.exec(new TransformObjects(pageNo, label, plan.moves));
+      next = objs.map((o) => o.id);
+      msg = objs.length === 1 ? transformedMessage(spec.kind, objs[0] as PageObject) : transformedManyMessage(spec.kind, objs.length);
+    }
+    endTransform(next);
+    say(msg);
+    return true;
+  }
+  /** I punti di Sposta e Specchio sono completi, o il centro della Rotazione e' stato indicato. Dice se l'app li accetta (vedi `ConstructionEvents.transform`). */
+  function onTransformPoints(kind: TransformTool, pts: UserPoint[]): boolean {
+    const g = viewer.geometry;
+    if (!g) return false;
+    if (kind === 'rotate') {
+      say('');
+      if (desktopPointer()) angleInput.focus(); // il passo dopo il centro e' solo digitare l'angolo (a differenza della shell, che non prende il fuoco da sola)
+      return true;
+    }
+    const a = g.userToSheet(pts[0] as UserPoint);
+    const b = g.userToSheet(pts[1] as UserPoint);
+    return applyTransform(kind === 'move' ? { kind: 'move', dx: b.x - a.x, dy: b.y - a.y } : { kind: 'mirror', a, b });
+  }
+  function useOriginAsCenter(): void {
+    const o = model.origin(pageNo);
+    if (tool !== 'rotate' || !o) return;
+    construction.place(o);
+    renderConstruction();
+  }
+  function angleError(message: string): void {
+    say(message);
+    angleInput.setAttribute('aria-invalid', 'true');
+  }
+  /** Invio nella casella dell'angolo: ruota la selezione attorno al centro indicato. */
+  function submitAngle(): void {
+    const g = viewer.geometry;
+    const c = construction.points[0];
+    if (tool !== 'rotate' || !g) return;
+    if (!c) return angleError('Indica prima il centro: un clic sul foglio o il pulsante Origine.');
+    const r = parseAngle(angleInput.value);
+    if (!r.ok) return angleError(r.error);
+    if (!applyTransform({ kind: 'rotate', center: g.userToSheet(c), deg: r.value })) angleInput.setAttribute('aria-invalid', 'true');
+  }
+  angleInput.addEventListener('input', () => {
+    angleInput.removeAttribute('aria-invalid');
+    renderConstruction(); // l'anteprima segue l'angolo mentre si digita
+  });
+  angleInput.addEventListener('keydown', (e) => {
+    // Come la shell: i tasti della casella valgono per il TESTO (il gestore globale della tastiera esce per ogni campo di testo): Backspace e Canc non cancellano oggetti.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitAngle();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      if (angleInput.value !== '') {
+        angleInput.value = '';
+        angleInput.removeAttribute('aria-invalid');
+        renderConstruction();
+      } else cancelTransform();
+    }
+  });
+
+  /** Duplica: copie SUL POSTO (stesse coordinate) degli oggetti selezionati, che diventano la nuova selezione (un solo Annulla). */
+  function duplicateSelected(): void {
+    const objs = selectedObjects();
+    if (!pdf || tool !== 'select' || objs.length === 0) return;
+    const copies = objs.map((o) => cloneObject(o, model.newId()));
+    history.exec(new AddObjects(pageNo, `Duplica ${countLabel(objs)}`, copies));
+    setSelection(copies.map((c) => c.id));
+    say(duplicatedMessage(objs));
+  }
 
   async function calibrateFlow(a: UserPoint, b: UserPoint): Promise<void> {
     const geom = viewer.geometry;
@@ -1262,10 +1527,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const objectAt = (sheet: { x: number; y: number }, tol: number): PageObject | null => pickTop(drawOrder(model.objects(pageNo)), shapeOf, sheet, tol);
 
   // ---------- Annulla / ripeti ----------
-  const canUndo = (): boolean => !entry && (construction.pending || history.canUndo);
+  const canUndo = (): boolean => !entry && (construction.pending || (history.canUndo && !isTransformTool(tool))); // durante una trasformazione Annulla toglie solo l'ultimo punto
   function refreshUndoRedo(): void {
     undoBtn.disabled = !canUndo();
-    redoBtn.disabled = entry !== null || !history.canRedo;
+    redoBtn.disabled = entry !== null || !history.canRedo || isTransformTool(tool);
     undoBtn.title = construction.pending ? 'Annulla: toglie l\'ultimo punto' : history.nextUndo ? `Annulla ${history.nextUndo}` : 'Annulla';
     redoBtn.title = history.nextRedo ? `Ripeti ${history.nextRedo}` : 'Ripeti';
   }
@@ -1276,6 +1541,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   }
   function undoAction(): void {
     if (entry) return; // con il tastierino aperto si conferma o si annulla da li'
+    if (isTransformTool(tool) && !construction.pending) {
+      say('Nessun punto da togliere: Esc annulla la trasformazione.');
+      return;
+    }
     if (construction.undoLast()) {
       currentAim = null;
       renderConstruction();
@@ -1288,7 +1557,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     afterHistory(history.undo(), 'Annullato');
   }
   function redoAction(): void {
-    if (entry) return;
+    if (entry || isTransformTool(tool)) return;
     if (!history.canRedo) {
       say('Niente da ripetere');
       return;
@@ -1336,14 +1605,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     say(deletedMessage(o));
   }
   /**
-   * Canc con lo strumento Seleziona: cancella l'oggetto selezionato (CP6b, decisione 57) e azzera la selezione. Il punto da estendere quando la selezione
-   * sara' multipla: un solo comando per tutti gli oggetti scelti (un solo Annulla) al posto del singolo `removeObject`.
+   * Canc con lo strumento Seleziona: cancella TUTTA la selezione (CP6b, decisione 57; CP6e: piu' oggetti) con un solo comando (un solo Annulla) e azzera la selezione.
+   * Con un oggetto solo e' lo stesso comando e lo stesso messaggio di sempre (`removeObject`).
    */
   function deleteSelected(): void {
-    const o = selObj();
-    if (!o) return;
-    removeObject(o);
-    setSelected(null);
+    const objs = selectedObjects();
+    if (!pdf || objs.length === 0) return;
+    if (objs.length === 1) removeObject(objs[0] as PageObject);
+    else {
+      history.exec(new RemoveObjects(pageNo, objs)); // un solo comando: un solo Annulla li rimette tutti al loro posto
+      say(deletedManyMessage(objs.length));
+    }
+    setSelection([]);
   }
   viewer.hooks.onErase = (sheet, tol) => {
     const o = objectAt(sheet, tol);
@@ -1354,33 +1627,61 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     removeObject(o);
   };
   // Seleziona: un tocco sceglie l'oggetto in primo piano; trascinare l'oggetto selezionato lo sposta (un solo comando).
-  viewer.hooks.onSelect = (sheet, tol) => {
+  // Ctrl (o Cmd) + clic: aggiunge l'oggetto alla selezione, o lo toglie se c'e' gia'; nel vuoto non cambia niente. Senza Ctrl: la selezione diventa quell'oggetto (anche
+  // se faceva parte di una selezione multipla) e un clic nel vuoto la azzera, come prima.
+  viewer.hooks.onSelect = (sheet, tol, additive) => {
     const o = objectAt(sheet, tol);
-    setSelected(o ? o.id : null);
-    say(''); // lo dice gia' la barra contestuale: "Selezionata: Retta"
+    if (additive) {
+      if (!o) return;
+      const next = new Set(selection);
+      if (!next.delete(o.id)) next.add(o.id);
+      setSelection(next);
+    } else setSelection(o ? [o.id] : []);
+    say(''); // lo dice gia' la barra contestuale: "Selezionata: Retta" / "Selezionati: 3 oggetti"
   };
-  viewer.hooks.canGrab = (sheet, tol) => {
-    const o = selObj();
-    return o !== undefined && distToShape(sheet, shapeOf(o)) <= tol;
+  // Si afferra con uno qualsiasi degli oggetti selezionati (entro la tolleranza): il trascinamento sposta TUTTA la selezione.
+  viewer.hooks.canGrab = (sheet, tol) => selectedObjects().some((o) => distToShape(sheet, shapeOf(o)) <= tol);
+  viewer.hooks.onDragMove = (dx, dy) => {
+    dragIds ??= [...selection];
+    viewer.setDragOffset(dragIds, dx, dy);
   };
-  viewer.hooks.onDragMove = (dx, dy) => viewer.setDragOffset(selected, dx, dy);
-  viewer.hooks.onDragCancel = () => viewer.setDragOffset(null, 0, 0);
-  viewer.hooks.onDragEnd = (dx, dy) => {
+  viewer.hooks.onDragCancel = () => {
+    dragIds = null;
     viewer.setDragOffset(null, 0, 0);
-    const o = selObj();
+  };
+  viewer.hooks.onDragEnd = (dx, dy) => {
+    dragIds = null;
+    viewer.setDragOffset(null, 0, 0);
+    const objs = selectedObjects();
     const g = viewer.geometry;
-    if (!o || !g) return;
+    if (objs.length === 0 || !g) return;
     const d = g.sheetDeltaToUser(dx, dy); // lo spostamento sul foglio, riportato nello spazio utente PDF
     if (d.x === 0 && d.y === 0) return;
-    history.exec(new MoveObject(pageNo, o, d.x, d.y));
-    say(movedMessage(o));
+    const only = objs[0];
+    if (objs.length === 1 && only) {
+      history.exec(new MoveObject(pageNo, only, d.x, d.y)); // un oggetto: lo stesso comando, la stessa etichetta e lo stesso messaggio di prima
+      say(movedMessage(only));
+      return;
+    }
+    const plan = planTransform(objs, { kind: 'move', dx, dy }, g);
+    if (!plan.ok) {
+      say(plan.reason);
+      return;
+    }
+    history.exec(new TransformObjects(pageNo, `${VERB_LABEL.move} ${countLabel(objs)}`, plan.moves));
+    say(transformedManyMessage('move', objs.length));
   };
 
   // Modello e cronologia: ogni cambiamento aggiorna disegno, scala, proprieta' e pulsanti.
   model.onChange(() => {
     refreshScene();
     refreshGrid(); // una ricalibrazione cambia il passo in pt (il messaggio lo dice: gridRecalNote)
-    if (selected !== null && !model.get(pageNo, selected)) selected = null; // l'oggetto selezionato non c'e' piu'
+    if (selection.size > 0) {
+      // gli oggetti selezionati che non ci sono piu' (Annulla di un Duplica, per esempio) escono dalla selezione
+      const present = new Set<number>();
+      for (const o of model.objects(pageNo)) present.add(o.id);
+      if ([...selection].some((id) => !present.has(id))) selection = new Set([...selection].filter((id) => present.has(id)));
+    }
     renderSelection();
     refreshStyleChip();
     updateScaleLabel();
@@ -1412,7 +1713,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       redoAction();
     } else if (e.key === 'Escape') {
       if (propsOpen) toggleProps(false);
-      else if (selected !== null) setSelected(null);
+      else if (isTransformTool(tool)) cancelTransform(); // prima la trasformazione in corso: la selezione resta com'e'
+      else if (selection.size > 0) setSelection([]);
       else if (tool === 'origin') disarmOrigin();
       else if (construction.pending || construction.done) cancelConstruction();
     } else if (e.key === 'Enter' && tool === 'polyline' && onCanvas) {
@@ -1421,8 +1723,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && construction.pending && onCanvas) {
       e.preventDefault();
       undoAction();
-    } else if (e.key === 'Delete' && tool === 'select' && selected !== null && onCanvas) {
-      // Canc cancella l'oggetto selezionato (non Backspace: resta solo l'annullamento dell'ultimo punto in costruzione).
+    } else if (e.key === 'Delete' && tool === 'select' && selection.size > 0 && onCanvas) {
+      // Canc cancella tutta la selezione (non Backspace: resta solo l'annullamento dell'ultimo punto in costruzione).
       e.preventDefault();
       deleteSelected();
     }
@@ -1454,7 +1756,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   async function goTo(n: number): Promise<void> {
     if (!pdf) return;
     cancelEntry();
-    selected = null;
+    if (isTransformTool(tool)) selectTool('select'); // cambiare pagina annulla la trasformazione in corso (e azzera la selezione)
+    selection = new Set();
     pageNo = Math.min(Math.max(1, n), pdf.pages.length);
     construction.reset();
     shellInput.value = ''; // quello che si stava digitando era per la pagina di prima
@@ -1932,6 +2235,24 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         return { hits, calls, batch: o.batch, batchMs, singleMs };
       },
       goTo: (n: number) => goTo(n),
+      /** Gli id selezionati (nell'ordine del modello) e le proprieta' dei NUOVI oggetti: per provare che la selezione multipla non le cambia. */
+      selection: () => selectedObjects().map((o) => o.id),
+      sessionProps: () => ({ stroke: { ...stroke }, textPt }),
+      /** Seleziona per id (strumento Seleziona), senza clic: per le prove di prestazioni con molti oggetti. */
+      selectIds: (ids: number[]) => {
+        selectTool('select');
+        setSelection(ids);
+      },
+      /** Lo stesso percorso del pulsante, del menu o della tastiera: Sposta/Specchio/Rotazione (spec nel FOGLIO), Duplica, Canc; per le prove di prestazioni. */
+      applyTransform: (spec: TransformSpec) => applyTransform(spec),
+      duplicate: () => duplicateSelected(),
+      deleteSelection: () => deleteSelected(),
+      keepOriginal: (on: boolean) => setKeepOriginal(on),
+      /** I punti dell'oggetto con questo id (copie), per leggere i risultati senza passare da state(). */
+      pointsOfId: (page: number, id: number) => {
+        const o = model.get(page, id);
+        return o ? pointsOf(o) : null;
+      },
       /** I byte originali del PDF aperto (stesso Uint8Array dell'app: serve a provare che non cambiano). */
       originalBytes: () => pdf?.bytes ?? null,
       page: () => pageNo,

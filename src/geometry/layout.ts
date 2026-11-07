@@ -54,6 +54,17 @@ export interface Shape {
   circles: SheetCircle[];
   arcs?: SheetArc[];
 }
+/** L'unione di piu' forme (la selezione multipla di CP6e): stesse primitive, una dopo l'altra. */
+export function unionShapes(shapes: readonly Shape[]): Shape {
+  const out: Shape = { lines: [], rects: [], circles: [] };
+  for (const sh of shapes) {
+    for (const l of sh.lines) out.lines.push(l);
+    for (const r of sh.rects) out.rects.push(r);
+    for (const c of sh.circles) out.circles.push(c);
+    if (sh.arcs && sh.arcs.length > 0) (out.arcs ??= []).push(...sh.arcs);
+  }
+  return out;
+}
 export interface Layout {
   lines: LayoutLine[];
   arrows: LayoutArrow[];

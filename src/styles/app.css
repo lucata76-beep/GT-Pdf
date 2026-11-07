@@ -1445,7 +1445,8 @@ body.app-mode {
 .seg-btn[aria-pressed='true'],
 .swatch[aria-pressed='true'],
 .preset[aria-pressed='true'],
-.grid-preset[aria-pressed='true'] {
+.grid-preset[aria-pressed='true'],
+.ctx-keep[aria-pressed='true'] {
   border-color: var(--cad-accent-stroke);
   box-shadow: inset 0 0 0 1px var(--cad-accent-stroke);
   color: var(--cad-accent-fill);
@@ -1773,4 +1774,37 @@ body.app-mode {
 .sc-ghost {
   opacity: 0.6;
   color: var(--cad-measure); /* contorno delle coperture (`currentColor`) */
+}
+
+/* Barra contestuale con piu' oggetti e trasformazioni (CP6e): i pulsanti Sposta, Specchio e Rotazione hanno la stessa altezza degli altri della riga e non cambiano l'altezza
+   della barra; la casella dell'angolo sta dove sta la shell (parte centrale) e ha accanto il pulsante Origine. */
+.ctx-tr,
+.ctx-keep,
+.ctx-origin-center {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+/* Angolo della Rotazione: stessa disposizione della casella della shell (`.ctx-shell`), con classi proprie perche' le prove della shell contano `.ctx-shell`. */
+.ctx-angle {
+  display: flex;
+  align-items: center;
+  gap: var(--gutter);
+  flex: 0 1 16rem;
+  min-width: 0;
+}
+.ctx-angle-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--hit);
+  font-size: 0.875rem;
+}
+.ctx-angle-unit {
+  color: var(--cad-text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+@media (max-width: 719.98px) {
+  .ctx-angle {
+    flex-basis: 100%;
+  }
 }
