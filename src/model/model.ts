@@ -197,6 +197,17 @@ function assignPoints(o: PageObject, pts: readonly UserPoint[]): void {
 }
 
 /**
+ * Una copia profonda dell'oggetto con un id nuovo e, se `pts` e' dato, questi punti al posto degli originali (stesso ordine di `pointsOf`). Proprieta' (tratto, colore,
+ * corpo, valueText) e tipo restano quelli dell'originale: servono a Duplica e a "Mantieni l'originale" (CP6e).
+ */
+export function cloneObject(o: PageObject, id: number, pts?: readonly UserPoint[]): PageObject {
+  const copy = JSON.parse(JSON.stringify(o)) as PageObject;
+  copy.id = id;
+  if (pts) assignPoints(copy, pts);
+  return copy;
+}
+
+/**
  * Ordine di disegno, dal fondo al primo piano: prima le coperture (nell'ordine di creazione), poi linee, cerchi, archi, testi e quote
  * (nell'ordine di creazione, tutti nello stesso strato). Cosi' una copertura sta sotto tutto, anche se e' stata disegnata dopo.
  */
@@ -300,6 +311,63 @@ export class DocumentModel {
     const o = this.get(page, id);
     if (!o) return;
     assignPoints(o, pts);
+    this.emit();
+  }
+  /**
+   * Sostituisce i punti di piu' oggetti con UN SOLO cambiamento (un `emit`, una salita di `revision`): le trasformazioni di CP6e. Gli id che non ci sono si ignorano.
+   * Indicizza una volta gli oggetti della pagina: il costo e' lineare nel numero di oggetti e non quadratico.
+   */
+  setPointsMany(page: number, entries: ReadonlyArray<{ id: number; pts: readonly UserPoint[] }>): void {
+    const byId = new Map<number, PageObject>();
+    for (const o of this.objects(page)) byId.set(o.id, o);
+    for (const e of entries) {
+      const o = byId.get(e.id);
+      if (o) assignPoints(o, e.pts);
+    }
+    this.emit();
+  }
+  /** Aggiunge piu' oggetti in fondo all'elenco (nell'ordine dato) con un solo cambiamento. */
+  insertMany(page: number, objs: readonly PageObject[]): void {
+    this.data(page).objects.push(...objs);
+    this.emit();
+  }
+  /** Toglie piu' oggetti con un solo cambiamento e dice dove stava ciascuno (indici nell'elenco di PRIMA, in ordine crescente), per rimetterli al loro posto. */
+  takeMany(page: number, ids: readonly number[]): { obj: PageObject; index: number }[] {
+    const d = this.data(page);
+    const want = new Set(ids);
+    const taken: { obj: PageObject; index: number }[] = [];
+    const kept: PageObject[] = [];
+    d.objects.forEach((o, index) => {
+      if (want.has(o.id)) taken.push({ obj: o, index });
+      else kept.push(o);
+    });
+    d.objects = kept;
+    this.emit();
+    return taken;
+  }
+  /**
+   * Rimette piu' oggetti ciascuno al suo indice (quelli restituiti da `takeMany`), con un solo cambiamento. Costo lineare: ricostruisce l'elenco una volta sola.
+   * Gli indici sono quelli dell'elenco di prima della cancellazione; l'elenco attuale deve essere quello di subito dopo (la cronologia e' lineare).
+   */
+  insertAt(page: number, entries: ReadonlyArray<{ obj: PageObject; index: number }>): void {
+    const d = this.data(page);
+    const sorted = [...entries].sort((a, b) => a.index - b.index);
+    const out: PageObject[] = [];
+    let k = 0;
+    let rest = 0;
+    const total = d.objects.length + sorted.length;
+    for (let pos = 0; pos < total; pos++) {
+      const e = sorted[k];
+      if (e && e.index === pos) {
+        out.push(e.obj);
+        k++;
+      } else if (rest < d.objects.length) out.push(d.objects[rest++] as PageObject);
+      else if (e) {
+        out.push(e.obj); // indice oltre la fine: in fondo
+        k++;
+      }
+    }
+    d.objects = out;
     this.emit();
   }
   setScale(page: number, scale: PageScale | null): void {
@@ -416,6 +484,82 @@ export class MoveObject implements Command<DocumentModel> {
   }
   revert(m: DocumentModel): void {
     m.setPoints(this.page, this.id, this.before);
+  }
+}
+
+/** Quello che cambia per un oggetto in una trasformazione: i suoi punti prima e dopo (valori ESATTI, cosi' Annulla restituisce quelli di prima). */
+export interface PointChange {
+  id: number;
+  before: readonly UserPoint[];
+  after: readonly UserPoint[];
+}
+
+/** Il testo "retta" / "3 oggetti" per le etichette dei comandi su piu' oggetti. */
+export const countLabel = (objs: readonly PageObject[]): string => (objs.length === 1 ? objectNoun(objs[0] as PageObject) : `${objs.length} oggetti`);
+
+/**
+ * Trasformazione di N oggetti (CP6e): UN comando = UN passo di Annulla e di Ripeti e UN solo cambiamento del modello, qualunque sia N. Come `MoveObject` salva i punti
+ * prima e dopo, quindi Annulla e Ripeti sono esatti. `label` lo sceglie l'app ("Sposta 3 oggetti", "Specchia retta").
+ */
+export class TransformObjects implements Command<DocumentModel> {
+  constructor(
+    readonly page: number,
+    readonly label: string,
+    private readonly changes: readonly PointChange[],
+  ) {}
+  apply(m: DocumentModel): void {
+    m.setPointsMany(
+      this.page,
+      this.changes.map((c) => ({ id: c.id, pts: c.after })),
+    );
+  }
+  revert(m: DocumentModel): void {
+    m.setPointsMany(
+      this.page,
+      this.changes.map((c) => ({ id: c.id, pts: c.before })),
+    );
+  }
+}
+
+/**
+ * Aggiunta di N oggetti gia' costruiti (le copie di CP6e): gli id sono assegnati UNA volta, alla creazione del comando (`model.newId()`), non in `apply`, cosi' Ripeti
+ * reinserisce gli STESSI oggetti con gli stessi id. Vanno in fondo all'elenco nell'ordine dato.
+ */
+export class AddObjects implements Command<DocumentModel> {
+  constructor(
+    readonly page: number,
+    readonly label: string,
+    private readonly objs: readonly PageObject[],
+  ) {}
+  apply(m: DocumentModel): void {
+    m.insertMany(this.page, this.objs);
+  }
+  revert(m: DocumentModel): void {
+    m.takeMany(
+      this.page,
+      this.objs.map((o) => o.id),
+    );
+  }
+}
+
+/** Cancellazione di N oggetti (Canc con una selezione multipla): un solo passo di Annulla, che li rimette ognuno al suo posto nell'elenco. */
+export class RemoveObjects implements Command<DocumentModel> {
+  readonly label: string;
+  private entries: { obj: PageObject; index: number }[] = [];
+  constructor(
+    readonly page: number,
+    private readonly objs: readonly PageObject[],
+  ) {
+    this.label = `Cancella ${countLabel(objs)}`;
+  }
+  apply(m: DocumentModel): void {
+    this.entries = m.takeMany(
+      this.page,
+      this.objs.map((o) => o.id),
+    );
+  }
+  revert(m: DocumentModel): void {
+    m.insertAt(this.page, this.entries);
   }
 }
 

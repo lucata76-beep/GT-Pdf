@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PageObject } from '../model/model';
-import { addedMessage, deletedMessage, isMasculine, movedMessage, selectedText } from './messages';
+import { addedMessage, copiedMessage, deletedManyMessage, deletedMessage, duplicatedMessage, isMasculine, movedMessage, selectedManyText, selectedText, transformedManyMessage, transformedMessage } from './messages';
 
 const st = { style: 'solid', color: '#D32F2F', widthPt: 1 } as const;
 const p = { x: 0, y: 0 };
@@ -51,5 +51,31 @@ describe('messaggi al maschile (testo, cerchio, arco) e al femminile (retta, lin
     expect(addedMessage(OBJ.arco!, 'raggio 25 mm')).toBe('Arco aggiunto: raggio 25 mm. Annulla per toglierlo.');
     expect(addedMessage(OBJ.retta!)).toBe('Retta aggiunta. Annulla per toglierla.');
     expect(addedMessage(OBJ.testo!, '"ciao"')).toBe('Testo aggiunto: "ciao". Annulla per toglierlo.');
+  });
+});
+
+describe('selezione multipla e trasformazioni (CP6e)', () => {
+  it('selezionati', () => {
+    expect(selectedManyText(3)).toBe('Selezionati: 3 oggetti');
+  });
+  it('cancellazione e trasformazioni di N oggetti: forma plurale generica', () => {
+    expect(deletedManyMessage(3)).toBe('3 oggetti cancellati. Annulla li ripristina.');
+    expect(transformedManyMessage('move', 3)).toBe('3 oggetti spostati. Annulla li rimette a posto.');
+    expect(transformedManyMessage('mirror', 2)).toBe('2 oggetti specchiati. Annulla li rimette a posto.');
+    expect(transformedManyMessage('rotate', 5)).toBe('5 oggetti ruotati. Annulla li rimette a posto.');
+  });
+  it('un oggetto: il genere del nome; spostare resta identico a movedMessage', () => {
+    expect(transformedMessage('move', OBJ.retta!)).toBe(movedMessage(OBJ.retta!));
+    expect(transformedMessage('move', OBJ.arco!)).toBe(movedMessage(OBJ.arco!));
+    expect(transformedMessage('mirror', OBJ.retta!)).toBe('Retta specchiata. Annulla la rimette a posto.');
+    expect(transformedMessage('rotate', OBJ.cerchio!)).toBe('Cerchio ruotato. Annulla lo rimette a posto.');
+    expect(transformedMessage('mirror', OBJ.testo!)).toBe('Testo specchiato. Annulla lo rimette a posto.');
+  });
+  it('copie e duplicati', () => {
+    expect(copiedMessage('move', 1)).toBe("Copia creata e spostata: l'originale resta. Annulla la toglie.");
+    expect(copiedMessage('rotate', 3)).toBe('3 copie create e ruotate: gli originali restano. Annulla le toglie.');
+    expect(duplicatedMessage([OBJ.retta!])).toBe('Retta duplicata. Annulla la toglie.');
+    expect(duplicatedMessage([OBJ.cerchio!])).toBe('Cerchio duplicato. Annulla lo toglie.');
+    expect(duplicatedMessage([OBJ.retta!, OBJ.arco!])).toBe('2 oggetti duplicati. Annulla li toglie.');
   });
 });
