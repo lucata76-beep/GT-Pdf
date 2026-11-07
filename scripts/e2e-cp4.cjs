@@ -820,7 +820,8 @@ async function paletteAndColumnSuite(browser) {
     await openSample(page, 'A4 vettoriale');
     const menu = async (top, item) => {
       await page.getByRole('button', { name: top, exact: true }).click();
-      await page.getByRole('menuitem', { name: new RegExp(`^${item}`) }).click();
+      // CP6e: nel menu Modifica "Cancella selezione" si aggiunge a "Cancella": /^Cancella/ le troverebbe tutte e due, "Cancella" si cerca con il nome esatto
+      await page.getByRole('menuitem', item === 'Cancella' ? { name: 'Cancella', exact: true } : { name: new RegExp(`^${item}`) }).click();
       await page.waitForTimeout(150);
     };
     const active = () =>

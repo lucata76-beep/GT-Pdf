@@ -9,10 +9,12 @@ import {
   type DimSpec,
   LABEL_PAD_EM,
   type Layout,
+  type Shape,
   exportRuns,
   layoutDimension,
   layoutText,
   textRect,
+  unionShapes,
 } from './layout';
 import { PageGeometry, type SheetPoint, type UserPoint } from './page';
 import { ASCENT_EM, DESCENT_EM, textWidthPt } from './textMetrics';
@@ -264,5 +266,24 @@ describe('esportazione (CP5): i testi del layout diventano chiamate di drawText 
     const c = { rotate: 90, userUnit: 1 };
     const { items } = await roundTrip(c, (g) => layoutDimension(dimSpec(g, 'diameter', [{ x: 100, y: 200 }, { x: 200, y: 200 }]), g, 'Ø100.00'));
     expect(items.map((i) => i.str)).toEqual(['Ø100.00']);
+  });
+});
+
+describe('unionShapes (selezione multipla, CP6e)', () => {
+  const a: Shape = { lines: [[{ x: 0, y: 0 }, { x: 1, y: 1 }]], rects: [], circles: [] };
+  const b: Shape = { lines: [], rects: [{ x: 1, y: 2, w: 3, h: 4 }], circles: [{ c: { x: 5, y: 5 }, r: 2 }], arcs: [{ c: { x: 0, y: 0 }, r: 3, a0: 0, sweep: 1 }] };
+  it('concatena linee, rettangoli, cerchi e archi nell\'ordine dato', () => {
+    const u = unionShapes([a, b, a]);
+    expect(u.lines).toHaveLength(2);
+    expect(u.rects).toEqual(b.rects);
+    expect(u.circles).toEqual(b.circles);
+    expect(u.arcs).toEqual(b.arcs);
+  });
+  it('senza archi nessuna chiave `arcs` e le forme originali non cambiano', () => {
+    const u = unionShapes([a]);
+    expect(u.arcs).toBeUndefined();
+    expect(u).toEqual({ lines: a.lines, rects: [], circles: [] });
+    expect(a.lines).toHaveLength(1);
+    expect(unionShapes([])).toEqual({ lines: [], rects: [], circles: [] });
   });
 });
