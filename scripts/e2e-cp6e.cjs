@@ -622,9 +622,8 @@ async function moveSnapAndKeep(browser) {
   const maxId = Math.max(...orig.map((o) => o.id));
   const copies = kept.slice(orig.length);
   check('con "Mantieni l\'originale" acceso gli originali restano uguali e le copie sono in fondo, nello stesso ordine relativo (retta, cerchio, testo), con id nuovi', sameJSON(kept.slice(0, orig.length), orig) && copies.length === 3 && sameJSON(copies.map((o) => o.kind), ['segment', 'circle', 'text']) && copies.every((o) => o.id > maxId) && new Set(kept.map((o) => o.id)).size === kept.length, JSON.stringify(copies.map((o) => [o.id, o.kind])));
-  const errC = compareObjects(sub(orig), copies, movSheet(3 * STEP, 3 * STEP), 1e-6).replace?.(/^$/, '') ?? null;
   const strip = (o) => { const c = JSON.parse(JSON.stringify(o)); for (const k of ['id', 'points', 'at', 'p1', 'p2', 'p3', 'a', 'b']) delete c[k]; return c; };
-  check('le copie hanno le stesse proprieta\' degli originali (tratto, colore, corpo, testo) e i punti spostati (calcolo indipendente)', sub(orig).every((o, i) => sameJSON(strip(o), strip(copies[i]))) && copies.every((c, i) => ptsOf(c).every((p, k) => nearP(p, expUser(ptsOf(sub(orig)[i])[k], movSheet(3 * STEP, 3 * STEP)), 1e-6))), errC ?? '');
+  check('le copie hanno le stesse proprieta\' degli originali (tratto, colore, corpo, testo) e i punti spostati (calcolo indipendente)', sub(orig).every((o, i) => sameJSON(strip(o), strip(copies[i]))) && copies.every((c, i) => ptsOf(c).every((p, k) => nearP(p, expUser(ptsOf(sub(orig)[i])[k], movSheet(3 * STEP, 3 * STEP)), 1e-6))));
   check('"3 copie create e spostate: gli originali restano. Annulla le toglie." e "Annulla Sposta 3 oggetti (copia)"', (await status(page)) === '3 copie create e spostate: gli originali restano. Annulla le toglie.' && (await undoTitle(page)) === 'Annulla Sposta 3 oggetti (copia)', `${await status(page)} / ${await undoTitle(page)}`);
   check('la selezione passa alle COPIE', sameJSON(await selIds(page), copies.map((o) => o.id)) && (await hint(page)) === 'Selezionati: 3 oggetti', JSON.stringify(await selIds(page)));
   await undoBtn(page).click();
@@ -889,7 +888,7 @@ async function mixedSuite(browser) {
   await armBtn(page, 'Rotazione');
   await clickNode(page, 9, 14);
   await typeAngle(page, '45');
-  check('selezione mista (retta, quota orizzontale, cerchio): la Rotazione rifiuta TUTTO, con la ragione; la retta e il cerchio non si muovono', /non ruotano/.test(await status(page)) && sameJSON(await objectsOf(page), snap0.objs) && (await undoTitle(page)) === (await undoTitle(page)), await status(page));
+  check('selezione mista (retta, quota orizzontale, cerchio): la Rotazione rifiuta TUTTO, con la ragione; la retta e il cerchio non si muovono', /non ruotano/.test(await status(page)) && sameJSON(await objectsOf(page), snap0.objs), await status(page));
   await page.locator('.ctx-angle-input').press('Escape');
   await page.locator('.ctx-angle-input').press('Escape');
   await armBtn(page, 'Specchio');
@@ -1058,13 +1057,11 @@ async function projectSuite(browser) {
   await armBtn(page, 'Sposta'); await keepToggle(page, true); await clickNode(page, 3, 10); await clickNode(page, 4, 9);
   const S0 = await state(page);
   check('(premessa) gli oggetti sono stati trasformati: 16 oggetti (13 + 3 copie)', S0.pages[0].objects.length === 16, String(S0.pages[0].objects.length));
-  const pinfo = await pageInfo(page);
   const text0 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   const j = JSON.parse(text0);
   check('il formato del file NON cambia: versione 3 e gli stessi campi di pagina di CP6d (nessun nuovo tipo di oggetto)', j.version === 3 && j.format === 'gt-pdf-project' && JSON.stringify(Object.keys(j.pages[0])) === JSON.stringify(['number', 'view', 'rotate', 'userUnit', 'scale', 'origin', 'objects']), JSON.stringify(Object.keys(j.pages[0])));
   check('il progetto scritto contiene gli oggetti trasformati (stessi punti, stesso ordine) e la lettura lo accetta', JSON.stringify(j.pages[0].objects) === JSON.stringify(S0.pages[0].objects) && (await page.evaluate(async () => (await window.__gtpdf.projectText()).ok)) === true);
   const sample = readFileSync(join(PDF_DIR, 'a4-rotate90.pdf'));
-  const text = (loc) => loc.innerText().then((x) => x.replace(/\s+/g, ' ').trim());
   await menuItem(page, 'File', /^Salva con nome/);
   const d = page.locator('.save-dialog');
   await d.waitFor();
@@ -1092,7 +1089,6 @@ async function projectSuite(browser) {
   check('salvato e riaperto: lo stato (oggetti con tutti i punti, ordine, proprieta\') e\' IDENTICO (state())', JSON.stringify(S1.pages[0].objects) === JSON.stringify(S0.pages[0].objects) && JSON.stringify(S1.pages[0].texts) === JSON.stringify(S0.pages[0].texts), `${S1.pages[0].objects.length}`);
   const text1 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   check('... e il progetto riscritto e\' identico', JSON.stringify(JSON.parse(text1).pages) === JSON.stringify(j.pages));
-  void pinfo; void text;
   await ctx.close();
 }
 
