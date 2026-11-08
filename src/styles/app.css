@@ -553,16 +553,26 @@ body.app-mode {
 }
 /* Marcatore di snap (CP6a, DESIGN.md "Snap"): 8x8 px, tratto 1.5 px, colore snap-topology; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro (V2b); etichetta col nome.
    Dimensioni in px CSS fissi (non scalano con lo zoom). Solo a schermo: sta nel livello di sovrapposizione, non nel disegno esportato. */
+/* CP6f: tutti i marcatori sono di 8x8 px; i punti calcolati (Intersezione, Perpendicolare, Tangente) hanno il colore `snap-vector`, gli altri `snap-topology`. */
+.snap-mark {
+  --snap-color: var(--cad-snap-topology);
+}
+.snap-mark[data-kind='intersection'],
+.snap-mark[data-kind='perpendicular'],
+.snap-mark[data-kind='tangent'] {
+  --snap-color: var(--cad-snap-vector);
+}
 .snap-mark rect,
 .snap-mark polygon,
-.snap-mark circle {
-  stroke: var(--cad-snap-topology);
+.snap-mark circle,
+.snap-mark path {
+  stroke: var(--snap-color);
   stroke-width: 1.5;
   fill: none;
   stroke-linejoin: miter;
 }
 .snap-mark text {
-  fill: var(--cad-snap-topology);
+  fill: var(--snap-color);
   stroke: var(--cad-sheet);
   stroke-width: 3;
   paint-order: stroke;

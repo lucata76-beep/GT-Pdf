@@ -15,7 +15,7 @@ import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '..
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { GRID_DEFAULT_MM, GRID_MIN_SCREEN_PX, gridStepPt, gridVisible } from '../geometry/grid';
-import { SNAP_LABEL, type SnapHit, type SnapKind, findSnap, snapRadiusPt } from '../geometry/snap';
+import { SNAP_LABEL, type SnapHit, findSnap, snapRadiusPt } from '../geometry/snap';
 import { type PlannedMove, type TransformSpec, planTransform, specProblem } from '../geometry/transform';
 import { type Command, History } from '../model/history';
 import {
@@ -151,7 +151,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let opening = false;
   let ortho = false;
   /** Snap sugli oggetti: Estremo e Punto medio (V2a) e Centro (V2b), attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
-  const snapOn: Record<SnapKind, boolean> = { end: true, mid: true, center: true };
+  const snapOn: Record<'end' | 'mid' | 'center', boolean> = { end: true, mid: true, center: true };
   /** Griglia (V2a): spenta all'avvio; passo in mm (reali se la pagina ha una scala, del foglio se no). Stato della sessione: NON si salva nel progetto. */
   let gridOn = false;
   let gridMm = GRID_DEFAULT_MM;
@@ -379,7 +379,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     say(on ? 'Ortogonale attivo: il punto successivo va in orizzontale o in verticale' : 'Ortogonale disattivato');
     viewer.refreshAim();
   }
-  function setSnap(kind: SnapKind, on: boolean): void {
+  function setSnap(kind: 'end' | 'mid' | 'center', on: boolean): void {
     snapOn[kind] = on;
     setPressed(kind, on);
     const what = kind === 'end' ? 'agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati' : kind === 'mid' ? 'al centro dei tratti, dei lati delle coperture e degli archi' : 'al centro di cerchi, archi e coperture circolari';

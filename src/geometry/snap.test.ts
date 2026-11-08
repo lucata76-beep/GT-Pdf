@@ -27,8 +27,9 @@ const nudge = (p: Pt, dx: number, dy: number): Pt => ({ x: p.x + dx, y: p.y + dy
 
 describe('costanti', () => {
   it('i nomi dei tipi sono quelli di DESIGN.md', () => {
-    expect(SNAP_LABEL).toEqual({ end: 'Estremo', mid: 'Punto medio', center: 'Centro' });
-    expect(SNAP_KINDS).toEqual(['end', 'mid', 'center']);
+    // CP6f: i nomi dei tre tipi di prima restano quelli di DESIGN.md; ne arrivano altri (vedi `snap.extra.test.ts` per l'elenco intero)
+    expect({ end: SNAP_LABEL.end, mid: SNAP_LABEL.mid, center: SNAP_LABEL.center }).toEqual({ end: 'Estremo', mid: 'Punto medio', center: 'Centro' });
+    expect(SNAP_KINDS.slice(0, 3)).toEqual(['end', 'mid', 'center']);
   });
   it('raggio di cattura: valori di partenza uguali a quelli di selezione, in pt = px / zoom', () => {
     expect(SNAP_TOL_PX).toEqual({ touch: 22, mouse: 10 });

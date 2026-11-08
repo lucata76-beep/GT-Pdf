@@ -53,6 +53,13 @@ const svgEl = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
   return el;
 };
 
+/** Un marcatore fatto di piu' elementi (cerchio con croce, cerchio con tangente). */
+function snapGroup(...els: SVGElement[]): SVGGElement {
+  const g = svgEl('g');
+  g.append(...els);
+  return g;
+}
+
 const pathData = (pts: readonly SheetPoint[]): string => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ');
 
 interface StrokeEl {
@@ -112,12 +119,21 @@ export class SceneOverlay {
   private readonly originG = svgEl('g', { class: 'origin-mark', display: 'none' });
   private origin: SheetPoint | null = null;
   private readonly aimG = svgEl('g', { class: 'aim-mark', display: 'none' });
-  /** Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px; quadrato = Estremo, triangolo = Punto medio, cerchio = Centro) con il nome: solo a schermo, mai esportato. */
+  /**
+   * Marcatore di snap (DESIGN.md "Snap": 8x8 px, tratto 1.5 px) con il nome: solo a schermo, mai esportato. Colore `snap-topology` per i punti che stanno negli oggetti
+   * (quadrato = Estremo, triangolo = Punto medio, cerchio = Centro) e per l'Origine (CP6f: cerchio con una croce dentro) e per il Quadrante (CP6f: rombo, scelta dell'assistente);
+   * colore `snap-vector` (CP6f) per i punti calcolati: croce a X = Intersezione, angolo retto (due tratti a L) = Perpendicolare, cerchio con un tratto tangente = Tangente.
+   */
   private readonly snapG = svgEl('g', { class: 'snap-mark', display: 'none' });
   private readonly snapShape: Record<SnapKind, SVGElement> = {
     end: svgEl('rect', { x: -SNAP_HALF, y: -SNAP_HALF, width: 2 * SNAP_HALF, height: 2 * SNAP_HALF }),
     mid: svgEl('polygon', { points: `0,${-SNAP_HALF} ${SNAP_HALF},${SNAP_HALF} ${-SNAP_HALF},${SNAP_HALF}` }),
     center: svgEl('circle', { cx: 0, cy: 0, r: SNAP_HALF }),
+    origin: snapGroup(svgEl('circle', { cx: 0, cy: 0, r: SNAP_HALF }), svgEl('path', { d: `M${-SNAP_HALF / 2} 0H${SNAP_HALF / 2}M0 ${-SNAP_HALF / 2}V${SNAP_HALF / 2}` })),
+    intersection: svgEl('path', { d: `M${-SNAP_HALF} ${-SNAP_HALF}L${SNAP_HALF} ${SNAP_HALF}M${-SNAP_HALF} ${SNAP_HALF}L${SNAP_HALF} ${-SNAP_HALF}` }),
+    quadrant: svgEl('polygon', { points: `0,${-SNAP_HALF} ${SNAP_HALF},0 0,${SNAP_HALF} ${-SNAP_HALF},0` }),
+    perpendicular: svgEl('path', { d: `M${-SNAP_HALF} ${-SNAP_HALF}V${SNAP_HALF}H${SNAP_HALF}` }),
+    tangent: snapGroup(svgEl('circle', { cx: 0, cy: -1, r: 3 }), svgEl('path', { d: `M${-SNAP_HALF} 2H${SNAP_HALF}` })),
   };
   private readonly snapLabel = svgEl('text', { x: SNAP_HALF + 5, y: -SNAP_HALF - 2 });
   private readonly badgeEl = h('div', { class: 'measure-badge', hidden: true });

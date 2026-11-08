@@ -123,7 +123,7 @@ describe('priorita\' a parita\' di distanza: Estremo, poi Punto medio, poi Centr
     expect(findSnap([c, s], g, g.userToSheet(P(201, 200)), 10, ALL)?.kind).toBe('center');
   });
   it('SNAP_KINDS e\' nell\'ordine della priorita\' e degli interruttori', () => {
-    expect(SNAP_KINDS).toEqual(['end', 'mid', 'center']);
+    expect(SNAP_KINDS.slice(0, 3)).toEqual(['end', 'mid', 'center']); // CP6f: poi Intersezione, Quadrante, Perpendicolare, Tangente
   });
 });
 

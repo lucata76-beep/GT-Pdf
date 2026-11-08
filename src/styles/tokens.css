@@ -16,6 +16,7 @@
   --cad-accent-stroke: #e65100; /* solo tratti e icone, mai testo piccolo */
   --cad-measure: #0277bd;
   --cad-snap-topology: #00796b;
+  --cad-snap-vector: #00838f; /* CP6f: punti calcolati (Intersezione, Perpendicolare, Tangente); il valore e' quello di DESIGN.md */
 
   /* colors.* (Material: errori e selezione del tastierino) */
   --secondary-container: #69e8fe;
