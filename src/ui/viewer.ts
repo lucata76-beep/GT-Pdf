@@ -41,7 +41,8 @@ export interface ViewerStats {
   error: string | null;
 }
 
-export type ViewerMode = 'pan' | 'pick' | 'erase' | 'select';
+/** 'choose' (CP6g): come 'erase' ma sceglie un oggetto per un altro scopo (i lati della quota angolare "da due linee"): usa `onChoose` e `onChoosePreview`. */
+export type ViewerMode = 'pan' | 'pick' | 'erase' | 'select' | 'choose';
 
 export interface ViewerHooks {
   /** Posizione del cursore sul foglio (pt fisici, origine in alto a sinistra); null quando esce dal foglio. */
@@ -59,6 +60,10 @@ export interface ViewerHooks {
   onErase?: (sheet: SheetPoint, tolPt: number) => void;
   /** Modo 'erase': posizione di dito o mouse per evidenziare l'oggetto che verrebbe cancellato; null quando finisce. */
   onErasePreview?: (sheet: SheetPoint | null, tolPt: number) => void;
+  /** Modo 'choose' (CP6g): tocco o clic fermo che sceglie un oggetto. `tolPt` come per 'erase'. */
+  onChoose?: (sheet: SheetPoint, tolPt: number) => void;
+  /** Modo 'choose': posizione di dito o mouse per evidenziare l'oggetto che verrebbe scelto; null quando finisce. */
+  onChoosePreview?: (sheet: SheetPoint | null, tolPt: number) => void;
   /**
    * Modo 'select': tocco o clic fermo, anche fuori dalla pagina. `tolPt` = tolleranza in pt del foglio (pixel di schermo / zoom). `additive` (CP6e): Ctrl (o Cmd) era premuto
    * quando il clic e' cominciato, quindi l'oggetto si AGGIUNGE alla selezione o se ne TOGLIE; senza, la selezione diventa quell'oggetto. Parametro facoltativo: le chiamate di prima restano valide.
@@ -173,6 +178,7 @@ export class PdfViewer {
       this.overlay.setSnap(null, null);
       this.hooks.onAim?.(null);
       this.hooks.onErasePreview?.(null, 0);
+      this.hooks.onChoosePreview?.(null, 0);
     });
     this.el.addEventListener('contextmenu', (e) => e.preventDefault());
     this.el.addEventListener('wheel', this.onWheel, { passive: false });
@@ -487,7 +493,7 @@ export class PdfViewer {
     } else {
       this.cancelAim(); // un secondo dito annulla la mira: si passa al pinch
     }
-    if (this.mode === 'erase' && primary) {
+    if ((this.mode === 'erase' || this.mode === 'choose') && primary) {
       this.tap = { id: e.pointerId, start: pos, moved: false, touch };
       this.previewErase(pos, touch);
     } else {
@@ -643,11 +649,11 @@ export class PdfViewer {
     return (touch ? HIT_TOL_PX.touch : HIT_TOL_PX.mouse) / this.zoom;
   }
   private previewErase(pos: Pt, touch: boolean): void {
-    this.hooks.onErasePreview?.(this.toSheet(pos), this.hitTol(touch));
+    (this.mode === 'choose' ? this.hooks.onChoosePreview : this.hooks.onErasePreview)?.(this.toSheet(pos), this.hitTol(touch));
   }
   private erase(pos: Pt, touch: boolean): void {
     const s = this.toSheet(pos);
-    if (this.inPage(s)) this.hooks.onErase?.(s, this.hitTol(touch));
+    if (this.inPage(s)) (this.mode === 'choose' ? this.hooks.onChoose : this.hooks.onErase)?.(s, this.hitTol(touch));
   }
   /** Interrompe un tocco in modo 'select'; se stava trascinando l'oggetto, lo rimette dov'era. */
   private cancelSelect(): void {
@@ -659,6 +665,7 @@ export class PdfViewer {
     if (!this.tap) return;
     this.tap = null;
     this.hooks.onErasePreview?.(null, 0);
+    this.hooks.onChoosePreview?.(null, 0); // il modo puo' essere gia' cambiato: si toglie l'evidenziazione di entrambi
   }
 
   /** Rifa' mira e anteprima dopo un cambio di vincolo (es. ORTO attivato). */
@@ -678,7 +685,7 @@ export class PdfViewer {
       // il segno di mira serve solo se il vincolo ha spostato il punto (altrimenti c'e' gia' il cursore a croce)
       this.overlay.setAim(ok && Math.hypot(eff.x - raw.x, eff.y - raw.y) * this.zoom > 1 ? eff : null);
       this.overlay.setSnap(ok && snap ? eff : null, snap);
-    } else if (this.mode === 'erase') {
+    } else if (this.mode === 'erase' || this.mode === 'choose') {
       this.previewErase(pos, false);
     }
   }

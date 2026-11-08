@@ -422,7 +422,8 @@ body.app-mode {
 .viewer[data-mode='pick'] {
   cursor: crosshair;
 }
-.viewer[data-mode='erase'] {
+.viewer[data-mode='erase'],
+.viewer[data-mode='choose'] {
   cursor: pointer;
 }
 .viewer[data-mode='select'] {
@@ -1456,7 +1457,8 @@ body.app-mode {
 .swatch[aria-pressed='true'],
 .preset[aria-pressed='true'],
 .grid-preset[aria-pressed='true'],
-.ctx-keep[aria-pressed='true'] {
+.ctx-keep[aria-pressed='true'],
+.ctx-angmode[aria-pressed='true'] {
   border-color: var(--cad-accent-stroke);
   box-shadow: inset 0 0 0 1px var(--cad-accent-stroke);
   color: var(--cad-accent-fill);
@@ -1790,6 +1792,7 @@ body.app-mode {
    della barra; la casella dell'angolo sta dove sta la shell (parte centrale) e ha accanto il pulsante Origine. */
 .ctx-tr,
 .ctx-keep,
+.ctx-angmode,
 .ctx-origin-center {
   font-size: 0.75rem;
   white-space: nowrap;

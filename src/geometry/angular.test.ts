@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ANGLE_MIN_DEG,
+  ANGULAR_COORD_LIMIT,
   ARC_MAX_DEVIATION_PT,
   ARC_MAX_SEGMENTS,
   ARC_MAX_STEP_DEG,
@@ -15,9 +16,13 @@ import {
   arcPoints,
   arcSegments,
   arcStepRad,
+  lineClearance,
   pickSide,
+  sidesProblem,
 } from './angular';
 import { PageGeometry, type SheetPoint, type UserPoint } from './page';
+import { COORD_LIMIT } from './transform';
+import { LIMITS } from '../project/format';
 
 const DEG = Math.PI / 180;
 const at = (c: UserPoint, r: number, deg: number): UserPoint => ({ x: c.x + r * Math.cos(deg * DEG), y: c.y + r * Math.sin(deg * DEG) });
@@ -204,7 +209,8 @@ describe('rifiuti (tolleranza di parallelismo ' + ANGLE_MIN_DEG + ' gradi)', () 
     const nearlyParallel = side(2, { x: 100, y: 450 - 150 * k }, { x: 400, y: 450 + 150 * k });
     const r = angularFromLines(s1, nearlyParallel, { x: 300, y: 380 }, G0, 1_000_000);
     expect(r).toEqual({ ok: false, problem: 'far' });
-    expect(angularFromLines(s1, nearlyParallel, { x: 300, y: 380 }, G0).ok).toBe(true);
+    expect(angularFromLines(s1, nearlyParallel, { x: 300, y: 380 }, G0, Infinity).ok).toBe(true);
+    expect(angularFromLines(s1, nearlyParallel, { x: 300, y: 380 }, G0)).toEqual({ ok: false, problem: 'far' }); // il limite di predefinito e' quello del formato
   });
 });
 
@@ -424,5 +430,40 @@ describe('scelta del tratto (pickSide)', () => {
     const mid = g.userToSheet({ x: 200, y: 100 });
     expect(pickSide([seg], g, { x: mid.x + 4, y: mid.y }, 5)?.id).toBe(1);
     expect(pickSide([seg], g, { x: mid.x + 6, y: mid.y }, 5)).toBeNull();
+  });
+});
+
+describe('controlli per l\'interfaccia (sidesProblem, lineClearance) e limite delle coordinate', () => {
+  const a = side(1, at(V, 100, 180), at(V, 100, 0));
+  const b = side(2, at(V, 100, 225), at(V, 100, 45));
+
+  it('il limite di coordinate e\' quello del formato del progetto e di transform.ts', () => {
+    expect(ANGULAR_COORD_LIMIT).toBe(LIMITS.coordAbs);
+    expect(ANGULAR_COORD_LIMIT).toBe(COORD_LIMIT);
+  });
+
+  it('sidesProblem: lo stesso tratto, parallele, vertice troppo lontano, oppure nulla', () => {
+    expect(sidesProblem(a, b, G0)).toBeNull();
+    expect(sidesProblem(a, side(1, a.a, a.b), G0)).toBe('same-side');
+    expect(sidesProblem(a, side(3, at(V, 100, 90), at(V, 150, 90)), G0)).toBeNull();
+    expect(sidesProblem(a, side(3, { x: 100, y: 350 }, { x: 400, y: 350 }), G0)).toBe('parallel');
+    const k = Math.tan(0.006 * DEG);
+    const far = side(2, { x: 100, y: 450 - 150 * k }, { x: 400, y: 450 + 150 * k });
+    expect(sidesProblem(a, far, G0)).toBe('far');
+    expect(sidesProblem(a, far, G0, Infinity)).toBeNull();
+  });
+
+  it('lineClearance: distanze dal vertice e dalle due rette (pt del foglio), calcolate con /Rotate e UserUnit', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      const p = at(V, 40, 20); // a 20 gradi dalla retta 1 (0) e a 25 dalla retta 2 (45)
+      const k = lineClearance(a, b, p, g);
+      expect(k).not.toBeNull();
+      if (!k) return;
+      expect(k.radius).toBeCloseTo(40 * c.userUnit, 7);
+      expect(k.dist1).toBeCloseTo(40 * c.userUnit * Math.sin(20 * DEG), 7);
+      expect(k.dist2).toBeCloseTo(40 * c.userUnit * Math.sin(25 * DEG), 7);
+    }
+    expect(lineClearance(a, side(3, { x: 100, y: 350 }, { x: 400, y: 350 }), V, G0)).toBeNull();
   });
 });

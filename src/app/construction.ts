@@ -5,6 +5,9 @@
 // La Quota lo usa solo sul SECONDO punto di Allineata, Ø e R (come la Retta; decisione 56 di PIANO.md). Non sull'Orizzontale e sulla Verticale, che misurano
 // gia' una componente (e `place` rifiuta due punti sulla stessa X o Y), e non sul terzo punto di nessuna quota: e' la posizione della linea di quota,
 // gia' vincolata dal tipo di quota.
+// Quota angolare (CP6g): due modalita' per lo stesso oggetto. "Da due linee": si SCELGONO due tratti (`addSide`: un tocco su una Retta o una Linea, non punti) e poi un punto che
+// fissa l'angolo e l'arco (snap e griglia, nessun ORTO). "Da tre punti": vertice, un punto per lato e il punto del raggio; ORTO sul secondo e sul terzo punto con partenza dal
+// vertice (la stessa ancora di Allineata, Ø e R: quindi anche Perpendicolare e Tangente), nessun ORTO sul quarto.
 // Priorita' del punto effettivo (`resolve`): (1) squadratura del secondo punto del quadrato; (2) snap su un oggetto, se un candidato e' nel
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
@@ -14,6 +17,7 @@
 // Due punti coincidenti NON si rifiutano qui con i 6 px di `place` (dipendono dallo zoom): li rifiuta l'app con la soglia in pt di `geometry/transform`.
 // Origine (CP6d): un solo punto, indicato come ogni altro (snap e griglia attivi, nessun ORTO). Shell (CP6d, decisione 59): i punti digitati sono ESATTI (`placeExact`):
 // non passano da snap, griglia, squadratura ne' ORTO, e si rifiutano per distanza in pt (non per i pixel di `COINCIDENT_PX`, che dipendono dallo zoom).
+import { ANGULAR_PROBLEM_TEXT, type PickedSide, angularFromLines, angularFromPoints, lineClearance, sidesProblem } from '../geometry/angular';
 import { ARC_PROBLEM_TEXT, type CurveKind, arcProblem, curveInfo } from '../geometry/arc';
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
@@ -23,6 +27,8 @@ import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
 import type { Resolved, SnapHit } from '../geometry/snap';
 import type { LineKind } from '../model/model';
 
+/** Quota angolare: si costruisce da due linee scelte o da tre punti indicati. */
+export type AngularMode = 'lines' | 'points';
 export type TransformTool = 'move' | 'mirror' | 'rotate';
 export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin' | TransformTool;
 export const isTransformTool = (t: string | null): t is TransformTool => t === 'move' || t === 'mirror' || t === 'rotate';
@@ -111,6 +117,10 @@ export class Construction {
   coverKind: CoverKind = 'rect';
   /** Cerchio o Arco in costruzione. */
   curveKind: CurveKind = 'circle';
+  /** Quota angolare in costruzione: da due linee o da tre punti (predefinito: da due linee, la richiesta dell'utente). */
+  angularMode: AngularMode = 'lines';
+  /** Quota angolare "da due linee": i tratti scelti finora (0, 1 o 2). Gli oggetti non sono salvati nella quota: servono solo a calcolarla. */
+  sides: PickedSide[] = [];
 
   constructor(
     private readonly env: ConstructionEnv,
@@ -126,6 +136,22 @@ export class Construction {
   setDimType(type: DimType): void {
     this.dimType = type;
     this.reset();
+  }
+
+  /** Cambia la modalita' della quota angolare: i lati e i punti gia' scelti si scartano (cambia il significato dei passi). */
+  setAngularMode(mode: AngularMode): void {
+    this.angularMode = mode;
+    this.reset();
+  }
+
+  /** E' in corso una quota angolare. */
+  get angular(): boolean {
+    return this.tool === 'dim' && this.dimType === 'angular';
+  }
+
+  /** Quota angolare "da due linee" e mancano ancora dei lati da scegliere: il prossimo tocco sceglie una Retta o una Linea (non indica un punto). */
+  get choosingSides(): boolean {
+    return this.angular && this.angularMode === 'lines' && !this.locked && !this.done && this.sides.length < 2;
   }
 
   /** Cambia la forma della copertura: il punto gia' indicato si scarta (cambia il significato dei due punti). */
@@ -155,7 +181,7 @@ export class Construction {
       case 'rotate':
         return 1;
       case 'dim':
-        return dimInfo(this.dimType).points;
+        return this.angular && this.angularMode === 'lines' ? 1 : dimInfo(this.dimType).points; // angolare da due linee: i due lati sono scelti, resta il punto dell'arco
       case 'curve':
         return curveInfo(this.curveKind).points;
       default:
@@ -165,21 +191,24 @@ export class Construction {
 
   reset(): void {
     this.points = [];
+    this.sides = [];
     this.done = false;
     this.locked = false;
   }
 
-  /** Ci sono punti in costruzione (non ancora una linea finita). */
+  /** Ci sono punti (o lati scelti) in costruzione (non ancora una linea finita). */
   get pending(): boolean {
-    return this.points.length > 0 && !this.done;
+    return (this.points.length > 0 || this.sides.length > 0) && !this.done;
   }
 
   /**
    * L'ultimo punto, da cui parte il vincolo ortogonale; null per il primo punto e per gli strumenti senza ORTO (Testo, Copertura, Cerchio e Arco).
    * Quota: solo il secondo punto di Allineata, Ø e R (con un punto gia' indicato); null per Orizzontale e Verticale e per il terzo punto (posizione della linea di quota).
+   * Angolare "da tre punti": il vertice per il secondo e il terzo punto (i punti sui lati), nessuno per il primo e per il quarto (il raggio); "da due linee": nessuno.
    */
   get anchor(): UserPoint | null {
     if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.tool === 'rotate' || this.done || this.locked) return null;
+    if (this.angular) return this.angularMode === 'points' && (this.points.length === 1 || this.points.length === 2) ? (this.points[0] ?? null) : null;
     if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
   }
@@ -217,6 +246,17 @@ export class Construction {
     if (!geom || !this.tool || this.locked) return;
     if (this.done) this.reset(); // nuova misura
     if (this.tool === 'rotate') this.points = []; // un nuovo clic sostituisce il centro
+    if (this.angular) {
+      if (this.angularMode === 'lines') {
+        if (this.sides.length < 2) {
+          this.ev.reject('Quota angolare: scegli prima le due linee.');
+          return;
+        }
+        if (!this.arcPointOk(geom, placed)) return;
+      } else if (!this.vertexSideOk(geom, placed)) return;
+      this.commit(geom, placed);
+      return;
+    }
     const last = this.points.at(-1);
     // Quadrato: il secondo punto e' sempre l'angolo squadrato (idempotente se il vincolo l'ha gia' applicato).
     const p = this.tool === 'cover' && this.coverKind === 'square' && last ? squareUser(last, placed, geom) : placed;
@@ -260,6 +300,70 @@ export class Construction {
       }
     }
     this.commit(geom, p);
+  }
+
+  /**
+   * Angolare "da due linee", punto dell'arco: rifiuta (con la soglia in pixel di ogni altro punto) un punto troppo vicino al vertice o a una delle due rette, che non dice quale dei
+   * quattro angoli si vuole quotare. L'incrocio troppo lontano o i lati paralleli si sono gia' rifiutati quando si e' scelto il secondo lato.
+   */
+  private arcPointOk(geom: PageGeometry, p: UserPoint): boolean {
+    const c = lineClearance(this.sides[0] as PickedSide, this.sides[1] as PickedSide, p, geom);
+    if (!c) {
+      this.ev.reject(ANGULAR_PROBLEM_TEXT.parallel);
+      return false;
+    }
+    const z = this.env.zoom();
+    if (c.radius * z < COINCIDENT_PX) {
+      this.ev.reject(ANGULAR_PROBLEM_TEXT['at-vertex']);
+      return false;
+    }
+    if (Math.min(c.dist1, c.dist2) * z < COINCIDENT_PX) {
+      this.ev.reject(ANGULAR_PROBLEM_TEXT['on-line']);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Angolare "da tre punti": il secondo e il terzo punto non possono stare sul vertice (soglia in pixel), i due lati non possono stare sulla stessa retta (si dice appena si
+   * indica il secondo lato) e il punto del raggio non puo' stare sul vertice. Il primo punto (il vertice) non ha controlli.
+   */
+  private vertexSideOk(geom: PageGeometry, p: UserPoint): boolean {
+    const v = this.points[0];
+    if (!v) return true;
+    const sv = geom.userToSheet(v);
+    const sp = geom.userToSheet(p);
+    if (Math.hypot(sp.x - sv.x, sp.y - sv.y) * this.env.zoom() < COINCIDENT_PX) {
+      this.ev.reject(this.points.length === 3 ? 'Il raggio dell\'arco è troppo piccolo: indica un punto più lontano dal vertice.' : 'Il punto coincide con il vertice: indica un punto più lontano.');
+      return false;
+    }
+    if (this.points.length === 2) {
+      const r = angularFromPoints(v, this.points[1] as UserPoint, p, p, geom);
+      if (!r.ok && r.problem === 'parallel') {
+        this.ev.reject('I due lati sono sulla stessa retta: l\'angolo sarebbe 0° o 180°. Indica un altro punto.');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Angolare "da due linee": sceglie un tratto (una Retta o un tratto di una Linea, gia' individuato dall'app con `pickSide`). Falso se non sta scegliendo i lati. Il secondo lato
+   * si rifiuta (con il motivo, e il primo resta scelto) se e' lo stesso tratto, e' parallelo al primo o fa uscire il vertice dai limiti del foglio.
+   */
+  addSide(side: PickedSide): boolean {
+    const geom = this.env.geometry();
+    if (!geom || !this.choosingSides) return false;
+    const first = this.sides[0];
+    if (first) {
+      const problem = sidesProblem(first, side, geom);
+      if (problem) {
+        this.ev.reject(ANGULAR_PROBLEM_TEXT[problem]);
+        return false;
+      }
+    }
+    this.sides.push({ id: side.id, index: side.index, a: { ...side.a }, b: { ...side.b } });
+    return true;
   }
 
   /** Aggiunge il punto `p` (gia' validato) e, se la costruzione e' completa, la consegna all'app. */
@@ -324,10 +428,16 @@ export class Construction {
         break;
       case 'dim':
         if (this.points.length === this.needed) {
-          const def = buildDimension(this.dimType, this.points, geom);
+          let def: DimensionDef | null;
+          let problem = 'Quota non valida: scegli un altro punto.';
+          if (this.angular && this.angularMode === 'lines') {
+            const res = angularFromLines(this.sides[0] as PickedSide, this.sides[1] as PickedSide, this.points[0] as UserPoint, geom);
+            def = res.ok ? { dim: 'angular', ...res.points } : null;
+            if (!res.ok) problem = ANGULAR_PROBLEM_TEXT[res.problem];
+          } else def = buildDimension(this.dimType, this.points, geom);
           if (!def) {
             this.points.pop();
-            this.ev.reject('Quota non valida: scegli un altro punto.');
+            this.ev.reject(problem);
           } else {
             this.locked = true;
             this.ev.dimension(def);
@@ -352,9 +462,16 @@ export class Construction {
 
   /** Toglie l'ultimo punto in costruzione. Falso se non c'era nulla da togliere. */
   undoLast(): boolean {
-    if (this.locked || this.done || this.points.length === 0) return false;
-    this.points.pop();
-    return true;
+    if (this.locked || this.done) return false;
+    if (this.points.length > 0) {
+      this.points.pop();
+      return true;
+    }
+    if (this.sides.length > 0) {
+      this.sides.pop(); // quota angolare "da due linee": toglie l'ultimo lato scelto
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -460,9 +577,17 @@ export class Construction {
     }
   }
 
+  /** Quota angolare, una riga per passo (le stesse lunghezze delle altre quote o meno: la barra contestuale su iPhone non deve cambiare altezza). */
+  private angularPrompt(n: number): string {
+    const name = dimInfo('angular').label;
+    if (this.angularMode === 'lines') return this.sides.length === 0 ? `${name}: scegli la prima linea` : this.sides.length === 1 ? `${name}: scegli la seconda linea` : `${name}: indica dove mettere l'arco`;
+    return n === 0 ? `${name}: indica il vertice` : n === 1 ? `${name}: indica un punto sul lato 1` : n === 2 ? `${name}: indica un punto sul lato 2` : `${name}: indica dove mettere l'arco`;
+  }
+
   private dimPrompt(n: number): string {
     const name = dimInfo(this.dimType).label;
     if (this.locked) return `${name}: digita il valore con il tastierino`;
+    if (this.angular) return this.angularPrompt(n);
     switch (this.dimType) {
       case 'diameter':
         return n === 0 ? `${name}: indica un punto sul bordo` : `${name}: indica il punto opposto, sul diametro`;

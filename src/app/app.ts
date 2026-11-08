@@ -2,6 +2,7 @@
 // Strumenti: Sposta, Seleziona, Retta, Linea, Scala (calibrazione), Distanza, Testo, Quota, Copertura, Cancella (e Origine, dal menu). Oggetti, scala e origine sono in memoria
 // nella sessione, nello spazio utente PDF; si salvano in un file progetto (.json) con File > Salva con nome e si riaprono con File > Apri progetto.
 // Ogni modifica passa da un comando (annulla/ripeti).
+import { type PickedSide, type SideTract, angularFromLines, pickSide } from '../geometry/angular';
 import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, dimInfo } from '../geometry/dimension';
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { CURVE_TYPES, type CurveKind, arcProblem, curveOnSheet } from '../geometry/arc';
@@ -79,7 +80,7 @@ import { type MenuEntry, menuButton } from '../ui/menu';
 import { type StyleBinding, type StyleKind, createStyleControls, styleGlyph } from '../ui/styleControls';
 import { TouchReadout } from '../ui/touchReadout';
 import { PdfViewer, type ViewerMode } from '../ui/viewer';
-import { Construction, type ConstructionTool, type TransformTool, isTransformTool } from './construction';
+import { type AngularMode, Construction, type ConstructionTool, type TransformTool, isTransformTool } from './construction';
 import { OUTSIDE_MESSAGE, SHELL_MAX_LENGTH, parseShellPoint, parseShellRadius } from './shell';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
 
@@ -191,6 +192,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let textPt = DEFAULT_TEXT_PT;
   /** Tipo della quota che si sta per disegnare. */
   let dimType: DimType = 'aligned';
+  /** Come si costruisce la quota angolare: da due linee (predefinito) o da tre punti. Stato della sessione, non si salva. */
+  let angularMode: AngularMode = 'lines';
   /** Forma della copertura che si sta per disegnare. */
   let coverKind: CoverKind = 'rect';
   /** Cerchio o arco che si sta per disegnare. */
@@ -498,7 +501,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     ...CURVE_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCurveKind(t.id) })),
     'separator',
     { label: 'Testo', disabled: !pdf, onSelect: () => selectTool('text') },
-    ...DIM_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) })),
+    ...DIM_TYPES.flatMap((t): MenuEntry[] =>
+      t.id === 'angular'
+        ? [
+            { label: `${t.label} da due linee`, disabled: !pdf, onSelect: () => selectAngularMode('lines') },
+            { label: `${t.label} da tre punti`, disabled: !pdf, onSelect: () => selectAngularMode('points') },
+          ]
+        : [{ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) }],
+    ),
     ...COVER_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCoverKind(t.id) })),
     { label: 'Raccordo', hint: 'V2c', disabled: true },
   ];
@@ -704,6 +714,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const trMirrorBtn = trBtn('mirror', 'Specchio', 'Specchia la selezione rispetto a un asse indicato con due punti');
   const trRotateBtn = trBtn('rotate', 'Rotazione', 'Ruota la selezione attorno a un centro: digita l\'angolo in gradi (solo con mouse o trackpad)');
   const keepBtn = h('button', { class: 'btn ctx-act ctx-keep', type: 'button', 'aria-pressed': 'false', hidden: true, title: 'Acceso: gli originali restano e la trasformazione crea copie', onclick: () => setKeepOriginal(!keepOriginal) }, 'Mantieni l\'originale');
+  // Quota angolare: un interruttore (come "Mantieni l'originale") sceglie fra "da due linee" (spento, la richiesta dell'utente) e "da tre punti" (acceso): nessuna riga in piu' nella barra
+  const angModeBtn = h('button', { class: 'btn ctx-act ctx-angmode', type: 'button', 'aria-pressed': 'false', hidden: true, title: 'Acceso: la quota angolare si costruisce indicando vertice, un punto per lato e il raggio dell\'arco. Spento: si scelgono due linee', onclick: () => selectAngularMode(angularMode === 'lines' ? 'points' : 'lines') }, 'Da 3 punti');
   const angleInput = h('input', {
     class: 'field num ctx-angle-input',
     type: 'text',
@@ -718,7 +730,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const originCenterBtn = h('button', { class: 'btn ctx-act ctx-origin-center', type: 'button', title: 'Usa l\'origine della pagina come centro', onclick: () => useOriginAsCenter() }, 'Origine');
   const angleBox = h('div', { class: 'ctx-angle', hidden: true }, angleInput, h('span', { class: 'ctx-angle-unit num' }, '°'), originCenterBtn);
   const popover = h('div', { class: 'props-pop', role: 'group', 'aria-label': 'Proprietà', hidden: true }, popoverStyle.el);
-  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, shellBox, angleBox, h('div', { class: 'ctx-actions' }, styleChip, trMoveBtn, trMirrorBtn, trRotateBtn, keepBtn, cancelBtn, finishBtn), popover);
+  const ctxBar = h('section', { class: 'ctxbar', 'aria-label': 'Strumento attivo', hidden: true }, ctxHint, dimTypes, coverTypes, curveTypes, shellBox, angleBox, h('div', { class: 'ctx-actions' }, styleChip, trMoveBtn, trMirrorBtn, trRotateBtn, keepBtn, angModeBtn, cancelBtn, finishBtn), popover);
   let propsOpen = false;
   function toggleProps(open = !propsOpen): void {
     propsOpen = open;
@@ -913,7 +925,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     renderSelection();
     toggleProps(false);
     construction.setTool(isConstructionTool(id) ? id : null);
-    if (id === 'dim') construction.setDimType(dimType);
+    if (id === 'dim') {
+      construction.setDimType(dimType);
+      construction.angularMode = angularMode;
+    }
     if (id === 'cover') construction.setCoverKind(coverKind);
     if (id === 'curve') construction.setCurveKind(curveKind);
     currentAim = null;
@@ -1035,6 +1050,57 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
   }
 
+  /** Sceglie la quota angolare e come costruirla (e passa allo strumento Quota). */
+  function selectAngularMode(mode: AngularMode): void {
+    angularMode = mode;
+    dimType = 'angular';
+    if (tool !== 'dim') selectTool('dim');
+    else {
+      cancelEntry();
+      construction.setDimType('angular');
+      construction.setAngularMode(mode);
+      viewer.setHighlight(null);
+      currentAim = null;
+      renderConstruction();
+    }
+  }
+
+  /** Il tratto scelto sul foglio mostrato (una linea sola): serve a evidenziarlo. */
+  function sideShape(s: SideTract): Shape {
+    const g = viewer.geometry;
+    return g ? { lines: [[g.userToSheet(s.a), g.userToSheet(s.b)]], rects: [], circles: [] } : { lines: [], rects: [], circles: [] };
+  }
+  /** Il tratto di Retta o Linea piu' vicino al punto (entro la tolleranza), per la quota angolare "da due linee". */
+  function sideAt(sheet: SheetPoint, tol: number): PickedSide | null {
+    const g = viewer.geometry;
+    return g && pdf ? pickSide(model.objects(pageNo).filter(isLine), g, sheet, tol) : null;
+  }
+
+  /**
+   * Quota angolare in costruzione: linee guida e anteprima. "Da due linee": con i due lati scelti l'anteprima segue il cursore (settore e raggio). "Da tre punti": il
+   * vertice con i lati finora indicati (il secondo segue il cursore) e, dopo il terzo punto, l'anteprima con il raggio sotto il cursore. Solo a schermo, mai esportata.
+   */
+  function renderAngular(geom: PageGeometry, aim: UserPoint | null): void {
+    const pts = construction.points;
+    const [v, a1, a2] = pts;
+    let def: DimensionDef | null = null;
+    let guide: UserPoint[] | null = null;
+    if (construction.angularMode === 'lines') {
+      const [s1, s2] = construction.sides;
+      if (s1 && s2 && aim) {
+        const r = angularFromLines(s1, s2, aim, geom);
+        if (r.ok) def = { dim: 'angular', ...r.points };
+      }
+    } else if (v && pts.length === 1 && aim) guide = [v, aim];
+    else if (v && a1 && pts.length === 2) guide = aim ? [a1, v, aim] : [a1, v];
+    else if (v && a1 && a2) {
+      guide = [a1, v, a2];
+      if (aim) def = buildDimension('angular', [v, a1, a2, aim], geom);
+    }
+    viewer.setGuide(guide);
+    if (def) viewer.setDraft(dimLayout(def, null, geom, dimDraftLabel(def, null, geom)));
+  }
+
   /** Redisegna punti, anteprima, misura e barra contestuale secondo lo stato della costruzione. */
   function renderConstruction(): void {
     const geom = viewer.geometry;
@@ -1059,9 +1125,14 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       viewer.setMarkers(pts.map((p, i) => ({ p, label: String(i + 1) })));
       viewer.setPreview(null);
       viewer.setBadge(null);
+      // quota angolare "da due linee": si scelgono prima i lati (il visore sceglie un oggetto con un tocco) e poi si indica un punto; i lati scelti restano evidenziati
+      if (!entry) viewer.setMode(construction.choosingSides ? 'choose' : 'pick');
+      viewer.setSelection(construction.angular && construction.sides.length > 0 ? unionShapes(construction.sides.map(sideShape)) : null);
       if (entry) {
         viewer.setGuide(null);
         viewer.setDraft(entryLayout(geom));
+      } else if (construction.angular) {
+        renderAngular(geom, aim);
       } else {
         // dopo il primo punto la guida segue il dito; per le quote a tre punti, dopo il secondo si vede la quota intera
         const need = dimInfo(dimType).points;
@@ -1152,6 +1223,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     }
     dimTypes.hidden = tool !== 'dim';
     for (const [id, b] of dimTypeBtns) b.setAttribute('aria-pressed', String(id === dimType));
+    angModeBtn.hidden = !(tool === 'dim' && dimType === 'angular');
+    angModeBtn.setAttribute('aria-pressed', String(angularMode === 'points'));
     coverTypes.hidden = tool !== 'cover';
     for (const [id, b] of coverTypeBtns) b.setAttribute('aria-pressed', String(id === coverKind));
     curveTypes.hidden = tool !== 'curve';
@@ -1563,7 +1636,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       { kind: 'dim', def, text: auto ?? dimInfo(def.dim).prefix, auto },
       {
         title: name,
-        info: auto && scale ? `Automatico ${auto} mm · scala ${scaleLabel(scale)}` : 'Pagina non calibrata: digita il valore in mm',
+        info: def.dim === 'angular' ? (auto ? `Automatico ${auto} · gradi decimali` : 'Digita l\'angolo in gradi') : auto && scale ? `Automatico ${auto} mm · scala ${scaleLabel(scale)}` : 'Pagina non calibrata: digita il valore in mm',
         layout: 'num',
         selectFrom: auto ? dimInfo(def.dim).prefix.length : undefined, // il valore automatico e' proposto: il primo tasto lo sostituisce (il prefisso Ø/R resta)
         maxLength: DIM_TEXT_MAX_LENGTH,
@@ -1655,6 +1728,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   viewer.hooks.onErasePreview = (sheet, tol) => {
     const o = sheet ? objectAt(sheet, tol) : null;
     viewer.setHighlight(o ? shapeOf(o) : null);
+  };
+  // Quota angolare "da due linee" (CP6g): un tocco sceglie il TRATTO di Retta o Linea piu' vicino (non il primo in primo piano: `pickSide`); Cerchi, Archi, Coperture, Testi e Quote non si scelgono.
+  viewer.hooks.onChoosePreview = (sheet, tol) => {
+    const side = sheet ? sideAt(sheet, tol) : null;
+    viewer.setHighlight(side ? sideShape(side) : null);
+  };
+  viewer.hooks.onChoose = (sheet, tol) => {
+    const side = sideAt(sheet, tol);
+    if (!side) {
+      say('Nessuna retta o linea in questo punto: tocca sopra una retta o una linea');
+      return;
+    }
+    if (!construction.addSide(side)) return; // rifiutato: il motivo e' gia' nel messaggio di stato
+    say('');
+    viewer.setHighlight(null);
+    renderConstruction();
   };
   /** Cancella un oggetto con il comando dello strumento Cancella: un solo passo di Annulla, lo stesso messaggio. */
   function removeObject(o: PageObject): void {

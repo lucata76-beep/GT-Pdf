@@ -15,6 +15,8 @@ export const ANGLE_MIN_DEG = 0.005;
 export const SIDE_STUB_PT = 1;
 /** Un punto a meno di cosi' (pt del foglio) dal vertice o da una delle due rette non individua un settore. */
 export const ON_LINE_EPS_PT = 1e-6;
+/** Coordinate massime (spazio utente, pt): quelle del formato del progetto (`LIMITS.coordAbs`) e di `transform.COORD_LIMIT`; un test controlla che siano uguali. Un vertice o un punto oltre non si salverebbe. */
+export const ANGULAR_COORD_LIMIT = 1_000_000;
 /** Arco a segmenti (decisione dell'utente: nessun arco vero nel layout): passo massimo, scarto massimo dal vero arco, e tetto al numero di segmenti. */
 export const ARC_MAX_STEP_DEG = 2;
 export const ARC_MAX_DEVIATION_PT = 0.02;
@@ -146,7 +148,7 @@ const outOfLimits = (p: UserPoint, limit: number): boolean => !Number.isFinite(p
  * Modalita' "da tre punti": vertice, un punto sul primo lato, un punto sul secondo lato e un punto che fissa il RAGGIO dell'arco (la sua distanza dal vertice).
  * L'angolo e' sempre il minore fra i due lati. Rifiuta: punti coincidenti con il vertice, lati sulla stessa retta.
  */
-export function angularFromPoints(vertex: UserPoint, p1: UserPoint, p2: UserPoint, radiusPoint: UserPoint, geom: PageGeometry, limit = Infinity): AngularResult {
+export function angularFromPoints(vertex: UserPoint, p1: UserPoint, p2: UserPoint, radiusPoint: UserPoint, geom: PageGeometry, limit = ANGULAR_COORD_LIMIT): AngularResult {
   const v = geom.userToSheet(vertex);
   const s1 = geom.userToSheet(p1);
   const s2 = geom.userToSheet(p2);
@@ -189,13 +191,32 @@ function sidePoint(v: SheetPoint, r: SheetPoint, e1: SheetPoint, e2: SheetPoint,
   return { x: v.x + r.x * rho, y: v.y + r.y * rho };
 }
 
+/** Perche' due tratti scelti non danno un angolo (lo stesso tratto, rette parallele o sulla stessa retta, vertice fuori dai limiti), o null. Si controlla appena si sceglie il secondo. */
+export function sidesProblem(s1: PickedSide, s2: PickedSide, geom: PageGeometry, limit = ANGULAR_COORD_LIMIT): AngularProblem | null {
+  if (s1.id === s2.id && s1.index === s2.index) return 'same-side';
+  const x = lineCrossing(s1, s2, geom);
+  if (!x) return 'parallel';
+  return outOfLimits(geom.sheetToUser(x.v), limit) ? 'far' : null;
+}
+
+/**
+ * Distanze (pt del foglio) di un punto dal vertice e dalle due rette dei lati scelti, o null se i lati non danno un angolo. Servono all'interfaccia per rifiutare, con la soglia in
+ * PIXEL che usa per ogni altro punto (`COINCIDENT_PX`), un punto troppo vicino al vertice o a una delle rette; la soglia esatta in pt e' ON_LINE_EPS_PT dentro `angularFromLines`.
+ */
+export function lineClearance(s1: PickedSide, s2: PickedSide, p: UserPoint, geom: PageGeometry): { radius: number; dist1: number; dist2: number } | null {
+  const x = lineCrossing(s1, s2, geom);
+  if (!x) return null;
+  const w = sub(geom.userToSheet(p), x.v);
+  return { radius: len(w), dist1: Math.abs(cross(x.d1, w)), dist2: Math.abs(cross(x.d2, w)) };
+}
+
 /**
  * Modalita' "da due linee": due tratti scelti e un punto `p` che fissa l'angolo e l'arco. Il vertice e' l'incrocio delle due rette PROLUNGATE (puo' stare fuori dai tratti). Le due
  * rette dividono il piano in quattro settori: quello in cui cade `p` e' l'angolo quotato, la distanza di `p` dal vertice e' il raggio dell'arco. Il settore e' {alfa u1 + beta u2}:
  * i segni di alfa e beta danno le due semirette che lo delimitano (sigma1 u1 e sigma2 u2), e l'angolo e' quello fra di esse (theta, 180 - theta, theta, 180 - theta nei quattro).
  * Rifiuta: lo stesso tratto due volte, rette parallele o sulla stessa retta, `p` sul vertice o su una delle due rette (a meno di ON_LINE_EPS_PT), vertice fuori da `limit` (+-limit pt utente).
  */
-export function angularFromLines(s1: PickedSide, s2: PickedSide, p: UserPoint, geom: PageGeometry, limit = Infinity): AngularResult {
+export function angularFromLines(s1: PickedSide, s2: PickedSide, p: UserPoint, geom: PageGeometry, limit = ANGULAR_COORD_LIMIT): AngularResult {
   if (s1.id === s2.id && s1.index === s2.index) return { ok: false, problem: 'same-side' };
   const x = lineCrossing(s1, s2, geom);
   if (!x) return { ok: false, problem: 'parallel' };
