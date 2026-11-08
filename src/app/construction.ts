@@ -12,6 +12,8 @@
 // raggio; (3) ORTO, se attivo e c'e' un'ancora; (4) griglia, se accesa e visibile: arrotonda le coordinate rimaste libere (senza ORTO tutte e due, con
 // ORTO solo quella libera: l'altra resta uguale all'ancora). Il punto che si vede (marcatore, anteprima, lente) e' quello che si inserisce: con ORTO
 // acceso lo snap puo' portare il punto fuori asse e si vede. I punti gia' indicati nella costruzione in corso sono candidati dello snap (Estremo): V2b.
+// Raccordo (CP6h): come la quota angolare "da due linee" non indica punti ma SCEGLIE due tratti di Retta o Linea (`addFilletSide`, con il punto cliccato, che decide da che parte del vertice
+// si sta); poi l'app chiede il raggio con il tastierino. Lo strumento resta armato dopo ogni raccordo (l'app lo disarma con Esc o cambiando strumento).
 // Sposta, Specchio, Rotazione (CP6e): strumenti a punti che non disegnano ma trasformano la selezione; riusano `resolve` (snap, griglia, ORTO sul secondo punto di Sposta e
 // dell'asse dello Specchio), `place`, `undoLast` e la mira (mirino e lente sul tocco). Sposta e Specchio hanno 2 punti, la Rotazione 1 (il centro: l'angolo si digita).
 // Due punti coincidenti NON si rifiutano qui con i 6 px di `place` (dipendono dallo zoom): li rifiuta l'app con la soglia in pt di `geometry/transform`.
@@ -21,6 +23,7 @@ import { ANGULAR_PROBLEM_TEXT, type PickedSide, angularFromLines, angularFromPoi
 import { ARC_PROBLEM_TEXT, type CurveKind, arcProblem, curveInfo } from '../geometry/arc';
 import { type CoverDef, type CoverKind, coverInfo, squareSheet, squareUser } from '../geometry/cover';
 import { type DimType, type DimensionDef, buildDimension, dimInfo } from '../geometry/dimension';
+import { type FilletSide, filletProblemText, filletSidesProblem } from '../geometry/fillet';
 import { snapToGrid } from '../geometry/grid';
 import { orthoFreeAxis, orthoSheet } from '../geometry/ortho';
 import type { PageGeometry, SheetPoint, UserPoint } from '../geometry/page';
@@ -30,7 +33,7 @@ import type { LineKind } from '../model/model';
 /** Quota angolare: si costruisce da due linee scelte o da tre punti indicati. */
 export type AngularMode = 'lines' | 'points';
 export type TransformTool = 'move' | 'mirror' | 'rotate';
-export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin' | TransformTool;
+export type ConstructionTool = 'segment' | 'polyline' | 'calibrate' | 'distance' | 'text' | 'dim' | 'cover' | 'curve' | 'origin' | 'fillet' | TransformTool;
 export const isTransformTool = (t: string | null): t is TransformTool => t === 'move' || t === 'mirror' || t === 'rotate';
 
 export interface ConstructionEnv {
@@ -72,6 +75,8 @@ export interface ConstructionEvents {
   curve(kind: CurveKind, points: UserPoint[]): void;
   /** Origine (CP6d): il punto e' stato indicato. */
   origin(at: UserPoint): void;
+  /** Raccordo (CP6h): i due tratti sono stati scelti; l'app apre il tastierino per il raggio (la costruzione resta bloccata fino a `reset()`). Facoltativa, come `transform`. */
+  fillet?(sides: [FilletSide, FilletSide]): void;
   /**
    * Sposta (base, arrivo), Specchio (due punti dell'asse) o Rotazione (il centro) (CP6e): i punti sono stati indicati. Risponde se l'app li ACCETTA: con `true` la costruzione
    * di Sposta e Specchio si azzera (l'app ha eseguito); con `false` (trasformazione non ammessa, l'app ha gia' detto perche') l'ultimo punto si scarta e il primo resta.
@@ -99,6 +104,7 @@ export const TOOL_NAME: Record<ConstructionTool, string> = {
   cover: 'Copertura',
   curve: 'Cerchio e arco',
   origin: 'Origine',
+  fillet: 'Raccordo',
   move: 'Sposta',
   mirror: 'Specchio',
   rotate: 'Rotazione',
@@ -121,6 +127,8 @@ export class Construction {
   angularMode: AngularMode = 'lines';
   /** Quota angolare "da due linee": i tratti scelti finora (0, 1 o 2). Gli oggetti non sono salvati nella quota: servono solo a calcolarla. */
   sides: PickedSide[] = [];
+  /** Raccordo: i tratti scelti finora (0, 1 o 2), ognuno con il punto cliccato (grezzo, senza snap). */
+  filletSides: FilletSide[] = [];
 
   constructor(
     private readonly env: ConstructionEnv,
@@ -154,6 +162,11 @@ export class Construction {
     return this.angular && this.angularMode === 'lines' && !this.locked && !this.done && this.sides.length < 2;
   }
 
+  /** Raccordo e mancano ancora dei tratti da scegliere: il prossimo tocco sceglie una Retta o una Linea (non indica un punto). */
+  get choosingFillet(): boolean {
+    return this.tool === 'fillet' && !this.locked && !this.done && this.filletSides.length < 2;
+  }
+
   /** Cambia la forma della copertura: il punto gia' indicato si scarta (cambia il significato dei due punti). */
   setCoverKind(kind: CoverKind): void {
     this.coverKind = kind;
@@ -180,6 +193,8 @@ export class Construction {
       case 'origin':
       case 'rotate':
         return 1;
+      case 'fillet':
+        return 2; // i due tratti: non sono punti
       case 'dim':
         return this.angular && this.angularMode === 'lines' ? 1 : dimInfo(this.dimType).points; // angolare da due linee: i due lati sono scelti, resta il punto dell'arco
       case 'curve':
@@ -192,13 +207,14 @@ export class Construction {
   reset(): void {
     this.points = [];
     this.sides = [];
+    this.filletSides = [];
     this.done = false;
     this.locked = false;
   }
 
   /** Ci sono punti (o lati scelti) in costruzione (non ancora una linea finita). */
   get pending(): boolean {
-    return (this.points.length > 0 || this.sides.length > 0) && !this.done;
+    return (this.points.length > 0 || this.sides.length > 0 || this.filletSides.length > 0) && !this.done;
   }
 
   /**
@@ -207,7 +223,7 @@ export class Construction {
    * Angolare "da tre punti": il vertice per il secondo e il terzo punto (i punti sui lati), nessuno per il primo e per il quarto (il raggio); "da due linee": nessuno.
    */
   get anchor(): UserPoint | null {
-    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.tool === 'rotate' || this.done || this.locked) return null;
+    if (!this.tool || this.tool === 'text' || this.tool === 'cover' || this.tool === 'curve' || this.tool === 'origin' || this.tool === 'rotate' || this.tool === 'fillet' || this.done || this.locked) return null;
     if (this.angular) return this.angularMode === 'points' && (this.points.length === 1 || this.points.length === 2) ? (this.points[0] ?? null) : null;
     if (this.tool === 'dim' && (this.points.length !== 1 || this.dimType === 'horizontal' || this.dimType === 'vertical')) return null;
     return this.points.at(-1) ?? null;
@@ -244,6 +260,7 @@ export class Construction {
   place(placed: UserPoint): void {
     const geom = this.env.geometry();
     if (!geom || !this.tool || this.locked) return;
+    if (this.tool === 'fillet') return; // il raccordo sceglie tratti (`addFilletSide`), non punti
     if (this.done) this.reset(); // nuova misura
     if (this.tool === 'rotate') this.points = []; // un nuovo clic sostituisce il centro
     if (this.angular) {
@@ -366,6 +383,30 @@ export class Construction {
     return true;
   }
 
+  /**
+   * Raccordo: sceglie un tratto (una Retta o un tratto di una Linea, gia' individuato dall'app con `pickSide`, piu' il punto cliccato). Falso se non sta scegliendo i tratti. Il secondo si
+   * rifiuta (con il motivo, e il primo resta scelto) se e' lo stesso tratto, e' parallelo al primo, fa uscire il vertice dai limiti del foglio o il clic e' sul vertice; se va bene i due tratti sono
+   * consegnati all'app (`ev.fillet`) e la costruzione si blocca fino al raggio.
+   */
+  addFilletSide(side: FilletSide): boolean {
+    const geom = this.env.geometry();
+    if (!geom || !this.choosingFillet) return false;
+    const first = this.filletSides[0];
+    if (first) {
+      const problem = filletSidesProblem(first, side, geom);
+      if (problem) {
+        this.ev.reject(filletProblemText({ problem }));
+        return false;
+      }
+    }
+    this.filletSides.push({ id: side.id, index: side.index, a: { ...side.a }, b: { ...side.b }, click: { ...side.click } });
+    if (this.filletSides.length === 2) {
+      this.locked = true;
+      this.ev.fillet?.([this.filletSides[0] as FilletSide, this.filletSides[1] as FilletSide]);
+    }
+    return true;
+  }
+
   /** Aggiunge il punto `p` (gia' validato) e, se la costruzione e' completa, la consegna all'app. */
   private commit(geom: PageGeometry, p: UserPoint): void {
     this.points.push(p);
@@ -471,6 +512,10 @@ export class Construction {
       this.sides.pop(); // quota angolare "da due linee": toglie l'ultimo lato scelto
       return true;
     }
+    if (this.filletSides.length > 0) {
+      this.filletSides.pop(); // raccordo: toglie l'ultimo tratto scelto
+      return true;
+    }
     return false;
   }
 
@@ -530,6 +575,8 @@ export class Construction {
         return this.curvePrompt(n);
       case 'origin':
         return 'Origine: indica il punto da cui contare X e Y';
+      case 'fillet':
+        return this.locked ? 'Raccordo: digita il raggio' : this.filletSides.length === 0 ? 'Raccordo: scegli il primo tratto' : 'Raccordo: scegli il secondo tratto';
       case 'move':
         return n === 0 ? 'Sposta: indica il punto base' : 'Sposta: indica il punto di arrivo';
       case 'mirror':

@@ -7,10 +7,11 @@ import { DIM_TYPES, type DimType, type DimensionDef, autoLabel, buildDimension, 
 import { DIM_TEXT_MAX_LENGTH, TEXT_MAX_LENGTH, normalizeDimText, validateDimText, validateFreeText } from '../geometry/annotationText';
 import { CURVE_TYPES, type CurveKind, arcProblem, curveOnSheet } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind, coverInfo, coverOnSheet, coverShapeOf, squareUser } from '../geometry/cover';
+import { type FilletSide, filletRadiusPt } from '../geometry/fillet';
 import { distToShape, pickTop } from '../geometry/hit';
 import { type Layout, type Shape, layoutDimension, layoutText, unionShapes } from '../geometry/layout';
 import { measure, measureLines, measureMessage } from '../geometry/measure';
-import { fmt, fmtTrim } from '../geometry/numbers';
+import { fmt, fmtTrim, parseDecimal } from '../geometry/numbers';
 import { type OriginFrame, inPageWithEps, originFrame, relToSheet, relUnitLabel, sheetToRel } from '../geometry/origin';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '../geometry/page';
 import { ptToMm } from '../geometry/pixels';
@@ -19,6 +20,7 @@ import { GRID_DEFAULT_MM, GRID_MIN_SCREEN_PX, gridStepPt, gridVisible } from '..
 import { SNAP_KINDS, SNAP_LABEL, type SnapHit, type SnapSwitch, findSnap, snapRadiusPt } from '../geometry/snap';
 import { type SnapScene, buildSnapScene } from '../geometry/snapExtra';
 import { type PlannedMove, type TransformSpec, planTransform, specProblem } from '../geometry/transform';
+import { type FilletPlan, FilletCommand, planFillet } from '../model/fillet';
 import { type Command, History } from '../model/history';
 import {
   AddObject,
@@ -116,6 +118,9 @@ const TOOLS: Tool[] = [
   { id: 'cover', label: 'Copertura', icon: 'square', mode: 'pick', needsDoc: true },
   // Origine (CP6d): strumento a un colpo armato dal menu Origine, NON in palette (la palette e' misurata per l'iPhone); dopo il clic si torna allo strumento di prima.
   { id: 'origin', label: 'Origine', icon: 'scaling', mode: 'pick', needsDoc: true, hidden: true },
+  // Raccordo (CP6h): strumento armato dal menu Inserisci, NON in palette (come l'Origine: la palette e' misurata per l'iPhone). Sceglie due tratti con un tocco (modo 'choose') e chiede il raggio.
+  // A differenza dell'Origine resta armato dopo ogni raccordo; Esc, Annulla (senza niente in corso) o un altro strumento lo disarmano.
+  { id: 'fillet', label: 'Raccordo', icon: 'circle', mode: 'choose', needsDoc: true, hidden: true },
   // Sposta, Specchio, Rotazione (CP6e): strumenti a punti che trasformano la SELEZIONE; si armano dai pulsanti della barra contestuale o dal menu Modifica con lo strumento
   // Seleziona, NON stanno in palette (come l'Origine: la palette e' misurata per l'iPhone). La selezione resta mentre sono armati.
   { id: 'move', label: 'Sposta', icon: 'mouse-pointer', mode: 'pick', needsDoc: true, hidden: true },
@@ -124,7 +129,12 @@ const TOOLS: Tool[] = [
 ];
 const isConstructionTool = (id: ToolId): id is ConstructionTool => id !== 'pan' && id !== 'erase' && id !== 'select';
 /** Testo o quota in corso di scrittura con il tastierino: non e' ancora nel documento (annulla = si scarta). */
-type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null };
+type Entry = { kind: 'text'; at: UserPoint; text: string } | { kind: 'dim'; def: DimensionDef; text: string; auto: string | null } | { kind: 'fillet'; sides: [FilletSide, FilletSide]; text: string };
+
+/** Raccordo: raggio proposto la prima volta (mm reali con la scala della pagina, mm del foglio senza), raggio massimo digitabile (mm) e lunghezza massima del testo del raggio. */
+const FILLET_DEFAULT_MM = 5;
+const FILLET_MAX_MM = 100000;
+const FILLET_TEXT_MAX_LENGTH = 10;
 
 /** Descrizione di un oggetto per il gancio di prova (vedi `__gtpdf.addSpecs`). Solo tipi: nessun costo nel build pubblicato. */
 type Frac = [number, number];
@@ -198,6 +208,9 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let coverKind: CoverKind = 'rect';
   /** Cerchio o arco che si sta per disegnare. */
   let curveKind: CurveKind = 'circle';
+  /** Raccordo: l'ultimo raggio usato (mm, reali o del foglio secondo la pagina) e lo strumento a cui tornare quando si disarma. Solo in memoria: NON si salvano nel progetto. */
+  let lastFilletMm = FILLET_DEFAULT_MM;
+  let filletReturn: ToolId | null = null;
   /** Lo strumento a cui tornare dopo il clic dell'Origine (strumento a un colpo, CP6d) o dopo averla disarmata; null se l'Origine non e' armata. */
   let originReturn: ToolId | null = null;
   /**
@@ -261,6 +274,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         say(addedMessage(obj, arc ? `raggio ${mmText(arc.r)}` : undefined));
       },
       origin: (at) => onOriginPoint(at),
+      fillet: (sides) => startFilletEntry(sides),
       transform: (kind, points) => onTransformPoints(kind, points),
       reject: say,
     },
@@ -510,7 +524,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         : [{ label: t.label, disabled: !pdf, onSelect: () => selectDimType(t.id) }],
     ),
     ...COVER_TYPES.map((t): MenuEntry => ({ label: t.label, disabled: !pdf, onSelect: () => selectCoverKind(t.id) })),
-    { label: 'Raccordo', hint: 'V2c', disabled: true },
+    { label: 'Raccordo', disabled: !pdf, onSelect: () => armFillet() },
   ];
   const originMenu = (): MenuEntry[] => [
     { label: 'Imposta origine', disabled: !pdf, onSelect: () => armOrigin() },
@@ -668,7 +682,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
 
   // ---------- Barra contestuale ----------
   const ctxHint = h('p', { class: 'ctx-hint', 'aria-live': 'polite' });
-  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => (tool === 'origin' ? disarmOrigin() : isTransformTool(tool) ? cancelTransform() : cancelConstruction()) }, 'Annulla');
+  const cancelBtn = h('button', { class: 'btn ctx-act', type: 'button', onclick: () => (tool === 'origin' ? disarmOrigin() : tool === 'fillet' && !construction.pending && !construction.locked ? disarmFillet() : isTransformTool(tool) ? cancelTransform() : cancelConstruction()) }, 'Annulla');
   const finishBtn = h('button', { class: 'btn primary ctx-act', type: 'button', onclick: () => finishLine() }, icon('check'), 'Fine');
   const dimTypeBtns = new Map<DimType, HTMLButtonElement>();
   const dimTypes = h('div', { class: 'ctx-types seg', role: 'group', 'aria-label': 'Tipo di quota', hidden: true });
@@ -916,6 +930,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (def.needsDoc && !pdf) return;
     cancelEntry();
     if (id !== 'origin') originReturn = null; // l'Origine armata si disarma scegliendo un altro strumento
+    if (id !== 'fillet') filletReturn = null; // e cosi' il Raccordo
     shellInput.value = '';
     shellInput.removeAttribute('aria-invalid');
     angleInput.value = '';
@@ -968,6 +983,78 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     selectTool(originReturn ?? 'pan');
     say(before ? 'Origine spostata. Annulla la rimette a posto.' : 'Origine impostata. Annulla la toglie.');
   }
+  // ---------- Raccordo (CP6h) ----------
+  /**
+   * "Raccordo" nel menu Inserisci arma lo strumento. Resta armato dopo ogni raccordo (sullo stesso profilo servono di solito piu' raccordi, e ripartire dal menu ogni volta pesa su iPhone) con l'ultimo
+   * raggio come valore proposto; Esc, Annulla senza nulla in corso o la scelta di un altro strumento lo disarmano e si torna allo strumento di prima. Scegliere di nuovo "Raccordo" ripulisce la scelta in corso.
+   */
+  function armFillet(): void {
+    if (!pdf) return;
+    if (tool === 'fillet') {
+      cancelEntry();
+      cancelConstruction();
+      return;
+    }
+    const back = tool;
+    selectTool('fillet');
+    filletReturn = back; // dopo selectTool, che azzera `filletReturn` per gli altri strumenti
+  }
+  /** Disarma il Raccordo e torna allo strumento di prima. */
+  function disarmFillet(): void {
+    if (tool !== 'fillet') return;
+    selectTool(filletReturn ?? 'pan');
+  }
+  /** Il raggio digitato in mm (reali con la scala, del foglio senza): un numero maggiore di 0 e al massimo FILLET_MAX_MM, o il motivo in una riga. */
+  function parseFilletMm(text: string): { ok: true; mm: number } | { ok: false; error: string } {
+    const r = parseDecimal(text);
+    if (!r.ok) return { ok: false, error: r.reason };
+    if (r.value <= 0) return { ok: false, error: 'Il raggio deve essere maggiore di 0.' };
+    if (r.value > FILLET_MAX_MM) return { ok: false, error: `Il raggio massimo è ${FILLET_MAX_MM} mm.` };
+    return { ok: true, mm: r.value };
+  }
+  /** Il piano del raccordo con il raggio digitato (senza effetti: gli id degli oggetti nuovi sono segnaposto), o il motivo del rifiuto. */
+  function filletPlanFor(sides: readonly [FilletSide, FilletSide], text: string, newId: () => number): { ok: true; plan: FilletPlan; mm: number } | { ok: false; error: string } {
+    const g = viewer.geometry;
+    const r = parseFilletMm(text);
+    if (!g || !r.ok) return { ok: false, error: r.ok ? 'Nessuna pagina.' : r.error };
+    const planned = planFillet(model.objects(pageNo), sides[0], sides[1], filletRadiusPt(r.mm, model.scale(pageNo)), g, newId);
+    return planned.ok ? { ok: true, plan: planned.plan, mm: r.mm } : { ok: false, error: planned.message };
+  }
+  /** I due tratti sono scelti: il tastierino chiede il raggio (valore proposto = l'ultimo usato, il primo tasto lo sostituisce). */
+  function startFilletEntry(sides: [FilletSide, FilletSide]): void {
+    const scale = model.scale(pageNo);
+    openEntry(
+      { kind: 'fillet', sides, text: fmtTrim(lastFilletMm, 3) },
+      {
+        title: 'Raccordo',
+        info: scale ? `Raggio in mm reali · scala ${scaleLabel(scale)}` : 'Raggio in mm sul foglio (pagina non calibrata)',
+        layout: 'num',
+        selectFrom: 0,
+        maxLength: FILLET_TEXT_MAX_LENGTH,
+        decimal: true,
+        validate: (text) => {
+          const r = filletPlanFor(sides, text, () => 0);
+          return r.ok ? null : r.error;
+        },
+        onConfirm: (text) => {
+          const r = filletPlanFor(sides, text, () => model.newId());
+          if (!r.ok) {
+            say(r.error);
+            return;
+          }
+          history.exec(new FilletCommand(pageNo, r.plan));
+          lastFilletMm = r.mm;
+          say(filletMessage(r.plan, r.mm));
+        },
+      },
+    );
+  }
+  /** "Raccordo R 5 mm aggiunto: tratti accorciati. Annulla lo ripristina." (R in mm reali con la scala, in mm del foglio senza). */
+  function filletMessage(plan: FilletPlan, mm: number): string {
+    const unit = model.scale(pageNo) ? 'mm' : 'mm sul foglio';
+    return `Raccordo R ${fmtTrim(mm, 3)} ${unit} aggiunto: ${plan.split ? 'Linea spezzata in due' : 'tratti accorciati'}. Annulla lo ripristina.`;
+  }
+
   function removeOrigin(): void {
     const before = model.origin(pageNo);
     if (!before) return;
@@ -1143,6 +1230,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           if (def) viewer.setDraft(dimLayout(def, null, geom, dimDraftLabel(def, null, geom)));
         }
       }
+    } else if (t === 'fillet') {
+      // Raccordo (CP6h): i tratti scelti restano evidenziati; con il tastierino aperto l'anteprima mostra l'arco con il raggio digitato (solo a schermo, mai esportata)
+      viewer.setMarkers([]);
+      viewer.setGuide(null);
+      viewer.setBadge(null);
+      viewer.setSelection(construction.filletSides.length > 0 ? unionShapes(construction.filletSides.map(sideShape)) : null);
+      const r = entry?.kind === 'fillet' ? filletPlanFor(entry.sides, entry.text, () => 0) : null;
+      if (r?.ok) viewer.setArcPreview(curveOnSheet(r.plan.arc, geom), r.plan.arc.stroke);
+      else viewer.setPreview(null);
     } else if (t === 'cover') {
       viewer.setMarkers(pts.map((p) => ({ p })));
       viewer.setPreview(null);
@@ -1244,7 +1340,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     angleBox.hidden = tool !== 'rotate';
     originCenterBtn.disabled = !pdf || model.origin(pageNo) === null;
     cancelBtn.hidden = !constructing;
-    cancelBtn.disabled = tool !== 'origin' && !inTransform && !(construction.pending || construction.done || construction.locked); // con l'Origine armata (o una trasformazione) Annulla la disarma
+    cancelBtn.disabled = tool !== 'origin' && tool !== 'fillet' && !inTransform && !(construction.pending || construction.done || construction.locked); // con l'Origine armata (o una trasformazione) Annulla la disarma
     finishBtn.hidden = tool !== 'polyline';
     finishBtn.disabled = pts.length < 2 || construction.done;
     if (!active) toggleProps(false);
@@ -1548,10 +1644,18 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   function entryLayout(g: PageGeometry): Layout | null {
     if (!entry) return null;
     if (entry.kind === 'text') return layoutText({ at: entry.at, text: entry.text, textPt, color: stroke.color }, g);
+    if (entry.kind === 'fillet') return null; // il raccordo non ha un'etichetta: l'anteprima e' l'arco (`setArcPreview`)
     return dimLayout(entry.def, null, g, dimDraftLabel(entry.def, entry.text, g));
   }
   /** Punti del foglio che devono restare in vista mentre si scrive. */
   function entryExtent(g: PageGeometry): SheetPoint[] {
+    if (entry?.kind === 'fillet') {
+      // i punti da tenere in vista: dove si e' cliccato sui due tratti e, se il raggio digitato da' un raccordo, l'arco
+      const r = filletPlanFor(entry.sides, entry.text, () => 0);
+      const pts = entry.sides.map((s) => g.userToSheet(s.click));
+      if (r.ok) pts.push(g.userToSheet(r.plan.arc.p1), g.userToSheet(r.plan.arc.p2), g.userToSheet(r.plan.arc.p3));
+      return pts;
+    }
     const l = entryLayout(g);
     if (!l) return [];
     const pts: SheetPoint[] = l.hit.lines.flat();
@@ -1740,7 +1844,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       say('Nessuna retta o linea in questo punto: tocca sopra una retta o una linea');
       return;
     }
-    if (!construction.addSide(side)) return; // rifiutato: il motivo e' gia' nel messaggio di stato
+    const g = viewer.geometry;
+    if (construction.tool === 'fillet') {
+      // raccordo: il punto cliccato (grezzo, senza snap) decide da che parte del vertice si sta
+      if (!g || !construction.addFilletSide({ ...side, click: g.sheetToUser(sheet) })) return;
+    } else if (!construction.addSide(side)) return; // rifiutato: il motivo e' gia' nel messaggio di stato
     say('');
     viewer.setHighlight(null);
     renderConstruction();
@@ -1863,6 +1971,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       else if (selection.size > 0) setSelection([]);
       else if (tool === 'origin') disarmOrigin();
       else if (construction.pending || construction.done) cancelConstruction();
+      else if (tool === 'fillet') disarmFillet(); // niente in corso: il Raccordo si disarma
     } else if (e.key === 'Enter' && tool === 'polyline' && onCanvas) {
       e.preventDefault();
       finishLine();
