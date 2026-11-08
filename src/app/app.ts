@@ -15,7 +15,8 @@ import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from '..
 import { ptToMm } from '../geometry/pixels';
 import { calibrate, realMm, scaleLabel } from '../geometry/scale';
 import { GRID_DEFAULT_MM, GRID_MIN_SCREEN_PX, gridStepPt, gridVisible } from '../geometry/grid';
-import { SNAP_LABEL, type SnapHit, findSnap, snapRadiusPt } from '../geometry/snap';
+import { SNAP_KINDS, SNAP_LABEL, type SnapHit, type SnapSwitch, findSnap, snapRadiusPt } from '../geometry/snap';
+import { type SnapScene, buildSnapScene } from '../geometry/snapExtra';
 import { type PlannedMove, type TransformSpec, planTransform, specProblem } from '../geometry/transform';
 import { type Command, History } from '../model/history';
 import {
@@ -134,6 +135,26 @@ type HookSpec =
   | { k: 'text'; at: Frac; text: string; pt?: number; color?: string }
   | { k: 'dim'; dim: DimType; pts: Frac[]; value?: string | null; color?: string; w?: number; pt?: number };
 
+/** Suggerimenti (title) e messaggi di stato degli interruttori di snap, uno per tipo (CP6f: i nuovi sono al femminile o al maschile come il loro nome). */
+const SNAP_TITLE: Record<SnapSwitch, string> = {
+  end: 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati',
+  mid: 'Snap sui punti medi: il punto si aggancia al centro dei tratti, dei lati delle coperture e degli archi',
+  center: 'Snap sul centro: il punto si aggancia al centro di cerchi, archi e coperture circolari',
+  intersection: 'Snap sull\'intersezione: il punto si aggancia a dove due linee, cerchi o archi si incontrano (solo dentro le linee, senza prolungamenti)',
+  quadrant: 'Snap sul quadrante: il punto si aggancia ai quattro punti di cerchi, archi e coperture circolari (destra, basso, sinistra e alto del foglio come lo vedi)',
+  perpendicular: 'Snap sulla perpendicolare: dopo il primo punto il punto si aggancia al piede della perpendicolare da quel punto su linee, cerchi e archi',
+  tangent: 'Snap sulla tangente: dopo il primo punto il punto si aggancia al punto di tangenza da quel punto su cerchi e archi',
+};
+const SNAP_MESSAGE: Record<SnapSwitch, { on: string; off: string }> = {
+  end: { on: 'Estremo attivo: il punto si aggancia agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati', off: 'Estremo disattivato' },
+  mid: { on: 'Punto medio attivo: il punto si aggancia al centro dei tratti, dei lati delle coperture e degli archi', off: 'Punto medio disattivato' },
+  center: { on: 'Centro attivo: il punto si aggancia al centro di cerchi, archi e coperture circolari', off: 'Centro disattivato' },
+  intersection: { on: 'Intersezione attiva: il punto si aggancia a dove due linee, cerchi o archi si incontrano', off: 'Intersezione disattivata' },
+  quadrant: { on: 'Quadrante attivo: il punto si aggancia ai quattro punti di cerchi, archi e coperture circolari', off: 'Quadrante disattivato' },
+  perpendicular: { on: 'Perpendicolare attiva: dopo il primo punto il punto si aggancia al piede della perpendicolare su linee, cerchi e archi', off: 'Perpendicolare disattivata' },
+  tangent: { on: 'Tangente attiva: dopo il primo punto il punto si aggancia al punto di tangenza su cerchi e archi', off: 'Tangente disattivata' },
+};
+
 export interface AppOptions {
   openDiagnostics: () => void;
 }
@@ -150,8 +171,15 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   let uiSize = loadUiSize();
   let opening = false;
   let ortho = false;
-  /** Snap sugli oggetti: Estremo e Punto medio (V2a) e Centro (V2b), attivi all'avvio. Stato della sessione: NON si salva nel progetto (come ORTO). */
-  const snapOn: Record<'end' | 'mid' | 'center', boolean> = { end: true, mid: true, center: true };
+  /**
+   * Snap sugli oggetti: Estremo e Punto medio (V2a), Centro (V2b), Intersezione, Quadrante, Perpendicolare e Tangente (CP6f), tutti attivi all'avvio. Stato della sessione: NON si
+   * salva nel progetto (come ORTO). L'Origine non ha un interruttore: e' un candidato quando la pagina ha un'origine e c'e' almeno un interruttore acceso.
+   */
+  const snapOn: Record<SnapSwitch, boolean> = { end: true, mid: true, center: true, intersection: true, quadrant: true, perpendicular: true, tangent: true };
+  /** La scena dei tipi calcolati (riquadri in pt del foglio): si rifa' quando cambiano gli oggetti o la pagina (versione del modello), non a ogni movimento del mouse. */
+  let snapScene: SnapScene | null = null;
+  let snapSceneKey = '';
+  let snapSceneGeom: PageGeometry | null = null;
   /** Griglia (V2a): spenta all'avvio; passo in mm (reali se la pagina ha una scala, del foglio se no). Stato della sessione: NON si salva nel progetto. */
   let gridOn = false;
   let gridMm = GRID_DEFAULT_MM;
@@ -248,11 +276,25 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     return g && o ? originFrame(g, o, model.scale(pageNo)) : null;
   }
 
-  /** Snap sugli oggetti della pagina corrente: il candidato piu' vicino al punto grezzo (foglio) entro il raggio (px CSS / zoom), tra i tipi attivi. */
+  /** La scena della pagina corrente, rifatta solo se sono cambiati il modello (versione) o la pagina. */
+  function sceneFor(g: PageGeometry): SnapScene {
+    const key = `${model.version}:${pageNo}`;
+    if (!snapScene || snapSceneKey !== key || snapSceneGeom !== g) {
+      snapScene = buildSnapScene(model.objects(pageNo), g);
+      snapSceneKey = key;
+      snapSceneGeom = g;
+    }
+    return snapScene;
+  }
+  /**
+   * Snap sugli oggetti della pagina corrente: il candidato piu' vicino al punto grezzo (foglio) entro il raggio (px CSS / zoom), tra i tipi attivi. Perpendicolare e Tangente
+   * partono dall'ancora della costruzione (`construction.anchor`, la stessa dell'ORTO): solo dove c'e'. L'origine della pagina e' un candidato (CP6f).
+   */
   function snapAt(raw: SheetPoint, touch: boolean, pending: readonly UserPoint[]): SnapHit | null {
     const g = viewer.geometry;
-    if (!g || !pdf || (!snapOn.end && !snapOn.mid && !snapOn.center)) return null;
-    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn, pending);
+    if (!g || !pdf || !SNAP_KINDS.some((k) => snapOn[k])) return null;
+    const calc = snapOn.intersection || snapOn.quadrant || snapOn.perpendicular || snapOn.tangent;
+    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn, pending, { scene: calc ? sceneFor(g) : undefined, anchor: construction.anchor, origin: model.origin(pageNo) });
   }
 
   /** Passo della griglia in pt FISICI del foglio per la pagina corrente (mm reali con la scala della pagina, altrimenti mm del foglio). */
@@ -314,21 +356,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const nextBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina successiva', disabled: true, onclick: () => void goTo(pageNo + 1) }, icon('chevron-right'));
   const pager = h('div', { class: 'st-pager' }, prevBtn, stPage, nextBtn);
   const scaleBtn = h('button', { class: 'st-scale-btn num', type: 'button', title: 'Calibra la scala di questa pagina', onclick: () => selectTool('calibrate') }, 'non calibrata');
-  /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio e ORTO (`data-toggle` li distingue). */
-  const mkToggle = (id: 'end' | 'mid' | 'center' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
+  /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio, Centro, Intersezione e ORTO (`data-toggle` li distingue). */
+  const mkToggle = (id: 'end' | 'mid' | 'center' | 'intersection' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
     h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': String(on), 'data-toggle': id, title, onclick: fn }, label);
-  const endBtn = mkToggle('end', SNAP_LABEL.end, 'Snap sugli estremi: il punto si aggancia agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati', snapOn.end, () => setSnap('end', !snapOn.end));
-  const midBtn = mkToggle('mid', SNAP_LABEL.mid, 'Snap sui punti medi: il punto si aggancia al centro dei tratti, dei lati delle coperture e degli archi', snapOn.mid, () => setSnap('mid', !snapOn.mid));
-  const centerBtn = mkToggle('center', SNAP_LABEL.center, 'Snap sul centro: il punto si aggancia al centro di cerchi, archi e coperture circolari', snapOn.center, () => setSnap('center', !snapOn.center));
+  const endBtn = mkToggle('end', SNAP_LABEL.end, SNAP_TITLE.end, snapOn.end, () => setSnap('end', !snapOn.end));
+  const midBtn = mkToggle('mid', SNAP_LABEL.mid, SNAP_TITLE.mid, snapOn.mid, () => setSnap('mid', !snapOn.mid));
+  const centerBtn = mkToggle('center', SNAP_LABEL.center, SNAP_TITLE.center, snapOn.center, () => setSnap('center', !snapOn.center));
+  const interBtn = mkToggle('intersection', SNAP_LABEL.intersection, SNAP_TITLE.intersection, snapOn.intersection, () => setSnap('intersection', !snapOn.intersection));
   const orthoBtn = mkToggle('ortho', 'ORTO', 'Ortogonale: il secondo punto va in orizzontale o in verticale', false, () => setOrtho(!ortho));
   const gridBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', 'data-toggle': 'grid', title: 'Griglia: mostra i nodi e arrotonda i punti ai nodi (passo nel pannello a destra)', onclick: () => setGridOn(!gridOn) }, 'Griglia');
   // Gli stessi interruttori stanno anche nel pannello a destra ("Aggancio e griglia"): sotto 720 px la barra di stato resta compatta (X, Y, scala, ORTO: DESIGN.md) e
   // quei tre vivono solo li'. Ogni interruttore ha piu' pulsanti, che mostrano tutti lo stesso stato.
-  const toggleBtns: Record<'end' | 'mid' | 'center' | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], center: [centerBtn], grid: [gridBtn] };
-  const setPressed = (id: 'end' | 'mid' | 'center' | 'grid', on: boolean): void => {
+  const toggleBtns: Record<SnapSwitch | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], center: [centerBtn], intersection: [interBtn], quadrant: [], perpendicular: [], tangent: [], grid: [gridBtn] };
+  const setPressed = (id: SnapSwitch | 'grid', on: boolean): void => {
     for (const b of toggleBtns[id]) b.setAttribute('aria-pressed', String(on));
   };
-  const panelToggle = (id: 'end' | 'mid' | 'center' | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
+  const panelToggle = (id: SnapSwitch | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
     const b = h('button', { class: 'btn panel-toggle', type: 'button', 'aria-pressed': String(on), 'data-panel-toggle': id, title, onclick: fn }, label);
     toggleBtns[id].push(b);
     return b;
@@ -341,6 +384,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     endBtn,
     midBtn,
     centerBtn,
+    interBtn,
     orthoBtn,
     gridBtn,
     statusMsg,
@@ -379,11 +423,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     say(on ? 'Ortogonale attivo: il punto successivo va in orizzontale o in verticale' : 'Ortogonale disattivato');
     viewer.refreshAim();
   }
-  function setSnap(kind: 'end' | 'mid' | 'center', on: boolean): void {
+  function setSnap(kind: SnapSwitch, on: boolean): void {
     snapOn[kind] = on;
     setPressed(kind, on);
-    const what = kind === 'end' ? 'agli estremi di rette, linee, archi, quote e coperture e ai punti già indicati' : kind === 'mid' ? 'al centro dei tratti, dei lati delle coperture e degli archi' : 'al centro di cerchi, archi e coperture circolari';
-    say(on ? `${SNAP_LABEL[kind]} attivo: il punto si aggancia ${what}` : `${SNAP_LABEL[kind]} disattivato`);
+    const m = SNAP_MESSAGE[kind];
+    say(on ? m.on : m.off);
     viewer.refreshAim();
   }
   function setGridOn(on: boolean): void {
@@ -712,6 +756,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     panelToggle('end', SNAP_LABEL.end, endBtn.title, snapOn.end, () => setSnap('end', !snapOn.end)),
     panelToggle('mid', SNAP_LABEL.mid, midBtn.title, snapOn.mid, () => setSnap('mid', !snapOn.mid)),
     panelToggle('center', SNAP_LABEL.center, centerBtn.title, snapOn.center, () => setSnap('center', !snapOn.center)),
+    panelToggle('intersection', SNAP_LABEL.intersection, interBtn.title, snapOn.intersection, () => setSnap('intersection', !snapOn.intersection)),
+    panelToggle('quadrant', SNAP_LABEL.quadrant, SNAP_TITLE.quadrant, snapOn.quadrant, () => setSnap('quadrant', !snapOn.quadrant)),
+    panelToggle('perpendicular', SNAP_LABEL.perpendicular, SNAP_TITLE.perpendicular, snapOn.perpendicular, () => setSnap('perpendicular', !snapOn.perpendicular)),
+    panelToggle('tangent', SNAP_LABEL.tangent, SNAP_TITLE.tangent, snapOn.tangent, () => setSnap('tangent', !snapOn.tangent)),
     panelToggle('grid', 'Griglia', gridBtn.title, false, () => setGridOn(!gridOn)),
   );
 
@@ -2219,18 +2267,25 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
        * Prestazioni dello snap (scripts/perf-cp6a.cjs): chiama `findSnap`, la stessa funzione dell'app, su oggetti sintetici di una pagina. Per ogni lotto di
        * `batch` chiamate misura il tempo del lotto; misura anche `singles` chiamate una per una (performance.now() ha risoluzione limitata).
        */
-      snapRun: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { batch: number; batches: number; singles?: number; pending?: UserPoint[] }) => {
+      snapRun: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { batch: number; batches: number; singles?: number; pending?: UserPoint[]; kinds?: Partial<Record<SnapSwitch, boolean>>; anchor?: UserPoint | null; origin?: UserPoint | null }) => {
         const info = pdf?.pages[0];
         if (!info) throw new Error('nessun documento');
         const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
         const sheetRaws = raws.map((u) => g.userToSheet(u));
+        // CP6f: con `kinds` si scelgono i tipi (predefinito: i tre di prima, come nelle misure di CP6a); la scena dei tipi calcolati si costruisce UNA volta (e si misura), come fa l'app
+        const kinds = o.kinds ?? { end: true, mid: true, center: true };
+        const calc = !!(kinds.intersection || kinds.quadrant || kinds.perpendicular || kinds.tangent);
+        const t0s = performance.now();
+        const scene = calc ? buildSnapScene(objects, g) : undefined;
+        const sceneMs = performance.now() - t0s;
+        const extra = { scene, anchor: o.anchor ?? null, origin: o.origin ?? null };
         let hits = 0;
         let calls = 0;
         const batchMs: number[] = [];
         for (let b = 0; b < o.batches; b++) {
           const t0 = performance.now();
           for (let i = 0; i < o.batch; i++) {
-            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, snapOn, o.pending)) hits++;
+            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, kinds, o.pending, extra)) hits++;
             calls++;
           }
           batchMs.push(performance.now() - t0);
@@ -2238,10 +2293,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const singleMs: number[] = [];
         for (let i = 0; i < (o.singles ?? 500); i++) {
           const t0 = performance.now();
-          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, snapOn, o.pending);
+          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, kinds, o.pending, extra);
           singleMs.push(performance.now() - t0);
         }
-        return { hits, calls, batch: o.batch, batchMs, singleMs };
+        return { hits, calls, batch: o.batch, batchMs, singleMs, sceneMs };
       },
       goTo: (n: number) => goTo(n),
       /** Gli id selezionati (nell'ordine del modello) e le proprieta' dei NUOVI oggetti: per provare che la selezione multipla non le cambia. */
