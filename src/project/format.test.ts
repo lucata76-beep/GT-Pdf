@@ -666,3 +666,40 @@ describe('versione 3 (fixture scritto da 57f82e8) e quote angolari (CP6g, decisi
     }
   });
 });
+
+describe('versione 4 (fixture scritto da b3d8646) e raccordo (CP6h: nessun cambiamento del formato)', () => {
+  let v4Text = '';
+  beforeAll(async () => {
+    const fsName = 'node:fs'; // niente @types/node: come sopra
+    const fs = (await import(/* @vite-ignore */ fsName)) as { readFileSync(url: URL, enc: string): string };
+    v4Text = fs.readFileSync(new URL('./fixtures/project-v4-b3d8646.json', import.meta.url), 'utf8');
+  });
+
+  it('un progetto salvato con b3d8646 (versione 4: retta, linea, cerchio, arco, testo, copertura, quota angolare e allineata, scala, origine) si apre con gli stessi oggetti e si riscrive IDENTICO', () => {
+    const j = JSON.parse(v4Text) as Json;
+    expect(j.version).toBe(4);
+    expect(j.app).toBe('b3d8646');
+    const r = parseProject(v4Text);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.objectCount).toBe(8);
+    expect(r.scaleCount).toBe(1);
+    expect(r.originCount).toBe(1);
+    expect(r.project.pages[0]!.objects.map(objectToJson)).toEqual(j.pages[0].objects);
+    expect(serializeProject(r.project)).toBe(v4Text);
+    expect(PROJECT_VERSION).toBe(4);
+    expect(READABLE_VERSIONS).toEqual([1, 2, 3, 4]);
+  });
+
+  it('un raccordo e\' fatto di oggetti che il file gia\' conosce: l\'arco ha i campi dell\'arco e viene validato come ogni arco (tratti quasi sulla stessa retta: rifiutato alla lettura)', () => {
+    const j = JSON.parse(v4Text) as Json;
+    const arc = j.pages[0].objects.find((o: Json) => o.kind === 'arc') as Json;
+    expect(Object.keys(arc)).toEqual(['id', 'kind', 'p1', 'p2', 'p3', 'stroke']);
+    const bad = JSON.parse(v4Text) as Json;
+    const a = bad.pages[0].objects.find((o: Json) => o.kind === 'arc') as Json;
+    a.p2 = { x: (a.p1.x + a.p3.x) / 2, y: (a.p1.y + a.p3.y) / 2 + 0.0001 }; // punti quasi allineati: l'arco coprirebbe meno di 1 grado
+    const r = parseProject(JSON.stringify(bad));
+    expect(r.ok).toBe(false);
+  });
+});
+
