@@ -196,14 +196,15 @@ async function menuSuite(browser) {
   const items = async () => page.locator('.menu-item').evaluateAll((els) => els.map((e) => ({ t: e.textContent.replace(/\s+/g, ' ').trim(), dis: e.disabled || e.getAttribute('aria-disabled') === 'true' })));
   await page.locator('.menu-btn', { hasText: 'Inserisci' }).click();
   let it = await items();
-  check('senza documento: le voci Cerchio e Arco ci sono ma sono disattivate; Raccordo disattivato con "V2c"', ['Cerchio', 'Arco'].every((n) => it.find((x) => x.t === n)?.dis === true) && /^Raccordo\s*V2c$/.test(it.find((x) => x.t.startsWith('Raccordo'))?.t ?? '') && it.find((x) => x.t.startsWith('Raccordo'))?.dis === true, JSON.stringify(it));
+  // CP6h: il Raccordo e' attivo (V2c fatta): senza documento la voce e' disattivata come le altre, senza piu' l'indicazione "V2c"
+  check('senza documento: le voci Cerchio e Arco ci sono ma sono disattivate; Raccordo disattivato, senza l\'indicazione "V2c" (CP6h)', ['Cerchio', 'Arco'].every((n) => it.find((x) => x.t === n)?.dis === true) && it.find((x) => x.t.startsWith('Raccordo'))?.t === 'Raccordo' && it.find((x) => x.t.startsWith('Raccordo'))?.dis === true, JSON.stringify(it));
   check('la voce vecchia "Cerchio, arco, raccordo" non c\'e\' piu\'', !it.some((x) => /Cerchio, arco, raccordo/.test(x.t)));
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 450);
   await openDoc(page, 'A4 vettoriale', false);
   await page.locator('.menu-btn', { hasText: 'Inserisci' }).click();
   it = await items();
-  check('con un documento: Cerchio e Arco attive, Raccordo ancora disattivato', ['Cerchio', 'Arco'].every((n) => it.find((x) => x.t === n)?.dis === false) && it.find((x) => x.t.startsWith('Raccordo'))?.dis === true, JSON.stringify(it));
+  check('con un documento: Cerchio e Arco attive, Raccordo attivo (CP6h: prima era disattivato)', ['Cerchio', 'Arco'].every((n) => it.find((x) => x.t === n)?.dis === false) && it.find((x) => x.t.startsWith('Raccordo'))?.t === 'Raccordo' && it.find((x) => x.t.startsWith('Raccordo'))?.dis === false, JSON.stringify(it));
   check('le voci delle coperture non cambiano (Copertura rettangolare, quadrata, circolare)', ['Copertura rettangolare', 'Copertura quadrata', 'Copertura circolare'].every((n) => it.some((x) => x.t === n)));
   await page.locator('.menu-item', { hasText: /^Arco$/ }).click();
   await page.waitForTimeout(150);
