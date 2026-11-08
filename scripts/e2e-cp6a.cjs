@@ -63,6 +63,30 @@ const setToggle = async (page, name, on) => {
   if ((await pressed(page, name)) !== on) await toggle(page, name).click();
   await page.waitForTimeout(80);
 };
+/**
+ * CP6f: i quattro tipi nuovi dello snap (Intersezione, Quadrante, Perpendicolare, Tangente) hanno ora un interruttore, acceso all'avvio. Le prove di questo file riguardano lo snap
+ * di CP6a (Estremo e Punto medio): con i quattro tipi nuovi SPENTI l'app si comporta come prima (provato in e2e-cp6f.cjs e nei test unitari), quindi si spengono. Dove il pannello
+ * a destra e' a scomparsa lo apre e lo richiude. Su un build precedente a CP6f gli interruttori non ci sono e non succede nulla.
+ */
+const NEW_KINDS = ['intersection', 'quadrant', 'perpendicular', 'tangent'];
+async function newKindsOff(page) {
+  const probe = page.locator('.panel-toggle[data-panel-toggle="end"]');
+  if (!(await page.locator('.panel-toggle[data-panel-toggle="quadrant"]').count())) return;
+  const hidden = !(await probe.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  for (const k of NEW_KINDS) {
+    const b = page.locator(`.panel-toggle[data-panel-toggle="${k}"]`);
+    if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  }
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(60);
+}
 const status = (page) => page.locator('.st-msg').innerText();
 const objectsOf = (page, n = 0) => page.evaluate((k) => window.__gtpdf.state().pages[k].objects, n);
 
@@ -224,7 +248,9 @@ async function mouseSuite(browser) {
   info(`zoom di adattamento ${k.toFixed(3)} px/pt`);
 
   // -- interruttori
-  const tg = await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })));
+  // (CP6f: l'interruttore "Intersezione" sta ora fra Centro e ORTO; qui si guardano gli altri, come prima: l'elenco completo e' provato in e2e-cp6f.cjs)
+  const tg = (await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })))).filter((t) => t.id !== 'intersection');
+  await newKindsOff(page);
   check('barra di stato: interruttori Estremo, Punto medio, Centro (dalla V2b), ORTO, Griglia (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['center', 'Centro'], ['ortho', 'ORTO'], ['grid', 'Griglia']]), JSON.stringify(tg));
   check('all\'avvio Estremo, Punto medio e Centro sono attivi, ORTO e Griglia spenti', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'true', 'false', 'false']), JSON.stringify(tg));
 
@@ -483,6 +509,7 @@ async function pageSuite(browser) {
     setSection(`mouse, ${title}`);
     const { ctx, page } = await desktop(browser);
     await openDoc(page, title);
+    await newKindsOff(page);
     const { info: pinfo } = await pageInfo(page);
     const C = candidates(pinfo, SPEC);
     await tool(page, 'Retta');
@@ -510,6 +537,7 @@ async function touchSuite(browser) {
   setSection('tocco 932x430');
   const { ctx, page, cdp } = await phone(browser, 932, 430, 1);
   await openDoc(page);
+  await newKindsOff(page);
   const { info: pinfo } = await pageInfo(page);
   const C = candidates(pinfo, SPEC);
   await tool(page, 'Retta');
@@ -905,7 +933,8 @@ async function panelSuite(browser) {
   {
     const { ctx, page } = await desktop(browser);
     await openDoc(page, 'A4 vettoriale', true);
-    const ids = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => [e.dataset.panelToggle, e.textContent.trim(), e.getAttribute('aria-pressed')]));
+    // (CP6f: nel pannello ci sono ora anche Intersezione, Quadrante, Perpendicolare e Tangente: qui si guardano gli altri, come prima; l'elenco completo e' provato in e2e-cp6f.cjs)
+    const ids = (await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => [e.dataset.panelToggle, e.textContent.trim(), e.getAttribute('aria-pressed')]))).filter((t) => !NEW_KINDS.includes(t[0]));
     check('desktop: il pannello "Aggancio e griglia" ha Estremo, Punto medio, Centro (dalla V2b) e Griglia', JSON.stringify(ids) === JSON.stringify([['end', 'Estremo', 'true'], ['mid', 'Punto medio', 'true'], ['center', 'Centro', 'true'], ['grid', 'Griglia', 'false']]), JSON.stringify(ids));
     await page.locator('.panel-toggle[data-panel-toggle="end"]').click();
     check('un interruttore del pannello cambia anche quello della barra di stato (stesso stato)', (await pressed(page, 'end')) === false && (await page.locator('.panel-toggle[data-panel-toggle="end"]').getAttribute('aria-pressed')) === 'false');
@@ -924,7 +953,7 @@ async function panelSuite(browser) {
     if (idx === 1) {
       await page.locator('.insp-toggle').click();
       await page.waitForTimeout(150);
-      const pv = await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.panelToggle, w: r.width, h: r.height, vis: e.offsetParent !== null }; }));
+      const pv = (await page.$$eval('.inspector .panel-toggle', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.panelToggle, w: r.width, h: r.height, vis: e.offsetParent !== null }; }))).filter((b) => !NEW_KINDS.includes(b.id)); // (CP6f: i quattro nuovi sono provati in e2e-cp6f.cjs)
       check('verticale: nel pannello Estremo, Punto medio, Centro e Griglia ci sono e sono >= 44 px', pv.length === 4 && pv.every((b) => b.vis && b.w >= 43.5 && b.h >= 43.5), JSON.stringify(pv));
       await page.locator('.panel-toggle[data-panel-toggle="mid"]').click();
       check('verticale: spegnere Punto medio dal pannello e\' effettivo (messaggio e stato)', (await page.locator('.panel-toggle[data-panel-toggle="mid"]').getAttribute('aria-pressed')) === 'false' && /Punto medio disattivato/.test(await status(page)), await status(page));

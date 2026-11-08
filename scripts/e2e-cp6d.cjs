@@ -295,7 +295,14 @@ async function originSuite(browser) {
   const c1 = await clientOfUser(page, o1);
   await page.mouse.move(c1.x + 3, c1.y + 3);
   await page.waitForTimeout(80);
-  check('l\'origine non e\' un candidato dello snap: vicino al simbolo non compare nessun marcatore', (await page.locator('.snap-mark:not([display="none"])').count()) === 0);
+  // (CP6f, decisione 89: l'origine ora E' un candidato dello snap quando c'e' almeno un interruttore acceso: e2e-cp6f.cjs. Qui, come prima, il caso senza snap: tutti gli interruttori spenti.)
+  const snapSwitches = page.locator('.panel-toggle:not([data-panel-toggle="grid"])');
+  const snapWas = await snapSwitches.evaluateAll((els) => els.map((e) => [e.dataset.panelToggle, e.getAttribute('aria-pressed') === 'true']));
+  for (const [k, on] of snapWas) if (on) await page.locator(`.panel-toggle[data-panel-toggle="${k}"]`).click();
+  await page.mouse.move(c1.x + 4, c1.y + 4);
+  await page.waitForTimeout(80);
+  check('l\'origine non e\' un candidato dello snap con tutti gli interruttori spenti: vicino al simbolo non compare nessun marcatore', (await page.locator('.snap-mark:not([display="none"])').count()) === 0);
+  for (const [k, on] of snapWas) if (on) await page.locator(`.panel-toggle[data-panel-toggle="${k}"]`).click();
 
   // sposta con un nuovo clic
   await menuItem(page, 'Origine', /^Imposta origine/);
