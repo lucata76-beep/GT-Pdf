@@ -7,7 +7,7 @@ import { type SheetCover, coverShapeOf } from '../geometry/cover';
 import { gridIndexRange, gridVisible } from '../geometry/grid';
 import type { Layout, Shape } from '../geometry/layout';
 import type { SheetPoint } from '../geometry/page';
-import { SNAP_KINDS, SNAP_LABEL, type SnapKind } from '../geometry/snap';
+import { SNAP_LABEL, type SnapKind } from '../geometry/snap';
 import { DRAWING_FONT, type DrawItem } from '../model/scene';
 import { STROKE_CAP, STROKE_JOIN, STROKE_MITER_LIMIT, type Stroke, dashPattern } from '../model/stroke';
 import { h } from './dom';
@@ -433,7 +433,8 @@ export class SceneOverlay {
     }
     this.snapG.dataset.kind = this.snap.kind;
     this.snapG.insertBefore(this.snapShape[this.snap.kind], this.snapLabel);
-    for (const k of SNAP_KINDS) if (k !== this.snap.kind) this.snapShape[k].remove();
+    // tutte le forme tranne quella del tipo corrente, ORIGINE compresa (`SNAP_KINDS` sono i soli tipi con interruttore: senza l'origine il suo simbolo restava sotto il marcatore successivo)
+    for (const k of Object.keys(this.snapShape) as SnapKind[]) if (k !== this.snap.kind) this.snapShape[k].remove();
     this.snapLabel.textContent = SNAP_LABEL[this.snap.kind];
     this.snapG.setAttribute('display', 'inline');
     this.placeScreenItems();
