@@ -1014,8 +1014,10 @@ async function menuScrollSuite(browser) {
         check(`${tag}: il pannello sta nello schermo (fondo ${Math.round(m.bottom)} <= ${m.innerH})`, m.top >= 0 && m.bottom <= m.innerH + 0.5, JSON.stringify(m));
         check(`${tag}: tutte le ${m.n} voci sono raggiungibili scorrendo`, m.unreachable.length === 0, m.unreachable.join(', '));
         check(`${tag}: bersagli touch >= 44 px`, m.small.length === 0, m.small.join(', '));
-        if (!aPlus && w === 390 && h === 780 && name === 'Inserisci') check('Verticale: il menu Inserisci entra intero (633 px = 14 voci da 44 px dopo la V2b, erano 545 con 12; nessuno scorrimento)', !m.overflow && near(m.clientH, 633, 2), JSON.stringify(m));
-        if (!aPlus && w === 390) check(`${tag}: in verticale non scorre`, !m.overflow, JSON.stringify(m));
+        // CP6g ha portato le voci di Inserisci da 14 a 16 (le due quote angolari): in verticale il menu (721 px di contenuto in 678 px disponibili) ora SCORRE di circa 43 px; l'utente ha provato che
+        // scorre e che tutte le voci si raggiungono (CP6g, risposta F2). Il controllo "tutte le voci raggiungibili" resta e passa; qui si adattano i due controlli sul "non scorre" di Inserisci.
+        if (!aPlus && w === 390 && h === 780 && name === 'Inserisci') check('Verticale: il menu Inserisci ha 16 voci da 44 px (721 px di contenuto) e scorre in 678 px disponibili (prima di CP6g: 14 voci, 633 px, entrava intero)', m.n === 16 && m.overflow && near(m.scrollH, 721, 2) && near(m.clientH, 678, 2) && m.itemH === 44, JSON.stringify(m));
+        if (!aPlus && w === 390) check(name === 'Inserisci' ? `${tag}: in verticale scorre (16 voci)` : `${tag}: in verticale non scorre`, name === 'Inserisci' ? m.overflow : !m.overflow, JSON.stringify(m));
         if (m.overflow) {
           // scorrimento vero col dito: trascinamenti touch verso l'alto (CDP dispatchTouchEvent: `synthesizeScrollGesture` in questa emulazione non scorre il pannello, mentre il trascinamento e la rotella si), poi l'ultima voce attivabile si tocca
           for (let i = 0; i < 10; i++) {
