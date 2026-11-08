@@ -10,10 +10,13 @@
 //  - Numeri: `JSON.stringify` scrive il numero piu' breve che si rilegge identico (round-trip esatto dei double).
 //  - Non si salvano: cronologia annulla/ripeti, selezione, strumento attivo, zoom, dimensione dell'interfaccia, ORTO e interruttori di snap (Estremo, Punto medio,
 //    Centro) e la griglia (accesa e passo) (CP6a: stato della sessione, non del lavoro).
-//  - VERSIONE (decisioni 65 e 70 di docs/PIANO.md): la scrittura e' sempre versione 3; la lettura accetta 1, 2 e 3. La versione 2 aggiunge i tipi 'circle' e 'arc';
+//  - VERSIONE (decisioni 65, 70 e 93 di docs/PIANO.md): la scrittura e' sempre versione 4; la lettura accetta 1, 2, 3 e 4. La versione 2 aggiunge i tipi 'circle' e 'arc';
 //    un file di versione 1 che li contiene e' rifiutato (in 1 non esistono). La versione 3 (CP6d) aggiunge il campo di pagina `origin` ({x, y} nello spazio utente
-//    oppure null, OBBLIGATORIO come `scale`): un file di versione 1 o 2 che lo contiene e' rifiutato (in 1 e 2 non esiste). Il resto del formato e' identico:
-//    un progetto salvato prima si apre uguale e, riscritto, e' di versione 3 con `origin: null`.
+//    oppure null, OBBLIGATORIO come `scale`): un file di versione 1 o 2 che lo contiene e' rifiutato (in 1 e 2 non esiste). La versione 4 (CP6g) aggiunge il tipo di quota
+//    'angular' (oggetto 'dim' con `dim: "angular"`: stessi campi delle altre quote, nessun campo nuovo; p1 e p2 un punto per lato, a il vertice, b il punto di mezzo
+//    dell'arco): un file di versione 1, 2 o 3 che lo contiene e' rifiutato (in 1-3 non esiste). Il resto del formato e' identico: un progetto salvato prima si apre
+//    uguale e, riscritto, e' di versione 4 (con `origin: null` se veniva dalla 1 o dalla 2).
+import { angularUserProblem } from '../geometry/angular';
 import { ARC_PROBLEM_TEXT, arcProblem } from '../geometry/arc';
 import { COVER_TYPES, type CoverKind } from '../geometry/cover';
 import { type DimType, DIM_TYPES } from '../geometry/dimension';
@@ -26,11 +29,13 @@ import { LINE_STYLES, type LineStyleId, WIDTH_MAX_PT, WIDTH_MIN_PT, parseHexColo
 
 export const PROJECT_FORMAT = 'gt-pdf-project';
 /** La versione che si scrive (sempre questa). */
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 /** Le versioni che si leggono. */
-export const READABLE_VERSIONS: readonly number[] = [1, 2, 3];
+export const READABLE_VERSIONS: readonly number[] = [1, 2, 3, 4];
 /** Il campo di pagina `origin` esiste dalla versione 3. */
 const ORIGIN_SINCE = 3;
+/** Il tipo di quota 'angular' esiste dalla versione 4. */
+const ANGULAR_SINCE = 4;
 /** Il file di versione 1 non ha cerchi e archi (introdotti dalla 2). */
 const V1_KINDS = ['segment', 'polyline', 'text', 'dim', 'cover'] as const;
 const V2_KINDS = [...V1_KINDS, 'circle', 'arc'] as const;
@@ -243,6 +248,7 @@ function readObject(raw: unknown, where: string, ids: Set<number>, version: numb
       return o;
     }
     case 'dim': {
+      if (own(r, 'dim') === 'angular' && version < ANGULAR_SINCE) bad(where, `un progetto di versione ${version} non ha le quote angolari: sono della versione ${ANGULAR_SINCE}.`);
       const vt = own(r, 'valueText');
       let valueText: string | null = null;
       if (vt !== null) {
@@ -263,6 +269,10 @@ function readObject(raw: unknown, where: string, ids: Set<number>, version: numb
         widthPt: num(own(r, 'widthPt'), where, 'spessore', WIDTH_MIN_PT, WIDTH_MAX_PT, ' pt'),
         textPt: num(own(r, 'textPt'), where, 'corpo del testo', TEXT_MIN_PT, TEXT_MAX_PT, ' pt'),
       };
+      if (o.dim === 'angular') {
+        const problem = angularUserProblem(o);
+        if (problem !== null) bad(where, `quota angolare non valida: ${problem}`);
+      }
       return o;
     }
     default: {
@@ -299,7 +309,7 @@ function parseOrThrow(text: string): ParseResult {
   const version = own(root, 'version');
   if (typeof version !== 'number' || !Number.isInteger(version)) return bad('', 'La versione del progetto non e\' un numero intero.');
   if (!READABLE_VERSIONS.includes(version)) {
-    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge le versioni 1, 2 e 3. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1, 2 e 3.`);
+    return bad('', version > PROJECT_VERSION ? `Il progetto e' di una versione piu' recente (${version}): questa app legge le versioni 1, 2, 3 e 4. Aggiorna l'app.` : `Versione del progetto ${version} non supportata: questa app legge le versioni 1, 2, 3 e 4.`);
   }
   const app = str(own(root, 'app'), '', 'app');
   if (app.length > LIMITS.appChars) bad('', `app: massimo ${LIMITS.appChars} caratteri.`);
