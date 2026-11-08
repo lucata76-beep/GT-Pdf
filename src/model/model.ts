@@ -215,6 +215,30 @@ export function drawOrder(objects: readonly PageObject[]): PageObject[] {
   return [...objects.filter((o) => o.kind === 'cover'), ...objects.filter((o) => o.kind !== 'cover')];
 }
 
+/**
+ * Rimette gli oggetti `entries` ciascuno al suo indice nell'elenco RISULTANTE (quelli restituiti da `takeMany`, o scelti da chi aggiunge): ricostruisce l'elenco una volta sola.
+ * Un indice oltre la fine va in fondo.
+ */
+function mergeAt(list: readonly PageObject[], entries: ReadonlyArray<{ obj: PageObject; index: number }>): PageObject[] {
+  const sorted = [...entries].sort((a, b) => a.index - b.index);
+  const out: PageObject[] = [];
+  let k = 0;
+  let rest = 0;
+  const total = list.length + sorted.length;
+  for (let pos = 0; pos < total; pos++) {
+    const e = sorted[k];
+    if (e && e.index === pos) {
+      out.push(e.obj);
+      k++;
+    } else if (rest < list.length) out.push(list[rest++] as PageObject);
+    else if (e) {
+      out.push(e.obj); // indice oltre la fine: in fondo
+      k++;
+    }
+  }
+  return out;
+}
+
 interface PageData {
   objects: PageObject[];
   scale: PageScale | null;
@@ -351,23 +375,32 @@ export class DocumentModel {
    */
   insertAt(page: number, entries: ReadonlyArray<{ obj: PageObject; index: number }>): void {
     const d = this.data(page);
-    const sorted = [...entries].sort((a, b) => a.index - b.index);
-    const out: PageObject[] = [];
-    let k = 0;
-    let rest = 0;
-    const total = d.objects.length + sorted.length;
-    for (let pos = 0; pos < total; pos++) {
-      const e = sorted[k];
-      if (e && e.index === pos) {
-        out.push(e.obj);
-        k++;
-      } else if (rest < d.objects.length) out.push(d.objects[rest++] as PageObject);
-      else if (e) {
-        out.push(e.obj); // indice oltre la fine: in fondo
-        k++;
+    d.objects = mergeAt(d.objects, entries);
+    this.emit();
+  }
+  /**
+   * Una modifica composta con UN SOLO cambiamento (un `emit`, una salita di `revision`): sostituisce i punti di alcuni oggetti, toglie degli oggetti (per id) e ne aggiunge altri
+   * ciascuno al suo indice (gli indici sono quelli dell'elenco FINALE, come per `insertAt`). Serve al raccordo (CP6h): accorcia due tratti, spezza una Linea e aggiunge un arco in un
+   * solo passo. L'ordine e' fisso: prima i punti, poi le rimozioni, poi le aggiunte. Gli id che non ci sono si ignorano.
+   */
+  edit(
+    page: number,
+    e: { points?: ReadonlyArray<{ id: number; pts: readonly UserPoint[] }>; remove?: readonly number[]; add?: ReadonlyArray<{ obj: PageObject; index: number }> },
+  ): void {
+    const d = this.data(page);
+    if (e.points && e.points.length > 0) {
+      const byId = new Map<number, PageObject>();
+      for (const o of d.objects) byId.set(o.id, o);
+      for (const p of e.points) {
+        const o = byId.get(p.id);
+        if (o) assignPoints(o, p.pts);
       }
     }
-    d.objects = out;
+    if (e.remove && e.remove.length > 0) {
+      const gone = new Set(e.remove);
+      d.objects = d.objects.filter((o) => !gone.has(o.id));
+    }
+    if (e.add && e.add.length > 0) d.objects = mergeAt(d.objects, e.add);
     this.emit();
   }
   setScale(page: number, scale: PageScale | null): void {
