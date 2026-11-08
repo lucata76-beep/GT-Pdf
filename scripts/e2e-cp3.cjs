@@ -237,7 +237,7 @@ async function mouseSuite(browser) {
 
   // --- Quota senza scala: valore digitato ---
   await tool(page, 'Quota');
-  check('Quota: cinque tipi nella barra contestuale, allineata attiva', (await page.locator('.ctx-types button').count()) === 5 && (await page.locator('.ctx-types button[aria-pressed="true"]').innerText()) === 'Allineata');
+  check('Quota: sei tipi nella barra contestuale (Allineata, Orizz., Vert., Ø Diam., R Raggio, Angolare), allineata attiva', (await page.locator('.ctx-types button').count()) === 6 && (await page.locator('.ctx-types button').allInnerTexts()).join(',') === 'Allineata,Orizz.,Vert.,Ø Diam.,R Raggio,Angolare' && (await page.locator('.ctx-types button[aria-pressed="true"]').innerText()) === 'Allineata');
   await page.locator('.ctx-types button', { hasText: 'Orizz.' }).click();
   check('Quota orizzontale: guida del primo punto', (await page.locator('.ctx-hint').innerText()).includes('Quota orizzontale: indica il primo punto'));
   await tapSheet({ x: 150, y: 450 });
@@ -489,7 +489,7 @@ async function touchSuite(browser) {
   // --- Quota: tre punti con il dito, punto di lavoro in basso con zoom ---
   await tool(page, 'Quota');
   const types = await boxes('.ctx-types button');
-  check('Tipi di quota: 5 pulsanti interi dentro 390 px, >= 44 px di altezza', types.length === 5 && types.every((b) => b.h >= 43.5 && b.l >= -0.5 && b.r <= 390.5), JSON.stringify(types));
+  check('Tipi di quota: 6 pulsanti interi dentro 390 px, >= 44 px di altezza', types.length === 6 && types.every((b) => b.h >= 43.5 && b.l >= -0.5 && b.r <= 390.5), JSON.stringify(types));
   await calibrate(page, sample, async (p) => void (await tapSheet(p)));
   await tool(page, 'Quota');
   await page.locator('.ctx-types button', { hasText: 'Orizz.' }).click();
@@ -628,7 +628,26 @@ async function landscapeSuite(browser) {
   for (let i = 0; i < 3; i++) await page.locator('.size-btn').nth(1).click();
   await tool(page, 'Quota');
   const t5 = await page.$$eval('.ctx-types button', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, h: r.height }; }));
-  check('A+ al massimo: i cinque tipi di quota restano interi nei 390 px', t5.length === 5 && t5.every((b) => b.l >= -0.5 && b.r <= 390.5), JSON.stringify(t5));
+  check('A+ al massimo: i sei tipi di quota restano interi nei 390 px', t5.length === 6 && t5.every((b) => b.l >= -0.5 && b.r <= 390.5), JSON.stringify(t5));
+  // Tutti i livelli di A+ (14, 16, 18, 20, 22 px; 22 e' il massimo): sei pulsanti dentro i 390 px, alti >= 44 px, con la parola tutta nel pulsante (CP6h PARTE 1: dopo CP6g la riga usciva dallo schermo da A+ 20 in su).
+  // Si parte dal massimo, si scende a 14 e si risale: alla fine l'interfaccia e' di nuovo al massimo, come prima per il resto della serie.
+  for (let i = 0; i < 4; i++) await page.locator('.size-btn').nth(0).click();
+  for (const px of [14, 16, 18, 20, 22]) {
+    if (px > 14) await page.locator('.size-btn').nth(1).click();
+    const lv = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement).fontSize;
+      const btns = [...document.querySelectorAll('.ctx-types button')].map((e) => {
+        const r = e.getBoundingClientRect();
+        const rg = document.createRange();
+        rg.selectNodeContents(e);
+        const cs = getComputedStyle(e);
+        return { n: e.textContent, l: r.left, r: r.right, h: r.height, textW: rg.getBoundingClientRect().width, inner: e.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), font: parseFloat(cs.fontSize) };
+      });
+      return { root, btns, sw: document.documentElement.scrollWidth, iw: innerWidth };
+    });
+    check(`A+ ${px} px: sei tipi di quota interi nei 390 px, >= 44 px di altezza, parola tutta nel pulsante, nessuno scorrimento orizzontale`, lv.root === `${px}px` && lv.btns.length === 6 && lv.btns.every((b) => b.l >= -0.5 && b.r <= 390.5 && b.h >= 43.5 && b.textW <= b.inner + 0.01) && lv.sw <= lv.iw, JSON.stringify(lv));
+    console.log(`INFO  [${section}] A+ ${px} px: bordo destro ${Math.max(...lv.btns.map((b) => b.r)).toFixed(1)} px, lettera ${lv.btns[0].font.toFixed(1)} px (normale ${(px * 0.75).toFixed(1)} px), avanzo del testo piu' stretto ${Math.min(...lv.btns.map((b) => b.inner - b.textW)).toFixed(1)} px`);
+  }
   await page.locator('.ctx-types button', { hasText: 'Ø Diam.' }).click();
   const a = await toClient(page, sample, { x: 200, y: 300 });
   const b = await toClient(page, sample, { x: 400, y: 300 });
