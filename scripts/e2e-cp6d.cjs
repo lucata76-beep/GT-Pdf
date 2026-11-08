@@ -902,7 +902,7 @@ async function projectSuite(browser) {
   const S0 = await state(page);
   const text0 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   const j = JSON.parse(text0);
-  check('il progetto scritto e\' di versione 3 con il campo di pagina `origin` ({x, y})', j.version === 3 && j.format === 'gt-pdf-project' && JSON.stringify(Object.keys(j.pages[0])) === JSON.stringify(['number', 'view', 'rotate', 'userUnit', 'scale', 'origin', 'objects']) && nearP(j.pages[0].origin, o1, 1e-12), JSON.stringify(Object.keys(j.pages[0])));
+  check('il progetto scritto e\' di versione 4 con il campo di pagina `origin` ({x, y})', j.version === 4 && j.format === 'gt-pdf-project' && JSON.stringify(Object.keys(j.pages[0])) === JSON.stringify(['number', 'view', 'rotate', 'userUnit', 'scale', 'origin', 'objects']) && nearP(j.pages[0].origin, o1, 1e-12), JSON.stringify(Object.keys(j.pages[0])));
   // salva dall'interfaccia
   const text = (loc) => loc.innerText().then((s) => s.replace(/\s+/g, ' ').trim());
   await menuItem(page, 'File', /^Salva con nome/);
@@ -917,7 +917,7 @@ async function projectSuite(browser) {
   const saved = readFileSync(await dl.path());
   await d.locator('.btn', { hasText: 'Chiudi' }).click();
   const sj = JSON.parse(saved.toString('utf8'));
-  check('il file scaricato e\' di versione 3 con l\'origine della pagina', sj.version === 3 && nearP(sj.pages[0].origin, o1, 1e-12) && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects), `${sj.version}`);
+  check('il file scaricato e\' di versione 4 con l\'origine della pagina', sj.version === 4 && nearP(sj.pages[0].origin, o1, 1e-12) && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects), `${sj.version}`);
   check('... e il dialogo finale conta le origini', /Origini 1/.test(doneText), doneText);
   // chiude e riapre
   const closeDoc = async () => {
@@ -950,7 +950,7 @@ async function projectSuite(browser) {
   const mk = await originMark(page);
   check('... e il simbolo e\' sullo schermo, sull\'origine', !!mk && dist(mk, await clientOfUser(page, o1)) < 0.75, JSON.stringify(mk));
   const text1 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
-  check('il progetto riscritto dopo la riapertura e\' identico (versione 3)', JSON.parse(text1).version === 3 && JSON.stringify(JSON.parse(text1).pages) === JSON.stringify(j.pages));
+  check('il progetto riscritto dopo la riapertura e\' identico (versione 4)', JSON.parse(text1).version === 4 && JSON.stringify(JSON.parse(text1).pages) === JSON.stringify(j.pages));
   // progetto della versione 2 (fixture scritta dal codice di 8575e69) e della versione 1 (47a660e): si aprono uguali e si riscrivono come 3
   const v2 = JSON.parse(readFileSync(join(__dirname, '..', 'src', 'project', 'fixtures', 'project-v2-8575e69.json'), 'utf8'));
   const v1 = JSON.parse(readFileSync(join(__dirname, '..', 'src', 'project', 'fixtures', 'project-v1-47a660e.json'), 'utf8'));
@@ -965,7 +965,7 @@ async function projectSuite(browser) {
     const S2 = await state(page);
     check(`un progetto di versione ${label} si apre: gli oggetti sono quelli del file e non c'e' nessuna origine`, JSON.stringify(S2.pages[0].objects) === JSON.stringify(f.pages[0].objects) && S2.pages[0].origin === null && (await originMark(page)) === null, `${sum.slice(0, 120)} / ${S2.pages[0].objects.length}`);
     const t2 = JSON.parse(await page.evaluate(async () => (await window.__gtpdf.projectText()).text));
-    check(`... e si riscrive come versione 3 con "origin": null e gli stessi oggetti`, t2.version === 3 && t2.pages[0].origin === null && JSON.stringify(t2.pages[0].objects) === JSON.stringify(f.pages[0].objects));
+    check(`... e si riscrive come versione 4 con "origin": null e gli stessi oggetti`, t2.version === 4 && t2.pages[0].origin === null && JSON.stringify(t2.pages[0].objects) === JSON.stringify(f.pages[0].objects));
   }
   // origin in un file di versione 1 o 2: rifiutato, con la pagina
   for (const v of [1, 2]) {
@@ -985,6 +985,7 @@ async function projectSuite(browser) {
   // un file di versione 3 senza `origin` e uno con `origin` non valida
   for (const [name, mut, re] of [['senza origin', (b) => delete b.pages[0].origin, /pagina 1: manca origin/], ['origin non valida', (b) => (b.pages[0].origin = { x: 'a', y: 1 }), /pagina 1: origin\.x deve essere un numero/], ['origin fuori limite', (b) => (b.pages[0].origin = { x: 9e9, y: 1 }), /pagina 1: origin\.x \(9000000000\) fuori/]]) {
     const bad = JSON.parse(saved.toString('utf8'));
+    bad.version = 3; // un file di versione 3 (il file scritto adesso e' di versione 4: la regola di `origin` vale dalla 3)
     mut(bad);
     const first = page.waitForEvent('filechooser');
     await menuItem(page, 'File', /^Apri progetto/);
@@ -995,15 +996,15 @@ async function projectSuite(browser) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
   }
-  // messaggio di versione: un file di versione 4
+  // messaggio di versione: un file di versione 5 (la 4 e' ora leggibile)
   const fut = JSON.parse(saved.toString('utf8'));
-  fut.version = 4;
+  fut.version = 5;
   const first = page.waitForEvent('filechooser');
   await menuItem(page, 'File', /^Apri progetto/);
   await (await first).setFiles({ name: 'futuro.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fut)) });
   await page.waitForTimeout(500);
   const bodyF = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '));
-  check('un file di versione 4: "questa app legge le versioni 1, 2 e 3"', /versione piu' recente \(4\): questa app legge le versioni 1, 2 e 3\. Aggiorna l'app\./.test(bodyF), bodyF.slice(0, 250));
+  check('un file di versione 5: "questa app legge le versioni 1, 2, 3 e 4"', /versione piu' recente \(5\): questa app legge le versioni 1, 2, 3 e 4\. Aggiorna l'app\./.test(bodyF), bodyF.slice(0, 250));
   await ctx.close();
 }
 

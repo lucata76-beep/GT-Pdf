@@ -622,7 +622,7 @@ async function projectSuite(browser) {
   const S0 = await state(page);
   const text0 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   const j = JSON.parse(text0);
-  check('il progetto scritto e\' di versione 3 (format "gt-pdf-project"; dalla CP6d la scrittura e\' sempre la 3)', j.version === 3 && j.format === 'gt-pdf-project');
+  check('il progetto scritto e\' di versione 4 (format "gt-pdf-project"; dalla CP6g la scrittura e\' sempre la 4)', j.version === 4 && j.format === 'gt-pdf-project');
   const jc = j.pages[0].objects.find((o) => o.kind === 'circle');
   const ja = j.pages[0].objects.find((o) => o.kind === 'arc');
   check('cerchio e arco nel file: solo i punti indicati e il tratto (lista bianca), nessun centro/raggio/angolo', JSON.stringify(Object.keys(jc)) === JSON.stringify(['id', 'kind', 'p1', 'p2', 'stroke']) && JSON.stringify(Object.keys(ja)) === JSON.stringify(['id', 'kind', 'p1', 'p2', 'p3', 'stroke']) && !/center|centro|radius|raggio|angle|sweep/i.test(JSON.stringify([jc, ja])));
@@ -642,7 +642,7 @@ async function projectSuite(browser) {
   await d.locator('.btn', { hasText: 'Chiudi' }).click();
   writeFileSync(join(OUT, 'progetto-v2.json'), saved);
   const sj = JSON.parse(saved.toString('utf8'));
-  check('il file scaricato e\' di versione 3 con gli stessi oggetti del modello', sj.version === 3 && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects), `${sj.version}`);
+  check('il file scaricato e\' di versione 4 con gli stessi oggetti del modello', sj.version === 4 && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects), `${sj.version}`);
   // chiude e riapre il progetto con lo stesso PDF
   const openProject = async (pg, json, jsonName, pdfBytes) => {
     const first = pg.waitForEvent('filechooser');
@@ -668,7 +668,7 @@ async function projectSuite(browser) {
   check('... e a schermo cerchio e arco ci sono (due tracciati con archi)', (await page.evaluate(() => [...document.querySelectorAll('.sc-objects path')].filter((p) => /A/.test(p.getAttribute('d'))).length)) === 2);
   // riscrive: ancora versione 2, stesso contenuto
   const text1 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
-  check('il progetto riscritto dopo la riapertura e\' identico a quello scritto prima (versione 3)', JSON.parse(text1).version === 3 && JSON.stringify(JSON.parse(text1).pages) === JSON.stringify(j.pages));
+  check('il progetto riscritto dopo la riapertura e\' identico a quello scritto prima (versione 4)', JSON.parse(text1).version === 4 && JSON.stringify(JSON.parse(text1).pages) === JSON.stringify(j.pages));
   // progetto di versione 1: stesso file con i soli oggetti che c'erano nella 1 e version = 1
   const v1 = JSON.parse(saved.toString('utf8'));
   v1.version = 1;
@@ -684,7 +684,7 @@ async function projectSuite(browser) {
   check('un progetto di VERSIONE 1 (senza cerchi e archi) si apre: gli oggetti sono quelli del file', JSON.stringify(S2.pages[0].objects) === JSON.stringify(v1.pages[0].objects) && S2.pages[0].objects.length === 3, `${summary1} / ${S2.pages[0].objects.length}`);
   const text2 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   const j2 = JSON.parse(text2);
-  check('... e si riscrive come versione 3 con gli stessi oggetti', j2.version === 3 && JSON.stringify(j2.pages[0].objects) === JSON.stringify(v1.pages[0].objects));
+  check('... e si riscrive come versione 4 con gli stessi oggetti', j2.version === 4 && JSON.stringify(j2.pages[0].objects) === JSON.stringify(v1.pages[0].objects));
   // un file di versione 1 che contiene un cerchio e' rifiutato
   const bad = JSON.parse(saved.toString('utf8'));
   bad.version = 1;

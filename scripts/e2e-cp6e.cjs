@@ -1059,7 +1059,7 @@ async function projectSuite(browser) {
   check('(premessa) gli oggetti sono stati trasformati: 16 oggetti (13 + 3 copie)', S0.pages[0].objects.length === 16, String(S0.pages[0].objects.length));
   const text0 = await page.evaluate(async () => (await window.__gtpdf.projectText()).text);
   const j = JSON.parse(text0);
-  check('il formato del file NON cambia: versione 3 e gli stessi campi di pagina di CP6d (nessun nuovo tipo di oggetto)', j.version === 3 && j.format === 'gt-pdf-project' && JSON.stringify(Object.keys(j.pages[0])) === JSON.stringify(['number', 'view', 'rotate', 'userUnit', 'scale', 'origin', 'objects']), JSON.stringify(Object.keys(j.pages[0])));
+  check('il formato del file NON cambia: versione 4 e gli stessi campi di pagina di CP6d (nessun nuovo tipo di oggetto)', j.version === 4 && j.format === 'gt-pdf-project' && JSON.stringify(Object.keys(j.pages[0])) === JSON.stringify(['number', 'view', 'rotate', 'userUnit', 'scale', 'origin', 'objects']), JSON.stringify(Object.keys(j.pages[0])));
   check('il progetto scritto contiene gli oggetti trasformati (stessi punti, stesso ordine) e la lettura lo accetta', JSON.stringify(j.pages[0].objects) === JSON.stringify(S0.pages[0].objects) && (await page.evaluate(async () => (await window.__gtpdf.projectText()).ok)) === true);
   const sample = readFileSync(join(PDF_DIR, 'a4-rotate90.pdf'));
   await menuItem(page, 'File', /^Salva con nome/);
@@ -1071,7 +1071,7 @@ async function projectSuite(browser) {
   const saved = readFileSync(await dl.path());
   await d.locator('.btn', { hasText: 'Chiudi' }).click();
   const sj = JSON.parse(saved.toString('utf8'));
-  check('il file scaricato contiene gli oggetti trasformati', sj.version === 3 && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects));
+  check('il file scaricato contiene gli oggetti trasformati', sj.version === 4 && JSON.stringify(sj.pages[0].objects) === JSON.stringify(S0.pages[0].objects));
   await menuItem(page, 'File', /^Chiudi/);
   await page.waitForTimeout(300);
   const dlg = page.locator('.dialog .btn', { hasText: /Chiudi|Procedi|Scarta/ });

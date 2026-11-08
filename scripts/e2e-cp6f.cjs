@@ -1,6 +1,6 @@
 // Prove di CP6f (Snap ampliato) su Chromium: i candidati nuovi dello snap (Intersezione, Quadrante, Perpendicolare, Tangente, Origine), i loro interruttori, i marcatori e le
 // etichette, la priorita' a parita' di distanza, il punto di partenza di Perpendicolare e Tangente (Retta, Distanza, Sposta, Specchio, Scala sì; Cerchio, Copertura, Testo no),
-// i tipi nuovi spenti (nessun candidato nuovo, come prima), progetto (versione 3, nessun campo nuovo, interruttori non salvati) ed esportazione (marcatori solo a schermo).
+// i tipi nuovi spenti (nessun candidato nuovo, come prima), progetto (versione 4 dalla CP6g, nessun campo nuovo oltre a quelli del 4, interruttori non salvati) ed esportazione (marcatori solo a schermo).
 // Mouse (desktop 1280 x 900, clic reali) e tocco emulato (iPhone 390 x 780, DPR 3, CDP) su tre pagine: A4 vettoriale, A4 con /Rotate 90, A4 con CropBox.
 // Punti ESATTI: i punti attesi si calcolano QUI, con formule indipendenti dall'app, nel foglio mostrato (pt fisici, Y in giu') a partire dai punti degli oggetti del modello;
 // il punto inserito dall'app deve coincidere entro 1e-6 pt. Il punto di partenza di Perpendicolare e Tangente e' l'Estremo di una retta nota (agganciato), cosi' e' esatto.
@@ -556,9 +556,9 @@ async function switchSuite(browser) {
   await only(page, ['end']);
   const j = JSON.parse(await page.evaluate(async () => (await window.__gtpdf.projectText()).text));
   const txt = JSON.stringify(j);
-  check('il progetto scritto e\' di versione 3 e non contiene nessun campo di snap (interruttori, "snap", "intersez", "quadrante", "perpendicolare", "tangente")', j.version === 3 && !/snap|intersec|intersez|quadrant|perpendic|tangen|toggle|interrutt/i.test(txt), txt.slice(0, 200));
+  check('il progetto scritto e\' di versione 4 e non contiene nessun campo di snap (interruttori, "snap", "intersez", "quadrante", "perpendicolare", "tangente")', j.version === 4 && !/snap|intersec|intersez|quadrant|perpendic|tangen|toggle|interrutt/i.test(txt), txt.slice(0, 200));
   const keys = new Set([...Object.keys(j), ...Object.keys(j.pages[0])]);
-  check('i campi del progetto sono quelli di prima (nessun campo nuovo): format, version, app, pdf, pages / page, objects, scale, origin (e simili)', ![...keys].some((k) => /snap|switch|toggle|aggancio/i.test(k)), JSON.stringify([...keys]));
+  check('i campi del progetto sono quelli del 4 (nessun campo nuovo oltre a quelli del 4): format, version, app, pdf, pages / page, objects, scale, origin (e simili)', ![...keys].some((k) => /snap|switch|toggle|aggancio/i.test(k)) && JSON.stringify([...keys].sort()) === JSON.stringify(['app', 'format', 'number', 'objects', 'origin', 'pages', 'pdf', 'rotate', 'scale', 'userUnit', 'version', 'view']), JSON.stringify([...keys]));
   await page.reload();
   await page.addStyleTag({ content: '.float-zoom{display:none!important}' });
   const after = await Promise.all(SW.map((k) => isOn(panelBtn(page, k))));
@@ -846,7 +846,7 @@ async function projectExportSuite(browser) {
   check('(premessa) le 4 rette fatte con lo snap sono 4 oggetti nuovi', made.length === 4 && made.every((o) => o.kind === 'segment'), JSON.stringify(made.length));
   // il progetto contiene solo oggetti (kind, id, punti, tratto): nessun campo di snap
   const j = JSON.parse(await A.page.evaluate(async () => (await window.__gtpdf.projectText()).text));
-  check('il progetto con oggetti fatti con lo snap e\' di versione 3 e ogni oggetto nuovo ha solo le chiavi di prima (id, kind, points, stroke)', j.version === 3 && j.pages[0].objects.slice(n0).every((o) => JSON.stringify(Object.keys(o)) === JSON.stringify(['id', 'kind', 'points', 'stroke'])), JSON.stringify(j.pages[0].objects.slice(n0).map((o) => Object.keys(o))));
+  check('il progetto con oggetti fatti con lo snap e\' di versione 4 e ogni oggetto nuovo ha solo le chiavi di prima (id, kind, points, stroke)', j.version === 4 && j.pages[0].objects.slice(n0).every((o) => JSON.stringify(Object.keys(o)) === JSON.stringify(['id', 'kind', 'points', 'stroke'])), JSON.stringify(j.pages[0].objects.slice(n0).map((o) => Object.keys(o))));
   const mkVisible = await hoverS(A.page, segSeg(S.A, S.B)[0]);
   check('(premessa) col mouse sopra l\'intersezione il marcatore e\' visibile durante l\'esportazione', !!mkVisible);
   const hMarker = await hashes(A.page);
