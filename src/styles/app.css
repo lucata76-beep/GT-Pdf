@@ -1808,3 +1808,61 @@ body.app-mode {
     flex-basis: 100%;
   }
 }
+
+/* ---- "Adatta alla pagina" in fondo alla palette (desktop; aggiunta a CP6e, decisione 83) ----
+   Contenitore sticky in fondo alla colonna: con la finestra bassa la palette scorre e il pulsante resta in vista (copre il fondo mentre si scorre, ma in fondo allo scorrimento
+   l'ultimo strumento sta SOPRA di lui). Non e' uno strumento (niente `.tool`): stesse misure e stesso anello del fuoco, solo icona. */
+.palette-dock {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0;
+  background: var(--cad-chrome);
+  border-top: 1px solid var(--cad-border);
+}
+.palette-fit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--pal-w) - 0.5rem);
+  min-height: var(--hit);
+  padding: 0;
+  background: transparent;
+  color: var(--cad-text);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.palette-fit .icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: block;
+}
+.palette-fit:hover:not(:disabled) {
+  background: var(--cad-canvas);
+}
+.palette-fit:disabled {
+  color: var(--cad-text-disabled);
+  cursor: not-allowed;
+}
+.palette-fit:focus-visible {
+  outline: 2px solid var(--cad-measure);
+  outline-offset: 1px;
+}
+@media (max-width: 719.98px) {
+  /* palette orizzontale (misurata per l'iPhone): nessun pulsante in piu'; "Adatta alla pagina" sta nella colonna sul foglio */
+  .palette-dock {
+    display: none;
+  }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  /* tocco con poca altezza: lo zoom sta nei pulsanti sul foglio (anche "Adatta alla pagina"), quindi quello della palette si nasconde (uno solo in vista) */
+  .palette-dock {
+    display: none;
+  }
+}

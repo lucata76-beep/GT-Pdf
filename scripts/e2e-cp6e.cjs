@@ -8,7 +8,7 @@
 // NON e' una dipendenza del progetto: richiede Playwright con Chromium (require('playwright')).
 // Uso: node scripts/e2e-cp6e.cjs [cartella-immagini]   (costruisce da solo il build di prova con GTPDF_TEST=1 fuori dal repository;
 //   con E2E_DIST=<cartella di un build di prova gia' fatto> prova quel build: su 2b26073 i controlli sul comportamento nuovo FALLISCONO)
-//   E2E_ONLY=selezione,trascina,canc,sposta,specchio,rotazione,misto,copie,menu,tastiera,progetto,export,barra,tocco: solo alcune serie (per il debug)
+//   E2E_ONLY=selezione,trascina,canc,sposta,specchio,rotazione,misto,menu,tastiera,progetto,export,barra,tocco: solo alcune serie (per il debug)
 // Chromium NON e' il browser dell'utente: nulla di quanto segue prova il comportamento li'.
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');

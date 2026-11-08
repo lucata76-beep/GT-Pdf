@@ -512,6 +512,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     toolBtns.set(t.id, b);
     palette.append(b);
   }
+  // "Adatta alla pagina" in fondo alla palette (desktop, da 720 px; aggiunta a CP6e, decisione 83): fa quello che fanno la voce del menu Zoom e il valore percentuale della barra,
+  // `viewer.fit()`, e basta (nessun comando, nessun cambio di strumento o di selezione). NON e' uno strumento: niente classe `tool`, niente `TOOLS`, niente `toolBtns`, niente
+  // `aria-pressed` (la palette e' misurata per l'iPhone). Sta in un contenitore *sticky* in fondo alla palette: con la finestra bassa gli strumenti scorrono e il pulsante resta in vista;
+  // scorrendo fino in fondo l'ultimo strumento sta sopra il pulsante, non sotto. Sotto i 720 px e col tocco con poca altezza e' nascosto (app.css): li' c'e' gia' quello della colonna sul foglio.
+  const fitBtn = h('button', { class: 'palette-fit', type: 'button', 'aria-label': 'Adatta alla pagina', title: 'Adatta alla pagina', disabled: true, onclick: () => viewer.fit() }, icon('maximize'));
+  const paletteDock = h('div', { class: 'palette-dock' }, fitBtn);
+  palette.append(paletteDock);
 
   // ---------- Proprieta' ----------
   /** L'oggetto selezionato se ce n'e' UNO solo (solo con lo strumento Seleziona): con piu' oggetti le proprieta' non lavorano sul gruppo (CP6e). */
@@ -921,8 +928,10 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const padY = Number.parseFloat(cs.paddingTop) || 0;
     if (r.left < p.left + padX) palette.scrollLeft += r.left - (p.left + padX);
     else if (r.right > p.right - padX) palette.scrollLeft += r.right - (p.right - padX);
+    // In basso il limite e' il contenitore di "Adatta alla pagina" (sticky: copre il fondo della palette), non il bordo: uno strumento sotto di lui non e' in vista.
+    const bottom = paletteDock.offsetParent !== null ? Math.min(p.bottom, paletteDock.getBoundingClientRect().top) : p.bottom;
     if (r.top < p.top + padY) palette.scrollTop += r.top - (p.top + padY);
-    else if (r.bottom > p.bottom - padY) palette.scrollTop += r.bottom - (p.bottom - padY);
+    else if (r.bottom > bottom - padY) palette.scrollTop += r.bottom - (bottom - padY);
   }
   // Se la palette cambia dimensione (barra contestuale che compare o va a capo, rotazione) lo strumento attivo resta tutto in vista.
   new ResizeObserver(() => revealTool(tool)).observe(palette);
@@ -1740,7 +1749,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     emptyPanel.hidden = has;
     docName.textContent = pdf ? pdf.name : 'Nessun documento';
     docName.title = pdf ? pdf.name : '';
-    for (const b of [zoomOutBtn, zoomInBtn, zoomLabel]) b.disabled = !has;
+    for (const b of [zoomOutBtn, zoomInBtn, zoomLabel, fitBtn]) b.disabled = !has;
     floatZoom.hidden = !has;
     const n = pdf?.pages.length ?? 0;
     pager.hidden = n < 2;
