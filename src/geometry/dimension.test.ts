@@ -130,13 +130,14 @@ describe('valore ed etichetta', () => {
     expect(autoLabel(def, g2, s)).toBe('50.00');
   });
 
-  it('i tipi di quota: 5, con 3 punti le lineari e 2 punti Ø e R', () => {
+  it('i tipi di quota: 6, con 3 punti le lineari, 2 punti Ø e R e 4 punti l\'angolare "da tre punti"', () => {
     expect(DIM_TYPES.map((t) => [t.id, t.points])).toEqual([
       ['aligned', 3],
       ['horizontal', 3],
       ['vertical', 3],
       ['diameter', 2],
       ['radius', 2],
+      ['angular', 4],
     ]);
     expect(dimInfo('radius').label).toBe('Quota raggio R');
   });
@@ -168,5 +169,77 @@ describe('testo digitato', () => {
     expect(validateDimText('4x Ø8 ±0.1')).toBeNull();
     expect(validateDimText('12 Ω')).toMatch(/"Ω"/);
     expect(validateDimText('1'.repeat(DIM_TEXT_MAX_LENGTH + 1))).toMatch(/Massimo/);
+  });
+});
+
+describe('quota angolare (CP6g): valore, etichetta e costruzione dai quattro punti', () => {
+  const DEGR = Math.PI / 180;
+  const V: UserPoint = { x: 250, y: 300 };
+  const polar = (r: number, deg: number): UserPoint => ({ x: V.x + r * Math.cos(deg * DEGR), y: V.y + r * Math.sin(deg * DEGR) });
+  const scale = calibrate(mmToPt(100), 100);
+  if (!scale) throw new Error('scala');
+
+  it('etichetta automatica: gradi decimali con "." e 2 decimali e il simbolo, per ogni /Rotate, CropBox e UserUnit', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      for (const [deg, text] of [[30, '30.00°'], [45, '45.00°'], [90, '90.00°'], [135, '135.00°'], [179.99, '179.99°'], [12.346, '12.35°'], [12.344, '12.34°'], [0.01, '0.01°']] as const) {
+        const def = buildDimension('angular', [V, polar(80, 20), polar(55, 20 + deg), polar(40, 100)], g);
+        expect(def, `${deg}`).not.toBeNull();
+        if (!def) return;
+        expect(autoLabel(def, g, null), `${c.rotate}/${c.userUnit} ${deg} senza scala`).toBe(text);
+        expect(autoLabel(def, g, scale), `${c.rotate}/${c.userUnit} ${deg} con scala`).toBe(text);
+      }
+    }
+  });
+
+  it('non dipende dalla scala: mai null senza scala (le lineari, Ø e R si)', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const def = buildDimension('angular', [V, polar(80, 0), polar(80, 45), polar(40, 20)], g);
+    if (!def) throw new Error('quota degenere');
+    expect(autoLabel(def, g, null)).toBe('45.00°');
+    expect(dimensionLabel({ ...def, valueText: null }, g, null)).toBe('45.00°');
+    expect(autoLabel({ dim: 'aligned', p1: V, p2: polar(80, 0) }, g, null)).toBeNull();
+    expect(autoLabel({ dim: 'diameter', p1: V, p2: polar(80, 0) }, g, null)).toBeNull();
+  });
+
+  it('il valore digitato vince sull\'automatico (e il simbolo ° si digita e si accetta)', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const def = buildDimension('angular', [V, polar(80, 0), polar(80, 45), polar(40, 20)], g);
+    if (!def) throw new Error('quota degenere');
+    expect(dimensionLabel({ ...def, valueText: '44.5°' }, g, null)).toBe('44.5°');
+    expect(dimensionLabel({ ...def, valueText: '45' }, g, scale)).toBe('45');
+    for (const t of ['45.00°', '45°', '12,5°', '90.00 °']) expect(validateDimText(t), t).toBeNull();
+    expect(normalizeDimText('45,5°')).toBe('45.5°');
+    expect(normalizeDimText('45.00°')).toBe('45.00°');
+    expect(validateDimText('°')).toBe('Il valore deve contenere almeno una cifra.');
+  });
+
+  it('costruzione dai quattro punti: p1 e p2 sono i punti dei lati, a il vertice, b il punto di mezzo dell\'arco; null se degenere', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      const def = buildDimension('angular', [V, polar(80, 20), polar(55, 110), polar(40, 300)], g);
+      expect(def).not.toBeNull();
+      if (!def) return;
+      expect(def.dim).toBe('angular');
+      expect(def.a).toEqual(V);
+      expect(def.p1).toEqual(polar(80, 20));
+      expect(def.p2).toEqual(polar(55, 110));
+      const b = polar(40, 65); // la bisettrice dei lati a 20 e 110 gradi e' a 65; il raggio e' la distanza del quarto punto dal vertice (40)
+      expect(def.b.x).toBeCloseTo(b.x, 7);
+      expect(def.b.y).toBeCloseTo(b.y, 7);
+    }
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    expect(buildDimension('angular', [V, polar(80, 20), polar(55, 110)], g)).toBeNull(); // servono 4 punti
+    expect(buildDimension('angular', [V, V, polar(55, 110), polar(40, 0)], g)).toBeNull();
+    expect(buildDimension('angular', [V, polar(80, 20), polar(55, 20), polar(40, 0)], g)).toBeNull(); // lati sovrapposti
+    expect(buildDimension('angular', [V, polar(80, 20), polar(55, 200), polar(40, 0)], g)).toBeNull(); // lati opposti (180 gradi)
+    expect(buildDimension('angular', [V, polar(80, 20), polar(55, 110), V], g)).toBeNull(); // raggio nullo
+  });
+
+  it('il simbolo ° e le altre misure restano invariate: le quote lineari, Ø e R non cambiano', () => {
+    expect(dimInfo('angular')).toMatchObject({ label: 'Quota angolare', short: 'Angolare', points: 4, prefix: '' });
+    expect(autoText('aligned', 12.5)).toBe('12.50');
+    expect(autoText('diameter', 25.4)).toBe('Ø25.40');
+    expect(autoText('radius', 12.5)).toBe('R12.50');
   });
 });

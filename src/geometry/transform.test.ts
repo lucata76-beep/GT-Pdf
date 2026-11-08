@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { EXACT_MIN_DISTANCE_PT } from '../app/construction';
 import { type CoverObject, type DimensionObject, type LineObject, type PageObject, type TextObject, pointsOf } from '../model/model';
 import { DEFAULT_STROKE } from '../model/stroke';
+import { angleDegrees } from './angular';
 import { arcProblem, curveOnSheet } from './arc';
 import { measuredPt } from './dimension';
-import { textRect } from './layout';
+import { layoutDimension, textRect } from './layout';
 import { PageGeometry, type PageSpec, type SheetPoint, type UserPoint } from './page';
 import {
   ANGLE_MAX_DEG,
@@ -110,13 +111,17 @@ const objects = (g: PageGeometry, spec: PageSpec): Record<string, PageObject> =>
   const s0 = g.userToSheet(u(0.2, 0.6));
   out.coperturaRett = { id: 6, kind: 'cover', shape: 'rect', p1: g.sheetToUser(s0), p2: g.sheetToUser({ x: s0.x + 80, y: s0.y + 40 }) };
   out.coperturaQuad = { id: 7, kind: 'cover', shape: 'square', p1: g.sheetToUser(s0), p2: g.sheetToUser({ x: s0.x + 50, y: s0.y + 50 }) };
+  // Quota angolare (CP6g): vertice, un punto per lato (a 10 e 80 gradi) e il punto di mezzo dell'arco sulla bisettrice (45 gradi), costruita nello spazio utente
+  const av = u(0.3, 0.4);
+  const polar = (r: number, deg: number): UserPoint => ({ x: av.x + r * Math.cos(deg * DEG), y: av.y + r * Math.sin(deg * DEG) });
+  out.quotaAng = { id: 12, kind: 'dim', dim: 'angular', a: av, p1: polar(60, 10), p2: polar(45, 80), b: polar(30, 45), valueText: null, color: '#D32F2F', widthPt: 1, textPt: 10 };
   out.quotaOriz = dimBase('horizontal', [u(0.2, 0.2), u(0.5, 0.35), u(0.3, 0.5)]);
   out.quotaVert = dimBase('vertical', [u(0.2, 0.2), u(0.5, 0.35), u(0.3, 0.5)]);
   out.quotaOriz.id = 10;
   out.quotaVert.id = 11;
   return out;
 };
-const ALWAYS = ['retta', 'linea', 'cerchio', 'arco', 'coperturaCirc', 'quotaAll', 'quotaDiam', 'quotaRag', 'testo'] as const;
+const ALWAYS = ['retta', 'linea', 'cerchio', 'arco', 'coperturaCirc', 'quotaAll', 'quotaDiam', 'quotaRag', 'quotaAng', 'testo'] as const;
 
 /** Punti attesi per un oggetto di `ALWAYS` (testo escluso), calcolati nel foglio con le funzioni indipendenti. */
 const expectedPoints = (o: PageObject, g: PageGeometry, f: (p: SheetPoint) => SheetPoint): UserPoint[] => pointsOf(o).map((p) => g.sheetToUser(f(g.userToSheet(p))));
@@ -565,5 +570,63 @@ describe('limite di coordinata', () => {
     const { g, spec } = GEOMS[0]!;
     const t = objects(g, spec).testo as PageObject;
     expect(transformPoints(t, { kind: 'rotate', center: { x: 5_000_000, y: 5_000_000 }, deg: 90 }, g).ok).toBe(false);
+  });
+});
+
+describe('quota angolare (CP6g): tutti i punti si trasformano, il valore non cambia, nessun vincolo nuovo', () => {
+  const asDim = (o: PageObject, pts: readonly UserPoint[]): DimensionObject => ({ ...(o as DimensionObject), p1: pts[0] as UserPoint, p2: pts[1] as UserPoint, a: pts[2] as UserPoint, b: pts[3] as UserPoint });
+  const specsFor = (g: PageGeometry, spec: PageSpec): { name: string; t: TransformSpec; f: (p: SheetPoint) => SheetPoint }[] => {
+    const a = g.userToSheet(userAt(spec, 0.4, 0.4));
+    const c = g.userToSheet(userAt(spec, 0.5, 0.5));
+    const out: { name: string; t: TransformSpec; f: (p: SheetPoint) => SheetPoint }[] = [{ name: 'sposta', t: { kind: 'move', dx: 13, dy: -9 }, f: (p) => ({ x: p.x + 13, y: p.y - 9 }) }];
+    for (const deg of [90, 180, 270, 45, -30]) out.push({ name: `rotazione ${deg}`, t: { kind: 'rotate', center: c, deg }, f: (p) => expectedRotate(p, c, deg) });
+    for (const [name, b] of [['orizzontale', { x: a.x + 90, y: a.y }], ['verticale', { x: a.x, y: a.y + 90 }], ['a 45 gradi', { x: a.x + 90, y: a.y + 90 }], ['obliquo', { x: a.x + 90, y: a.y + 10 }]] as const) {
+      out.push({ name: `specchio ${name}`, t: { kind: 'mirror', a, b }, f: (p) => expectedMirror(p, a, b) });
+    }
+    return out;
+  };
+
+  it('Sposta, Rotazione e Specchio (assi orizzontale, verticale, a 45 gradi, obliquo) sono ammessi, portano i quattro punti dove devono e il valore non cambia', () => {
+    for (const { g, spec, name } of GEOMS) {
+      const o = objects(g, spec).quotaAng as DimensionObject;
+      const before = angleDegrees(o, g) as number;
+      expect(before).toBeCloseTo(70, 7);
+      for (const { name: tname, t, f } of specsFor(g, spec)) {
+        expect(objectProblem(o, t), `${name} ${tname}`).toBeNull(); // nessun vincolo nuovo in transform.ts
+        const r = transformPoints(o, t, g);
+        expect(r.ok, `${name} ${tname}`).toBe(true);
+        if (!r.ok) continue;
+        expectedPoints(o, g, f).forEach((p, i) => expect(nearPt(p, r.points[i] as UserPoint, 1e-7), `${name} ${tname} punto ${i}`).toBe(true));
+        expect(angleDegrees(asDim(o, r.points), g) as number, `${name} ${tname}: valore`).toBeCloseTo(before, 7);
+      }
+    }
+  });
+
+  it('dopo lo Specchio il settore e l\'arco sono quelli speculari (l\'arco trasformato e\' il trasformato dell\'arco), dopo la Rotazione ruotati', () => {
+    for (const { g, spec, name } of GEOMS) {
+      const o = objects(g, spec).quotaAng as DimensionObject;
+      const style = { textPt: 10, widthPt: 1, color: '#D32F2F' };
+      const arcOf = (d: DimensionObject): SheetPoint[] => layoutDimension({ ...d, ...style }, g, '70.00°').lines[0]!.pts;
+      const arc0 = arcOf(o);
+      for (const { name: tname, t, f } of specsFor(g, spec).filter((s) => s.t.kind !== 'move')) {
+        const r = transformPoints(o, t, g);
+        if (!r.ok) throw new Error(`${name} ${tname}`);
+        const arc1 = arcOf(asDim(o, r.points));
+        expect(arc1.length, `${name} ${tname}`).toBe(arc0.length);
+        arc0.forEach((p, k) => {
+          const e = f(p);
+          expect(Math.hypot(arc1[k]!.x - e.x, arc1[k]!.y - e.y), `${name} ${tname} punto ${k}`).toBeLessThan(1e-6);
+        });
+      }
+    }
+  });
+
+  it('selezione mista: con una quota orizzontale la rotazione e\' rifiutata per tutta la selezione; con la sola angolare (e le altre ammesse) no', () => {
+    const { g, spec } = GEOMS[0]!;
+    const all = objects(g, spec);
+    const rot: TransformSpec = { kind: 'rotate', center: { x: 100, y: 100 }, deg: 30 };
+    expect(selectionProblem([all.quotaAng as PageObject, all.retta as PageObject, all.quotaAll as PageObject], rot)).toBeNull();
+    expect(selectionProblem([all.quotaAng as PageObject, all.quotaOriz as PageObject], rot)).toMatch(/non ruotano/);
+    expect(planTransform([all.quotaAng as PageObject, all.retta as PageObject], rot, g).ok).toBe(true);
   });
 });

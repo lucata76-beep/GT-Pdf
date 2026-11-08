@@ -34,6 +34,7 @@ function dimSpec(g: PageGeometry, dim: Parameters<typeof buildDimension>[0], she
   return { ...def, textPt: SIZE, widthPt: 1, color: RED, ...extra };
 }
 const rectCenter = (r: { x: number; y: number; w: number; h: number }): SheetPoint => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+const unit = (v: SheetPoint): SheetPoint => ({ x: v.x / Math.hypot(v.x, v.y), y: v.y / Math.hypot(v.x, v.y) });
 
 describe('angolo del testo dritto sul foglio', () => {
   it('0, 90, 180, 270 per /Rotate 0, 90, 180, 270', () => {
@@ -285,5 +286,203 @@ describe('unionShapes (selezione multipla, CP6e)', () => {
     expect(u).toEqual({ lines: a.lines, rects: [], circles: [] });
     expect(a.lines).toHaveLength(1);
     expect(unionShapes([])).toEqual({ lines: [], rects: [], circles: [] });
+  });
+});
+
+describe('quota angolare (CP6g): arco a segmenti, frecce, linee di estensione, badge', () => {
+  const DEGR = Math.PI / 180;
+  const V: SheetPoint = { x: 200, y: 300 };
+  /** Direzione sul foglio (Y in giu') a `deg` gradi sopra l'asse X, cioe' il verso antiorario che si vede. */
+  const dir = (deg: number): SheetPoint => ({ x: Math.cos(deg * DEGR), y: -Math.sin(deg * DEGR) });
+  const along = (u: SheetPoint, d: number, from: SheetPoint = V): SheetPoint => ({ x: from.x + u.x * d, y: from.y + u.y * d });
+  const GAP = 0.25 * SIZE; // EXT_GAP_EM
+  const OVER = 0.4 * SIZE; // EXT_OVERSHOOT_EM
+  const LEN = Math.max(ARROW_LEN_EM * SIZE, 3 * 1); // lunghezza della freccia: 0.8 x corpo = 8
+  /** Quota angolare con vertice V, lato 1 a 0 gradi a distanza r1, lato 2 a `theta` gradi a distanza r2, raggio R. */
+  const spec = (g: PageGeometry, theta: number, r1: number, r2: number, R: number, extra: Partial<DimSpec> = {}): DimSpec => dimSpec(g, 'angular', [V, along(dir(0), r1), along(dir(theta), r2), along(dir(theta / 2), R)], extra);
+  const dist = (a: SheetPoint, b: SheetPoint): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+  it('arco: polilinea dal lato 1 al lato 2 di raggio R, estremi esatti, e nessuna linea di estensione se i lati toccano l\'arco', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      const l = layoutDimension(spec(g, 45, 80, 80, 80), g, '45.00°');
+      expect(l.lines).toHaveLength(1);
+      const arc = l.lines[0]!.pts;
+      near(arc[0]!, along(dir(0), 80), 6);
+      near(arc.at(-1)!, along(dir(45), 80), 6);
+      for (const p of arc) expect(dist(p, V)).toBeCloseTo(80, 6);
+      expect(arc.length).toBeGreaterThan(20); // 45 gradi a passi di 2 gradi al massimo
+      expect(l.lines[0]!.widthPt).toBe(1);
+      expect(l.lines[0]!.color).toBe(RED);
+    }
+  });
+
+  it('frecce: la punta sull\'estremo dell\'arco e il corpo lungo la tangente, verso l\'interno se l\'arco e\' lungo abbastanza', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      const l = layoutDimension(spec(g, 45, 80, 80, 80), g, '45.00°');
+      expect(l.arrows).toHaveLength(2);
+      const [a1, a2] = l.arrows as [Layout['arrows'][number], Layout['arrows'][number]];
+      near(a1.pts[0], along(dir(0), 80), 6);
+      near(a2.pts[0], along(dir(45), 80), 6);
+      // direzione interna calcolata in modo indipendente: la componente di u2 perpendicolare a u1 (e viceversa)
+      const u1 = dir(0);
+      const u2 = dir(45);
+      const k = u1.x * u2.x + u1.y * u2.y;
+      const in1 = unit({ x: u2.x - k * u1.x, y: u2.y - k * u1.y });
+      const in2 = unit({ x: u1.x - k * u2.x, y: u1.y - k * u2.y });
+      const mid = (a: Layout['arrows'][number]): SheetPoint => ({ x: (a.pts[1].x + a.pts[2].x) / 2, y: (a.pts[1].y + a.pts[2].y) / 2 });
+      near(mid(a1), along(in1, LEN, a1.pts[0]), 6);
+      near(mid(a2), along(in2, LEN, a2.pts[0]), 6);
+      // la base e' perpendicolare alla tangente, cioe' radiale, e larga 2 x (lunghezza / 6)
+      expect(dist(a1.pts[1], a1.pts[2])).toBeCloseTo((2 * LEN) / 6, 9);
+    }
+  });
+
+  it('arco corto (meno di 2.5 frecce): le frecce vanno fuori, lungo la tangente, dalla parte opposta', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const l = layoutDimension(spec(g, 5, 80, 80, 80), g, '5.00°'); // arco di 7 pt < 2.5 x 8
+    const u1 = dir(0);
+    const u2 = dir(5);
+    const k = u1.x * u2.x + u1.y * u2.y;
+    const in1 = unit({ x: u2.x - k * u1.x, y: u2.y - k * u1.y });
+    const in2 = unit({ x: u1.x - k * u2.x, y: u1.y - k * u2.y });
+    const [a1, a2] = l.arrows as [Layout['arrows'][number], Layout['arrows'][number]];
+    const mid = (a: Layout['arrows'][number]): SheetPoint => ({ x: (a.pts[1].x + a.pts[2].x) / 2, y: (a.pts[1].y + a.pts[2].y) / 2 });
+    near(mid(a1), along(in1, -LEN, a1.pts[0]), 6);
+    near(mid(a2), along(in2, -LEN, a2.pts[0]), 6);
+    // al limite: l'arco lungo esattamente 2.5 frecce sta dentro, appena meno fuori
+    const R = 100;
+    const edge = (2.5 * LEN) / R / DEGR; // gradi
+    const inside = layoutDimension(spec(g, edge * 1.001, R, R, R), g, 'x');
+    const outside = layoutDimension(spec(g, edge * 0.999, R, R, R), g, 'x');
+    const body = (ly: Layout): number => (ly.arrows[0]!.pts[1].y + ly.arrows[0]!.pts[2].y) / 2 - ly.arrows[0]!.pts[0].y; // sul lato 1 (a 0 gradi) la tangente e' verticale
+    expect(body(inside)).toBeLessThan(-LEN / 2); // verso l'arco, cioe' in su
+    expect(body(outside)).toBeGreaterThan(LEN / 2);
+  });
+
+  it('linee di estensione: solo dove il lato non arriva all\'arco, sottili, con lo stesso stacco e la stessa sporgenza delle lineari', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const R = 80;
+    // lato 1 oltre l'arco (120): torna indietro dal punto verso l'arco; lato 2 sull'arco (80): nessuna
+    let l = layoutDimension(spec(g, 45, 120, 80, R), g, '45.00°');
+    expect(l.lines).toHaveLength(2);
+    near(l.lines[1]!.pts[0]!, along(dir(0), 120 - GAP), 6);
+    near(l.lines[1]!.pts[1]!, along(dir(0), R - OVER), 6);
+    expect(l.lines[1]!.widthPt).toBeLessThan(l.lines[0]!.widthPt);
+    expect(l.lines[1]!.widthPt).toBeCloseTo(0.5, 9);
+    // lato 1 prima dell'arco (40): va dal punto verso l'arco e lo supera
+    l = layoutDimension(spec(g, 45, 40, 80, R), g, '45.00°');
+    expect(l.lines).toHaveLength(2);
+    near(l.lines[1]!.pts[0]!, along(dir(0), 40 + GAP), 6);
+    near(l.lines[1]!.pts[1]!, along(dir(0), R + OVER), 6);
+    // entrambi i lati corti: due linee
+    l = layoutDimension(spec(g, 45, 40, 30, R), g, '45.00°');
+    expect(l.lines).toHaveLength(3);
+    near(l.lines[2]!.pts[0]!, along(dir(45), 30 + GAP), 6);
+    near(l.lines[2]!.pts[1]!, along(dir(45), R + OVER), 6);
+    // a meno dello stacco dall'arco: niente (come le lineari)
+    l = layoutDimension(spec(g, 45, R - GAP + 0.01, R + GAP - 0.01, R), g, '45.00°');
+    expect(l.lines).toHaveLength(1);
+    // il punto a 1 pt dal vertice (lato dall'altra parte): la linea parte vicino al vertice
+    l = layoutDimension(spec(g, 45, 1, 1, R), g, '45.00°');
+    expect(l.lines).toHaveLength(3);
+    near(l.lines[1]!.pts[0]!, along(dir(0), 1 + GAP), 6);
+    // la hit comprende arco, linee di estensione e badge
+    expect(l.hit.lines).toHaveLength(3);
+    expect(l.hit.rects).toHaveLength(1);
+  });
+
+  it('badge: sul prolungamento della bisettrice, fuori dall\'arco, senza coprire le punte delle frecce; il testo e\' quello dato', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      for (const theta of [10, 45, 90, 135, 170]) {
+        const l = layoutDimension(spec(g, theta, 80, 80, 80), g, `${theta}.00°`);
+        const m = dir(theta / 2);
+        const box = l.boxes[0]!.rect;
+        const centre = rectCenter(box);
+        const w = { x: centre.x - V.x, y: centre.y - V.y };
+        expect(w.x * m.y - w.y * m.x).toBeCloseTo(0, 6); // sulla bisettrice
+        // l'angolo del riquadro piu' vicino al vertice e' oltre l'arco (con lo stacco): il riquadro sta tutto fuori dalla circonferenza
+        const corners = [
+          { x: box.x, y: box.y },
+          { x: box.x + box.w, y: box.y },
+          { x: box.x, y: box.y + box.h },
+          { x: box.x + box.w, y: box.y + box.h },
+        ];
+        expect(Math.min(...corners.map((p) => dist(p, V))) + 1e-9).toBeGreaterThanOrEqual(80);
+        // e il centro e' piu' lontano del punto di mezzo dell'arco
+        expect(Math.hypot(w.x, w.y)).toBeGreaterThan(80 + LABEL_PAD_EM * SIZE);
+        for (const a of l.arrows) {
+          const tip = a.pts[0];
+          expect(tip.x > box.x && tip.x < box.x + box.w && tip.y > box.y && tip.y < box.y + box.h, `theta ${theta}`).toBe(false);
+        }
+        expect(l.texts).toHaveLength(1);
+        expect(l.texts[0]!.text).toBe(`${theta}.00°`);
+        expect(box.w).toBeCloseTo(textWidthPt(`${theta}.00°`, SIZE) + 2 * LABEL_PAD_EM * SIZE, 9);
+        // il testo sta dentro il riquadro
+        expect(l.texts[0]!.x).toBeGreaterThan(box.x);
+        expect(l.texts[0]!.x + textWidthPt(l.texts[0]!.text, SIZE)).toBeLessThan(box.x + box.w);
+      }
+    }
+  });
+
+  it('hit: l\'arco (distanza 0 sui punti dell\'arco), le linee di estensione e il badge; fuori da tutto la distanza e\' quella vera', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const l = layoutDimension(spec(g, 60, 40, 80, 80), g, '60.00°');
+    for (const p of l.lines[0]!.pts) expect(distToShape(p, l.hit)).toBeCloseTo(0, 9);
+    expect(distToShape(rectCenter(l.boxes[0]!.rect), l.hit)).toBe(0);
+    expect(distToShape(along(dir(0), 60), l.hit)).toBeCloseTo(0, 9); // sulla linea di estensione
+    expect(distToShape(along(dir(150), 60), l.hit)).toBeGreaterThan(20); // fuori dal settore
+    expect(distToShape(V, l.hit)).toBeGreaterThan(30); // il vertice non e' sull'oggetto
+  });
+
+  it('lo specchio: il layout della quota specchiata e\' lo specchio del layout (stesso arco, frecce e badge dall\'altra parte)', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const flip = (p: SheetPoint): SheetPoint => ({ x: 2 * V.x - p.x, y: p.y });
+    const a = layoutDimension(spec(g, 70, 100, 60, 80), g, '70.00°');
+    const mirrored = dimSpec(g, 'angular', [V, flip(along(dir(0), 100)), flip(along(dir(70), 60)), flip(along(dir(35), 80))]);
+    const b = layoutDimension(mirrored, g, '70.00°');
+    expect(b.lines.length).toBe(a.lines.length);
+    b.lines.forEach((ln, i) => {
+      expect(ln.pts.length).toBe(a.lines[i]!.pts.length);
+      ln.pts.forEach((p, k) => near(p, flip(a.lines[i]!.pts[k]!), 6));
+    });
+    b.arrows.forEach((ar, i) => ar.pts.forEach((p, k) => near(p, flip(a.arrows[i]!.pts[k]!), 6)));
+    near(rectCenter(b.boxes[0]!.rect), flip(rectCenter(a.boxes[0]!.rect)), 6);
+  });
+
+  it('179.99 gradi e 0.01 gradi: il layout si costruisce (bisettrice stabile) e il badge sta sulla bisettrice', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    for (const theta of [0.01, 179.99]) {
+      const l = layoutDimension(spec(g, theta, 80, 80, 80), g, `${theta}`);
+      const m = dir(theta / 2);
+      const centre = rectCenter(l.boxes[0]!.rect);
+      expect((centre.x - V.x) * m.y - (centre.y - V.y) * m.x, `theta ${theta}`).toBeCloseTo(0, 5);
+      expect(l.lines[0]!.pts.length).toBeGreaterThanOrEqual(2);
+      expect(l.lines[0]!.pts.length).toBeLessThanOrEqual(2001);
+    }
+  });
+
+  it('esportazione: il testo "45.00°" esce una volta, dritto sul foglio, con il corpo in unita\' utente', () => {
+    for (const c of CASES) {
+      const g = geomOf(c);
+      const l = layoutDimension(spec(g, 45, 80, 80, 80), g, '45.00°');
+      const runs = exportRuns(l, g);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.text).toBe('45.00°');
+      expect(runs[0]!.size).toBeCloseTo(SIZE / c.userUnit, 9);
+      expect(runs[0]!.angleDeg).toBe(g.uprightAngleDeg);
+    }
+  });
+
+  it('punti che non danno un angolo (non succede): solo il badge sul vertice, senza eccezioni', () => {
+    const g = geomOf({ rotate: 0, userUnit: 1 });
+    const ok = spec(g, 45, 80, 80, 80);
+    const l = layoutDimension({ ...ok, p1: ok.a }, g, '??');
+    expect(l.lines).toHaveLength(0);
+    expect(l.arrows).toHaveLength(0);
+    expect(l.boxes).toHaveLength(1);
+    expect(l.texts).toHaveLength(1);
   });
 });

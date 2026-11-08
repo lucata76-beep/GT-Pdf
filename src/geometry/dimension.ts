@@ -3,19 +3,21 @@
 // due punti (decisione 8: Ø = due punti sul diametro, R = centro + punto sul bordo; la geometria del PDF si indica con punti).
 // Orizzontale e verticale sono quelle che si VEDONO sul foglio (con /Rotate): si calcola nel foglio e si riporta nello
 // spazio utente, dove l'oggetto e' salvato (stessa regola dell'ortogonale).
+// Quota angolare (CP6g): l'angolo fra due lati, in gradi decimali; gli stessi quattro punti, con un altro significato (vedi `geometry/angular`). Non dipende dalla scala.
+import { type AngularPoints, angleDegrees, angularFromPoints } from './angular';
 import { fmt } from './numbers';
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
 import { type PageScale, realMm } from './scale';
 
-export type DimType = 'aligned' | 'horizontal' | 'vertical' | 'diameter' | 'radius';
+export type DimType = 'aligned' | 'horizontal' | 'vertical' | 'diameter' | 'radius' | 'angular';
 
 export interface DimTypeInfo {
   id: DimType;
   label: string;
   /** Etichetta breve per i pulsanti stretti. */
   short: string;
-  /** Punti da indicare: 3 per le lineari (due punti + posizione della linea di quota), 2 per Ø e R. */
-  points: 2 | 3;
+  /** Punti da indicare: 3 per le lineari (due punti + posizione della linea di quota), 2 per Ø e R, 4 per l'angolare "da tre punti" (vertice, un punto per lato, raggio dell'arco). */
+  points: 2 | 3 | 4;
   /** Prefisso dell'etichetta: "Ø" solo per il diametro, "R" solo per il raggio (DESIGN.md). */
   prefix: '' | 'Ø' | 'R';
 }
@@ -26,11 +28,15 @@ export const DIM_TYPES: readonly DimTypeInfo[] = [
   { id: 'vertical', label: 'Quota verticale', short: 'Vert.', points: 3, prefix: '' },
   { id: 'diameter', label: 'Quota diametro Ø', short: 'Ø Diam.', points: 2, prefix: 'Ø' },
   { id: 'radius', label: 'Quota raggio R', short: 'R Raggio', points: 2, prefix: 'R' },
+  { id: 'angular', label: 'Quota angolare', short: 'Angolare', points: 4, prefix: '' },
 ];
 
 export const dimInfo = (t: DimType): DimTypeInfo => DIM_TYPES.find((d) => d.id === t) as DimTypeInfo;
 
-/** Definizione geometrica di una quota, nello spazio utente PDF. */
+/**
+ * Definizione geometrica di una quota, nello spazio utente PDF.
+ * Angolare: `a` e' il vertice, `p1` e `p2` sono un punto su ciascuna semiretta dei due lati e `b` il punto di mezzo dell'arco (sulla bisettrice, a distanza R dal vertice).
+ */
 export interface DimensionDef {
   dim: DimType;
   /** Punti misurati: origini delle linee di estensione (lineari), estremi del diametro, centro e punto sul bordo (R). */
@@ -48,10 +54,16 @@ const dist = (a: SheetPoint, b: SheetPoint): number => Math.hypot(b.x - a.x, b.y
 /**
  * Costruisce la quota dai punti indicati (3 per le lineari, 2 per Ø e R). Null se la quota e' degenere:
  * punti coincidenti, o orizzontale/verticale con i due punti alla stessa quota.
+ * Angolare: 4 punti nell'ordine vertice, punto sul primo lato, punto sul secondo lato, punto che fissa il raggio (la modalita' "da tre punti"); la modalita' "da due linee"
+ * passa da `angularFromLines`. Null anche per lati sulla stessa retta o punti sul vertice.
  */
 export function buildDimension(dim: DimType, pts: readonly UserPoint[], geom: PageGeometry): DimensionDef | null {
   const need = dimInfo(dim).points;
   if (pts.length < need) return null;
+  if (dim === 'angular') {
+    const r = angularFromPoints(pts[0] as UserPoint, pts[1] as UserPoint, pts[2] as UserPoint, pts[3] as UserPoint, geom);
+    return r.ok ? { dim, ...r.points } : null;
+  }
   const p1 = pts[0] as UserPoint;
   const p2 = pts[1] as UserPoint;
   const s1 = geom.userToSheet(p1);
@@ -95,16 +107,30 @@ export const AUTO_DECIMALS = 2;
 /** Testo del valore automatico: prefisso + mm reali con "." e 2 decimali, senza unita' ("100.00", "Ø25.40", "R12.50"). */
 export const autoText = (dim: DimType, mm: number): string => `${dimInfo(dim).prefix}${fmt(mm, AUTO_DECIMALS)}`;
 
-/** Etichetta automatica dalla scala della pagina; null se la pagina non e' calibrata (senza scala non c'e' un valore reale). */
-export function autoLabel(def: Pick<DimensionDef, 'dim' | 'p1' | 'p2'>, geom: PageGeometry, scale: PageScale | null): string | null {
+/** Testo del valore automatico di una quota angolare: gradi decimali con "." e 2 decimali, con il simbolo ("45.00°"). Il simbolo ° e' in Helvetica/WinAnsi (codice 176). */
+export const angleText = (deg: number): string => `${fmt(deg, AUTO_DECIMALS)}°`;
+
+/** I punti di una quota che bastano al valore automatico; `a` e `b` servono solo all'angolare (vertice e raggio). */
+type MeasuredDef = Pick<DimensionDef, 'dim' | 'p1' | 'p2'> & Partial<Pick<DimensionDef, 'a' | 'b'>>;
+
+/**
+ * Etichetta automatica. Lineari, Ø e R: dalla scala della pagina, null se la pagina non e' calibrata (senza scala non c'e' un valore reale).
+ * Angolare: l'angolo in gradi, calcolato nel foglio mostrato, SENZA bisogno della scala (mai null per una quota valida).
+ */
+export function autoLabel(def: MeasuredDef, geom: PageGeometry, scale: PageScale | null): string | null {
+  if (def.dim === 'angular') {
+    if (!def.a || !def.b) return null;
+    const deg = angleDegrees(def as AngularPoints, geom);
+    return deg === null ? null : angleText(deg);
+  }
   if (!scale) return null;
   return autoText(def.dim, realMm(measuredPt(def, geom), scale));
 }
 
 /**
- * Etichetta mostrata: il testo digitato (`valueText`), altrimenti quello automatico. Null = automatica senza scala.
+ * Etichetta mostrata: il testo digitato (`valueText`), altrimenti quello automatico. Null = automatica senza scala (mai per l'angolare).
  * Un testo automatico segue le ricalibrazioni successive della pagina.
  */
-export function dimensionLabel(def: Pick<DimensionDef, 'dim' | 'p1' | 'p2'> & { valueText: string | null }, geom: PageGeometry, scale: PageScale | null): string | null {
+export function dimensionLabel(def: MeasuredDef & { valueText: string | null }, geom: PageGeometry, scale: PageScale | null): string | null {
   return def.valueText !== null ? def.valueText : autoLabel(def, geom, scale);
 }
