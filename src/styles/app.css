@@ -1543,6 +1543,20 @@ body.app-mode {
   min-height: var(--hit);
   font-size: 0.75rem;
 }
+/* Tipi di quota: sei pulsanti in una riga (CP6g ha aggiunto "Angolare"). Dopo CP6g la riga usciva dallo schermo con A+ alto: il gruppo non si restringeva (il suo minimo era la
+   somma delle parole) e le parole sono larghe 4,14 em ("Allineata"), 4,22 ("R Raggio") e 4,31 ("Angolare") in Inter 500. Qui il gruppo puo' restringersi (min-width: 0), lo spazio
+   fra i pulsanti e il margine interno sono piu' piccoli e le etichette stanno su una riga con la lettera che si restringe SOLO se la parola piu' larga non entrerebbe nel
+   pulsante: spazio per pulsante = (larghezza - 2 margini - 5 spazi) / 6, meno i bordi (2 px) e il margine interno; il divisore 4,4 e' la parola piu' larga (4,31 em) con il 2% di
+   scorta. Con la lettera normale (0,75 rem) basta fino a un certo punto; oltre la lettera scende quanto serve. L'altezza non cambia: min-height e' dei pulsanti, non del testo. */
+.ctx-types {
+  min-width: 0;
+  gap: 0.125rem;
+}
+.ctx-types .seg-btn {
+  padding-inline: 0.0625rem;
+  white-space: nowrap;
+  font-size: min(0.75rem, calc(((100vw - 2 * var(--margin) - 5 * 0.125rem) / 6 - 2px - 2 * 0.0625rem) / 4.4));
+}
 .ctx-aa {
   font: 600 0.875rem/1 var(--font-ui);
 }
