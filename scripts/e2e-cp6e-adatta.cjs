@@ -108,7 +108,8 @@ async function positionSuite(browser) {
       await page.evaluate((x) => document.querySelector(`.palette button.tool[title="${x}"]`).click(), t);
       await page.waitForTimeout(60);
       const r = await page.evaluate((x) => { const e = document.querySelector(`.palette button.tool[title="${x}"]`).getBoundingClientRect(); return { l: e.left, t: e.top, r: e.right, b: e.bottom }; }, t);
-      if (!inside(r, await pal()) || intersects(r, await btn())) bad.push(t);
+      const bb = await btn();
+      if (!bb || !inside(r, await pal()) || intersects(r, bb)) bad.push(t); // senza il pulsante la prova non vale: fallisce
     }
     check(`${tag}: scegliendo ognuno degli ${titles.length} strumenti (clic dal codice: il browser non lo porta in vista da solo) resta tutto in vista e non finisce sotto il pulsante`, bad.length === 0, bad.join(', '));
     await ctx.close();
