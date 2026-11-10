@@ -1,6 +1,18 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo.
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7a: consegnata, non ancora provata dall'utente).
+
+## Provare CP7a sul PC (Diagnostica geometria PDF)
+
+Sul PC con il mouse. È una **misura**: non cambia nulla nell'editor e non c'è ancora nessuno snap sulla geometria del PDF (V3.1 e V3.2 vengono dopo, con i tuoi numeri). Per ogni punto rispondi con la risposta predefinita (in **grassetto**) oppure dici che cosa cambieresti.
+
+1. **Aprire la scheda.** Menu *File > Diagnostica*: sotto la scheda «PDF e visualizzazione» c'è la scheda **Geometria PDF**. Con *Apri PDF…* (nella scheda «PDF e visualizzazione») apri un tuo PDF **vettoriale** (un disegno, non una scansione). La misura **non parte da sola**.
+2. **Misurare una pagina.** Premi *Misura questa pagina* (è la pagina mostrata dal visore): compare «Misura in corso…» e poi il **dettaglio**: classe della pagina, percorsi, segmenti, cerchi, livelli, tempi. Risposta: **compare il dettaglio e la pagina resta usabile** / no (scrivi dove si ferma).
+3. **Copiare la misura.** Premi *Copia misura* e incolla il testo in chat. Contiene versione dell'app e di PDF.js, pagina, Rotate, dimensioni e UserUnit e solo numeri: **non** il nome del file, né testi, né nomi dei livelli, né titolo, autore o produttore del documento. *Copia registro* (più in basso nella stessa pagina) invece **include il nome del file**. Se la copia non riesce, il testo compare in un'area già selezionata: copialo da lì. Risposta: **copiato** / no.
+4. **Una scansione e un PDF con più pagine o livelli.** Ripeti con una **scansione** (deve dire classe «scansione» e 0 percorsi) e con un PDF **con più pagine** (*Misura tutte le pagine*: una riga per pagina, poi scegli la pagina del dettaglio) o con **livelli** (il dettaglio dice quanti gruppi e quanti spenti). Risposta: **coerente con quello che vedi nel tuo lettore** / no (dimmi che cosa non torna).
+5. **Un PDF grande o fitto.** Se ne hai uno con moltissimi tratti (una mappa, un disegno molto denso), provalo: dice quanto ci mette e, se supera il limite di sicurezza (10.000.000 di numeri letti dai percorsi), lo scrive e riporta quanto ha letto. Risposta: **un risultato e nessun blocco** / no (dimmi quanto ci ha messo e se la pagina si è bloccata).
+
+Che cosa **non** è stato provato: il tuo browser e il tuo sistema (tutte le prove sono su Chromium in un contenitore Linux, con un PDF alla volta e PDF di prova fittizi), Safari e iPhone (la memoria e i tempi su iPhone non sono misurati: i numeri di Chromium non valgono per l'iPhone), qualunque PDF reale, come altri programmi (AutoCAD, SolidWorks e simili) scrivono cerchi, archi e livelli, i pattern, i Type3 e le sfumature (non letti), le scansioni con JBIG2 o JPEG 2000.
 
 ## Provare CP6h sul PC (Raccordo)
 
