@@ -2,7 +2,6 @@
 // I PDF sintetici sono generati qui con @cantoo/pdf-lib (operatori scritti a mano) e letti con PDF.js, un altro lettore: i valori attesi si calcolano QUI con un
 // calcolo indipendente dal codice dell'estrattore. Tolleranza sulle coordinate: 1e-4 pt (PDF.js tiene i percorsi in Float32: errore misurato 1.5e-5 pt su A4).
 // Niente file nuovi in public/: i 7 PDF di prova sono quelli di public/test-pdfs.
-import { PDFDocument, PDFName, PDFString } from '@cantoo/pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +23,7 @@ import {
   extractGeometry,
   lengthBucket,
 } from './geometry';
+import { makePdf } from './geometryTestUtils';
 
 const OPS = pdfjs.OPS as unknown as Record<string, number>;
 /** I 7 PDF di public/test-pdfs. Il progetto non ha i tipi di Node (nessun @types/node): il modulo si carica con un nome in variabile (come src/geometry/snap.test.ts). */
@@ -37,73 +37,6 @@ const near = (a: number, b: number, tol = TOL): boolean => Math.abs(a - b) <= to
 const MM = 72 / 25.4;
 const A4: [number, number] = [595.276, 841.89];
 const A3L: [number, number] = [1190.551, 841.89];
-
-// ------------------------------------------------------------------ PDF sintetici
-interface FormSpec {
-  content: string;
-  matrix?: number[];
-  bbox?: number[];
-  /** nome nella risorsa XObject della form -> chiave di un'altra form */
-  uses?: Record<string, string>;
-}
-interface PdfSpec {
-  content: string;
-  mediabox?: [number, number];
-  rotate?: number;
-  ocgs?: { key: string; name: string; on: boolean }[];
-  ocmds?: { key: string; groups: string[]; policy?: string }[];
-  forms?: Record<string, FormSpec>;
-}
-async function makePdf(spec: PdfSpec): Promise<Uint8Array> {
-  const doc = await PDFDocument.create({ updateMetadata: false });
-  const page = doc.addPage(spec.mediabox ?? [600, 800]);
-  const ctx = doc.context;
-  const res: Record<string, unknown> = {};
-  if (spec.ocgs) {
-    const props: Record<string, unknown> = {};
-    const refs: unknown[] = [];
-    const on: unknown[] = [];
-    const off: unknown[] = [];
-    for (const g of spec.ocgs) {
-      const ref = ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of(g.name) }));
-      refs.push(ref);
-      (g.on ? on : off).push(ref);
-      props[g.key] = ref;
-    }
-    for (const m of spec.ocmds ?? []) {
-      const d: Record<string, unknown> = { Type: 'OCMD', OCGs: m.groups.map((k) => props[k]) };
-      if (m.policy) d['P'] = PDFName.of(m.policy);
-      props[m.key] = ctx.register(ctx.obj(d as never));
-    }
-    doc.catalog.set(PDFName.of('OCProperties'), ctx.obj({ OCGs: refs, D: { Order: refs, ON: on, OFF: off } } as never));
-    res['Properties'] = props;
-  }
-  if (spec.forms) {
-    const made = new Map<string, unknown>();
-    const mk = (key: string): unknown => {
-      const hit = made.get(key);
-      if (hit) return hit;
-      const f = spec.forms![key]!;
-      const d: Record<string, unknown> = { Type: 'XObject', Subtype: 'Form', BBox: f.bbox ?? [0, 0, 600, 800] };
-      if (f.matrix) d['Matrix'] = f.matrix;
-      if (f.uses) {
-        const xo: Record<string, unknown> = {};
-        for (const [name, k] of Object.entries(f.uses)) xo[name] = mk(k);
-        d['Resources'] = ctx.obj({ XObject: xo } as never);
-      }
-      const ref = ctx.register(ctx.stream(f.content, d as never));
-      made.set(key, ref);
-      return ref;
-    };
-    const xo: Record<string, unknown> = {};
-    for (const k of Object.keys(spec.forms)) xo[k] = mk(k);
-    res['XObject'] = xo;
-  }
-  page.node.set(PDFName.of('Resources'), ctx.obj(res as never));
-  page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(spec.content)));
-  if (spec.rotate) page.node.set(PDFName.of('Rotate'), ctx.obj(spec.rotate));
-  return doc.save({ useObjectStreams: false });
-}
 
 // ------------------------------------------------------------------ lettura con PDF.js
 const tasks: { destroy(): Promise<void> }[] = [];
