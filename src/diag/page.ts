@@ -10,6 +10,7 @@ import { type ProbeResult, type Tier, probeTier, savedResults, takeInterrupted, 
 import { type Row, environmentRows, featureRows } from './env';
 import { clearLog, errText, log, logText, onLog } from './log';
 import { PDF_NAME, copyText, downloadFile, openBlob, shareFile, sleep } from './share';
+import { geometryCard } from './geometryCard';
 import { menuTestCard } from './menuTest';
 import { makeDiagPdf } from './testPdf';
 
@@ -92,12 +93,16 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
   prevBtn.addEventListener('click', () => void showPage(pageNo - 1));
   nextBtn.addEventListener('click', () => void showPage(pageNo + 1));
 
+  // Scheda "Geometria PDF" (V3.0, CP7a): misura il PDF aperto qui; i dati letti appartengono al documento corrente.
+  const geometry = geometryCard(card, { pdf: () => pdf, pageNo: () => pageNo });
+
   const loadPdf = async (name: string, bytes: Uint8Array): Promise<void> => {
     log(`Apertura "${name}" (${kb(bytes.length)})`);
     try {
       const next = await openPdf(name, bytes);
       const prev = pdf;
       pdf = next;
+      geometry.reset();
       if (prev) await closePdf(prev);
       const rows: Row[] = [
         { label: 'File', value: name },
@@ -365,7 +370,7 @@ export function mountDiagPage(root: HTMLElement, back: () => void): void {
     logEl,
   );
 
-  root.replaceChildren(topbar, h('main', null, pdfCard, menuTestCard(card), canvasCard, shareCard, envCard, logCard));
+  root.replaceChildren(topbar, h('main', null, pdfCard, geometry.el, menuTestCard(card), canvasCard, shareCard, envCard, logCard));
   log(`Avvio GT-Pdf ${__BUILD_ID__} (diagnostica)`);
   log(`User agent: ${navigator.userAgent}`);
   log(`DPR ${window.devicePixelRatio}, schermo ${screen.width}x${screen.height}, finestra ${window.innerWidth}x${window.innerHeight}`);

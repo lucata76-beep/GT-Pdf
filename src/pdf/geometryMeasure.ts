@@ -231,7 +231,7 @@ export function measureLines(m: PageMeasure, layers: DocLayers | null): string[]
   ] as const) {
     const b = x.closedCubicOnly;
     lines.push(`sottopercorsi chiusi di sole cubiche, ${label}, per numero di cubiche: 1: ${n0(b[0]!)} · 2: ${n0(b[1]!)} · 3: ${n0(b[2]!)} · 4: ${n0(b[3]!)} · 5-8: ${n0(b[4]!)} · oltre 8: ${n0(b[5]!)}`);
-    lines.push(`di 4 cubiche che rispettano la regola del cerchio, ${label}: ${n0(x.circles4)} (scostamento massimo ${fmtTrim(x.circles4MaxDev, 5)} pt)`);
+    lines.push(`di 4 cubiche che rispettano la regola del cerchio, ${label}: ${n0(x.circles4)} (scostamento massimo ${fmtTrim(x.circles4MaxDev, 6)} pt)`);
     lines.push(`poligoni fitti (chiusi, almeno 12 lineTo, nessuna cubica), ${label}: ${n0(x.denseClosedPolygons)}`);
     lines.push(`cubiche in sottopercorsi aperti, ${label}: ${n0(x.cubicsInOpen)}`);
     lines.push(`sottopercorsi chiusi solo per coincidenza dell'ultimo punto (senza chiusura), ${label}: ${n0(x.closedByCoincidence)}`);

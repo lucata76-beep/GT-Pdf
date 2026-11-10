@@ -354,3 +354,24 @@ dl.data dd {
   white-space: pre;
   overflow: auto;
 }
+
+/* ---- Scheda "Geometria PDF" (CP7a): nessuno scorrimento orizzontale della pagina a 390 px ---- */
+.geo-card .stats {
+  overflow-wrap: anywhere;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+.geo-card .geo-picker-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--gutter);
+  align-items: center;
+  font-size: 0.75rem;
+}
+.geo-card .geo-picker {
+  max-width: 100%;
+  min-width: 0;
+}
+.geo-card .geo-fallback {
+  min-height: 8rem;
+}
