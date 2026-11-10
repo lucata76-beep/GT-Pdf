@@ -164,7 +164,8 @@ export function geometryCard(card: (title: string, open: boolean, ...body: Child
       if (isAll) r.skipped = to < pdf.pages.length ? pdf.pages.length - to : 0;
       render();
       const secs = (performance.now() - t0) / 1000;
-      status.textContent = okCount > 0 ? `Misurate ${okCount} ${okCount === 1 ? 'pagina' : 'pagine'} in ${secs.toFixed(2)} s. Il dettaglio qui sotto si copia con "Copia misura".` : 'Nessuna pagina misurata (vedi l\'errore sopra e il registro).';
+      status.textContent =
+        okCount > 0 ? `${okCount === 1 ? 'Misurata 1 pagina' : `Misurate ${okCount} pagine`} in ${secs.toFixed(2)} s. Il dettaglio qui sotto si copia con "Copia misura".` : 'Nessuna pagina misurata (vedi l\'errore sopra e il registro).';
     } catch (e) {
       showWarn(`Misura fallita: ${errText(e)}`);
       log(`Misura geometria fallita: ${errText(e)}`, 'err');
