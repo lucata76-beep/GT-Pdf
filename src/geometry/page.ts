@@ -5,7 +5,7 @@
 // - Foglio ("sheet"): pt fisici (1/72 in) della pagina MOSTRATA, origine in alto a sinistra, Y verso il basso,
 //   con /Rotate, CropBox e UserUnit applicati. Corrisponde al viewport a scala 1 di PDF.js.
 //
-// Le formule replicano PageViewport di PDF.js (pdfjs-dist 6.4.299, src/display/page_viewport.js); un test le confronta
+// Le formule replicano PageViewport di PDF.js (pdfjs-dist 6.5.438, src/display/page_viewport.js; il codice di `PageViewport` e `page_viewport.d.ts` sono identici a quelli di 6.4.299, riletti in CP6i); un test le confronta
 // con PageViewport per tutte le rotazioni.
 
 export interface Pt {

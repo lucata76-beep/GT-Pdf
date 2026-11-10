@@ -2,9 +2,9 @@
 // dell'app (`model/scene`, pittore `export/paint`), poi JPEG o PNG dal canvas. Una pagina per volta; il canvas si rilascia sempre
 // (width = height = 1) anche in caso di errore.
 //
-// Opzioni di PDF.js (documentazione: pdfjs-dist 6.4.299, `types/src/display/api.d.ts`, `RenderParameters`):
+// Opzioni di PDF.js (documentazione: pdfjs-dist 6.5.438, `types/src/display/api.d.ts`, `RenderParameters`; riletta in CP6i: rispetto a 6.4.299 si e' aggiunta solo la proprieta' facoltativa `partialFrames`):
 //  - `annotationMode: AnnotationMode.ENABLE` (e' il valore predefinito, lo stesso dell'app): "includes all possible annotations (thus it
-//    also depends on the intent)"; con `intent` 'display' (predefinito). Provato in Chromium (PDF.js 6.4.299) su un PDF con campo di testo,
+//    also depends on the intent)"; con `intent` 'display' (predefinito). Provato in Chromium (PDF.js 6.4.299; riprovato in CP6i con 6.5.438: stessa resa pixel per pixel in ENABLE, ENABLE_FORMS, DISABLE e 'print') su un PDF con campo di testo,
 //    casella, collegamento con bordo rosso e timbro: ENABLE disegna campo, casella e timbro, NON disegna il collegamento (nemmeno con
 //    bordo); ENABLE_FORMS non disegna il campo di testo; DISABLE non disegna nulla; 'print' non cambia. Si usa ENABLE perche' l'immagine
 //    deve essere quella che si vede nell'app.

@@ -2,8 +2,10 @@
 // Servono per scansioni JBIG2/JPEG2000 e per i PDF con font non incorporati.
 // I file LICENSE_* delle librerie incluse restano accanto agli asset.
 // Esclusi: cmaps/ (CJK). Aggiungerli solo se un PDF lo richiede.
-// Esclusi anche wasm/quickjs-eval.js e quickjs-eval.wasm: servono solo al JavaScript dentro i PDF (`enableScripting`, che l'app non attiva) e il pacchetto
-// non include la licenza di QuickJS accanto ai file: non si distribuisce cio' che non si usa e di cui non si ha il testo di licenza.
+// Esclusi anche wasm/quickjs-eval.js e quickjs-eval.wasm: servono solo al JavaScript dentro i PDF (`enableScripting`, che l'app non attiva): non si
+// distribuisce cio' che non si usa. Da pdfjs-dist 6.5.438 il pacchetto porta accanto ai file anche i testi di licenza di QuickJS (`LICENSE_QUICKJS` e
+// `LICENSE_PDFJS_QUICKJS`, MIT): il filtro (sotto) non li esclude, quindi finiscono nel sito accanto agli altri `LICENSE_*` anche se i due file di QuickJS non
+// ci sono (scelta di CP6i, da confermare: decisione 104 in docs/PIANO.md).
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
