@@ -76,9 +76,9 @@ describe('classe della pagina (regola dichiarata in classifyPage)', () => {
 });
 
 describe('misura di una pagina con PDF.js', () => {
-  it('a4-vettoriale.pdf: classe, conte, tempi, secondo getOperatorList sullo stesso oggetto, heap non disponibile in Node', async () => {
+  it('a4-vettoriale.pdf: classe, conte, tempi, secondo getOperatorList sullo stesso oggetto, heap non disponibile (simulato)', async () => {
     const doc = await open(await loadTestPdf('a4-vettoriale.pdf'));
-    const m = await measureOk(doc);
+    const m = await measureOk(doc, 1, { heapUsed: () => null }); // performance.memory esiste solo in Chromium: qui si simula la sua assenza
     expect(m.pageClass).toBe('vettoriale');
     expect(m.stats.ops.total).toBe(160);
     expect(m.stats.all.paths).toBe(15);
@@ -88,7 +88,7 @@ describe('misura di una pagina con PDF.js', () => {
     expect(m.timings.sameObject).toBe(true);
     expect(m.timings.fresh).toBe(true);
     for (const v of [m.timings.firstMs, m.timings.secondMs, m.timings.extractMs]) expect(v).toBeGreaterThanOrEqual(0);
-    expect(m.heap).toBeNull(); // performance.memory esiste solo in Chromium
+    expect(m.heap).toBeNull();
     expect(m.nPaths).toBe(15);
     expect(m.nLines).toBe(12);
     expect(m.nCubics).toBe(24);
@@ -125,7 +125,7 @@ describe('misura di una pagina con PDF.js', () => {
     expect(m.heap).toEqual({ before: 10 * 1048576, after: 25 * 1048576 });
     const lines = measureLines(m, null);
     expect(lines.some((l) => l.startsWith('heap JS (performance.memory, solo Chromium): prima 10.0 MB, dopo 25.0 MB'))).toBe(true);
-    const none = measureLines(await measureOk(doc), null);
+    const none = measureLines(await measureOk(doc, 1, { heapUsed: () => null }), null);
     expect(none.some((l) => l.endsWith('non disponibile'))).toBe(true);
   });
 
