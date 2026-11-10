@@ -14,7 +14,8 @@ export interface PdfSpec {
   mediabox?: [number, number];
   rotate?: number;
   ocgs?: { key: string; name: string; on: boolean }[];
-  ocmds?: { key: string; groups: string[]; policy?: string }[];
+  /** `ve`: espressione di visibilita' (/VE): [operatore, ...operandi], con operandi = chiavi di gruppi o altre espressioni. */
+  ocmds?: { key: string; groups?: string[]; policy?: string; ve?: unknown[] }[];
   forms?: Record<string, FormSpec>;
   /** Metadati del documento (per provare che non finiscono in "Copia misura"). */
   meta?: { title?: string; author?: string; producer?: string; creator?: string; subject?: string; keywords?: string[] };
@@ -43,9 +44,12 @@ export async function makePdf(spec: PdfSpec): Promise<Uint8Array> {
       (g.on ? on : off).push(ref);
       props[g.key] = ref;
     }
+    const toVe = (e: unknown): unknown => (Array.isArray(e) ? [PDFName.of(String(e[0])), ...e.slice(1).map(toVe)] : props[String(e)]);
     for (const m of spec.ocmds ?? []) {
-      const d: Record<string, unknown> = { Type: 'OCMD', OCGs: m.groups.map((k) => props[k]) };
+      const d: Record<string, unknown> = { Type: 'OCMD' };
+      if (m.groups) d['OCGs'] = m.groups.map((k) => props[k]);
       if (m.policy) d['P'] = PDFName.of(m.policy);
+      if (m.ve) d['VE'] = toVe(m.ve);
       props[m.key] = ctx.register(ctx.obj(d as never));
     }
     doc.catalog.set(PDFName.of('OCProperties'), ctx.obj({ OCGs: refs, D: { Order: refs, ON: on, OFF: off } } as never));

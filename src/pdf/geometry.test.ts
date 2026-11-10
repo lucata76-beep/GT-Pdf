@@ -115,9 +115,11 @@ function circle(cx: number, cy: number, r: number, opts: { ccw?: boolean; kappa?
   return out;
 }
 
+const fixMsg = (what: string): string => `Il formato dell'elenco di operazioni di PDF.js e' cambiato (${what}): aggiornare src/pdf/geometry.ts`;
+
 // ====================================================================================================================================
 describe('sentinella: il formato di PDF.js e i codici copiati (se fallisce: aggiornare src/pdf/geometry.ts)', () => {
-  const fix = (what: string): string => `Il formato dell'elenco di operazioni di PDF.js e' cambiato (${what}): aggiornare src/pdf/geometry.ts`;
+  const fix = fixMsg;
 
   it("un PDF minimo con un percorso noto dà esattamente i codici attesi e la forma degli argomenti di constructPath", async () => {
     const r = await read(await makePdf({ content: '10 20 m 30 40 l 50 60 70 80 90 100 c h S' }));
@@ -152,6 +154,20 @@ describe('sentinella: il formato di PDF.js e i codici copiati (se fallisce: aggi
     }
     const g = must(r.res);
     expect(g.stats.paths + g.stats.emptyPaths).toBe(g.stats.ops.constructPath);
+  });
+
+  it('percorso senza dati in un PDF vero: S da solo e n da solo diventano [codice, [null], null] e sono contati a parte', async () => {
+    const r = await read(await makePdf({ content: 'S\n1 1 m 2 2 l S\nn' }));
+    const paths = r.fn.map((f, i) => [f, r.args[i] as unknown[]] as const).filter(([f]) => f === OPS['constructPath']);
+    expect(paths.map(([, a]) => [a[0], a[1] instanceof Array && (a[1] as unknown[])[0] === null, a[2]]), fixMsg("il percorso vuoto non e' piu' [codice, [null], null]")).toEqual([
+      [20, true, null],
+      [20, false, expect.anything()],
+      [28, true, null],
+    ]);
+    const g = must(r.res);
+    expect(g.stats.emptyPaths).toBe(2);
+    expect(g.stats.paths).toBe(1);
+    expect(g.stats.ops.constructPath).toBe(3);
   });
 
   it("DrawOPS non e' esportata da PDF.js (se un giorno lo fosse, deve avere gli stessi valori)", () => {
@@ -435,6 +451,34 @@ describe('livelli (contenuto opzionale)', () => {
     expect(Array.from(r.geometry.pathVisible)).toEqual([0, 1, 0]);
     expect(r.stats.layers.ocmdMarkers).toBe(3);
     expect(r.stats.layers.ocmdHidden).toBe(2);
+  });
+
+  it('OCMD con espressione di visibilita\' (/VE): And(acceso, Not(spento)) visibile, And(spento, acceso) spento', async () => {
+    const content = ['/OC /V1 BDC', p(1), 'EMC', '/OC /V2 BDC', p(2), 'EMC', '/OC /V3 BDC', p(3), 'EMC'].join('\n');
+    const { res } = await read(
+      await makePdf({
+        content,
+        ocgs,
+        ocmds: [
+          { key: 'V1', ve: ['And', 'Lon', ['Not', 'Loff']] },
+          { key: 'V2', ve: ['And', 'Loff', 'Lon'] },
+          { key: 'V3', ve: ['Or', 'Loff', 'Lon'] },
+        ],
+      }),
+    );
+    const r = must(res);
+    expect(Array.from(r.geometry.pathVisible)).toEqual([1, 0, 1]);
+    expect(r.stats.layers.ocmdMarkers).toBe(3);
+    expect(r.stats.layers.ocmdHidden).toBe(1);
+  });
+
+  it('marcatore /OC con una proprieta\' che non esiste: PDF.js emette dati null (provato su un PDF vero), visibile e contato', async () => {
+    const real = await read(await makePdf({ content: `/OC /Nope BDC ${p(1)} EMC`, ocgs }));
+    const i = real.fn.indexOf(OPS['beginMarkedContentProps']!);
+    expect(real.args[i]).toEqual(['OC', null]);
+    const r = must(real.res);
+    expect(r.stats.layers.ocNull).toBe(1);
+    expect(r.geometry.pathVisible[0]).toBe(1);
   });
 
   it('marcatori OC con dati null: trattati come visibili e contati', () => {
