@@ -17,6 +17,8 @@
 // CP6f (Snap ampliato, decisioni 61 e 88-89): Intersezione, Quadrante, Perpendicolare e Tangente si CALCOLANO (`snapExtra.ts`, con una scena di primitive e riquadri in pt del
 // foglio) e l'Origine di pagina e' un candidato. Perpendicolare e Tangente hanno bisogno di un punto di partenza (`extra.anchor`: l'ancora della costruzione, la stessa dell'ORTO).
 // Senza `extra` e con i tipi nuovi spenti il risultato e' quello di prima.
+// CP7b (V3.1): `extra.pdf` aggiunge come candidati Estremo e Punto medio i punti dei tratti rettilinei del PDF (src/pdf/snapPoints.ts, indicizzati da src/pdf/pointIndex.ts); non e' un
+// tipo nuovo ne' un interruttore di `SnapKind`: l'interruttore «PDF» e' dell'app, che passa o no la sorgente.
 // A parita' di distanza (1e-9 pt) vince il tipo con priorita' piu' alta: Estremo, Punto medio, Centro, Origine, Intersezione, Quadrante, Perpendicolare, Tangente (i punti gia'
 // presenti negli oggetti prima di quelli calcolati).
 import type { PageObject } from '../model/model';
@@ -61,6 +63,12 @@ export interface SnapExtra {
   anchor?: UserPoint | null;
   /** L'origine della pagina (spazio utente): candidato "Origine". */
   origin?: UserPoint | null;
+  /**
+   * I punti dei tratti rettilinei del disegno del PDF (V3.1, CP7b): Estremo e Punto medio in piu' di quelli degli oggetti, entro lo stesso raggio e con gli stessi interruttori
+   * (con Estremo spento non c'e' l'Estremo del PDF, con Punto medio spento non c'e' quello del PDF). Non e' un tipo nuovo: stessi tipi, stesse etichette, stessi marcatori.
+   * A parita' di distanza e di tipo vince il punto di un oggetto disegnato (i punti del PDF si considerano per ultimi). Assente: il risultato e' quello di prima.
+   */
+  pdf?: PdfSnapSource | null;
 }
 
 export interface SnapHit {
@@ -184,7 +192,7 @@ function visitCandidates(o: PageObject, geom: PageGeometry, emit: (x: number, y:
  * `pending`: i punti gia' indicati nella costruzione in corso (nello spazio utente), candidati Estremo come gli estremi degli oggetti; se mancano o sono
  * vuoti il risultato e' quello di sempre.
  * `extra` (CP6f): scena, punto di partenza e origine; senza `extra` e con i tipi nuovi spenti il risultato e' quello di prima. L'Origine e' un candidato solo se c'e' almeno un
- * interruttore acceso (con tutti spenti non c'e' snap).
+ * interruttore acceso (con tutti spenti non c'e' snap). `extra.pdf` (CP7b): i punti Estremo e Punto medio del disegno del PDF, considerati dopo quelli degli oggetti.
  */
 export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw: SheetPoint, radius: number, kinds: SnapKinds, pending: readonly UserPoint[] = [], extra?: SnapExtra): SnapHit | null {
   const base = !!(kinds.end || kinds.mid || kinds.center);
@@ -218,6 +226,8 @@ export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw
       consider(sp.x, sp.y, 'end');
     }
   }
+  // i punti del PDF dopo quelli degli oggetti e della costruzione: a parita' di distanza e di tipo `consider` tiene il primo, quindi vince l'oggetto disegnato
+  if (extra?.pdf && (kinds.end || kinds.mid)) extra.pdf.forEachNear(raw.x, raw.y, radius, !!kinds.end, !!kinds.mid, consider);
   if (extra?.origin) {
     const so = geom.userToSheet(extra.origin);
     consider(so.x, so.y, 'origin');
