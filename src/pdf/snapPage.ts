@@ -14,7 +14,7 @@ import { type SheetMap, buildSnapPoints, visibleCubicCount, visibleLineCount } f
 
 /**
  * TETTO PROVVISORIO di primitive VISIBILI per pagina: tratti rettilinei PIU' cubiche (CP7c: ognuna conta 1, SCELTA DELL'ASSISTENTE-CODE da confermare; ragione e numeri in docs/PIANO.md,
- * decisione 115). Sopra, lo snap sul PDF di quella pagina e' spento (e il messaggio dice quanti tratti e curve ha la pagina e qual e' il tetto).
+ * decisione 114). Sopra, lo snap sul PDF di quella pagina e' spento (e il messaggio dice quanti tratti e curve ha la pagina e qual e' il tetto).
  * Valore scelto da Code in CP7b misurando nel browser (Chromium, NON iPhone) con scripts/perf-cp7b.cjs (decisione 111): con l'indice `findSnap` resta sotto 4 ms anche a 600.000 tratti;
  * a limitare e' il blocco una tantum della lettura (estrazione, punti e indice, in fasi separate) e la memoria. In CP7c NON e' cambiato (rimisurato con curve: scripts/perf-cp7c.cjs).
  * L'utente lo ritara alla fine con i suoi PDF densi.

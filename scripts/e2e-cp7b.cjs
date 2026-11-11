@@ -257,7 +257,8 @@ async function checkSheetPoints(page, name, box, tag = name) {
   }
   check(`${tag}: ${n} punti noti del disegno (20 Estremi, 7 Punti medi, 4 centri delle tacche): marcatore del tipo e nel punto giusti`, bad.length === 0, bad.slice(0, 3).join(' | '));
   if (state && state.state && state.state.kind === 'ready') {
-    check(`${tag}: lo stato dice 12 tratti, 20 Estremi e 11 Punti medi`, state.state.segments === 12 && state.state.nEnd === 20 && state.state.nMid === 11, JSON.stringify(state.state));
+    // CP7c: con gli Estremi delle curve `nEnd` conta anche i 24 dei sei cerchi: i 20 Estremi dei TRATTI sono nEnd meno quelli dovuti alle curve (`endsFromCurves`, assente prima di CP7c)
+    check(`${tag}: lo stato dice 12 tratti, 20 Estremi e 11 Punti medi`, state.state.segments === 12 && state.state.nEnd - (state.state.endsFromCurves ?? 0) === 20 && state.state.nMid === 11, JSON.stringify(state.state));
   }
   return pts;
 }
@@ -802,7 +803,7 @@ async function pagesSuite(browser) {
   const s3 = await waitPdfSnap(page, 90000);
   await page.waitForTimeout(3500); // il tempo in cui il vecchio documento avrebbe finito la sua lettura
   const s4 = await pdfState(page);
-  if (s4) check('documento sostituito durante la lettura: la pagina 1 del nuovo ha i SUOI punti (20 Estremi e 11 Punti medi), non quelli del vecchio', s4.state && s4.state.kind === 'ready' && s4.state.nEnd === 20 && s4.state.nMid === 11 && s4.cached.length === 1, JSON.stringify(s4));
+  if (s4) check('documento sostituito durante la lettura: la pagina 1 del nuovo ha i SUOI punti (20 Estremi e 11 Punti medi), non quelli del vecchio', s4.state && s4.state.kind === 'ready' && s4.state.nEnd - (s4.state.endsFromCurves ?? 0) === 20 && s4.state.nMid === 11 && s4.cached.length === 1, JSON.stringify(s4));
   void s3;
   await tool(page, 'Retta');
   await probe('nuovo documento: Estremo del rettangolo', { x: 10, y: 10 }, 'end');
