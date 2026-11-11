@@ -53,12 +53,25 @@ async function startServer() {
 }
 
 // ---------- Utilita' sulla pagina ----------
+/**
+ * CP7c: lo snap sul disegno del PDF (interruttore «PDF», acceso all'avvio) si spegne: queste prove riguardano le funzioni di CP2 e i cerchi dei PDF di prova hanno ora punti propri
+ * (Estremo delle curve) che si agganciano nei punti cliccati, secondo i tempi della lettura asincrona (lo snap sul PDF e' provato in e2e-cp7b.cjs e e2e-cp7c.cjs). Il clic e' sul
+ * pulsante del pannello anche se il pannello e' a scomparsa e chiuso. Su un build senza l'interruttore non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  await page.evaluate(() => {
+    const b = document.querySelector('.panel-toggle[data-panel-toggle="pdf"]');
+    if (b && b.getAttribute('aria-pressed') === 'true') b.click();
+  });
+  await page.waitForTimeout(60);
+}
 async function openSample(page, title) {
   await page.goto(URL);
   await page.locator('summary', { hasText: 'PDF di prova' }).click();
   await page.getByRole('button', { name: title, exact: true }).click();
   await page.waitForSelector('.viewer-stage canvas');
   await page.waitForTimeout(700);
+  await pdfSnapOff(page); // CP7c
 }
 /** Foglio (pt) -> pixel CSS della finestra, usando il riquadro del canvas del foglio. */
 async function toClient(page, sample, p) {
