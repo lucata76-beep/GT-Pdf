@@ -170,12 +170,13 @@ const SNAP_MESSAGE: Record<SnapSwitch, { on: string; off: string }> = {
 };
 
 /**
- * Interruttore «PDF» (V3.1, CP7b): Estremo e Punto medio si agganciano anche ai tratti rettilinei del disegno del PDF. NON e' un tipo di snap (non sta in `SnapSwitch`): e' la
- * sorgente dei punti; stessi marcatori e stessi nomi di Estremo e Punto medio, che restano i loro interruttori (con Estremo spento non c'e' l'Estremo del PDF).
+ * Interruttore «PDF» (V3.1, CP7b): Estremo e Punto medio si agganciano anche ai tratti rettilinei del disegno del PDF; dal V3.2a (CP7c) l'Estremo anche agli estremi delle cubiche. NON e'
+ * un tipo di snap (non sta in `SnapSwitch`): e' la sorgente dei punti; stessi marcatori e stessi nomi di Estremo e Punto medio, che restano i loro interruttori (con Estremo spento non
+ * c'e' l'Estremo del PDF, nemmeno quello delle curve).
  */
-const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, oltre che ai tuoi oggetti (non vale per le scansioni)';
+const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, e l\'Estremo anche agli estremi delle sue curve, oltre che ai tuoi oggetti (non vale per le scansioni)';
 const PDF_SNAP_MESSAGE = {
-  on: 'PDF attivo: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF',
+  on: 'PDF attivo: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, l\'Estremo anche alle sue curve',
   off: 'PDF disattivato: l\'aggancio resta solo sugli oggetti disegnati',
   reading: 'PDF attivo: il disegno di questa pagina è in lettura, l\'aggancio compare tra un momento',
 };
@@ -2615,13 +2616,13 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           st === null || st === 'busy'
             ? st
             : st.kind === 'ready'
-              ? { kind: 'ready', segments: st.segments, hidden: st.hiddenSegments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
+              ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
               : st;
         return { on: pdfSnapOn, cap: SNAP_MAX_SEGMENTS, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
       },
       /**
        * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
-       * (misure del tetto: scripts/perf-cp7b.cjs); con `store` il risultato va nella cache e lo snap lo usa.
+       * (misure del tetto: scripts/perf-cp7b.cjs e scripts/perf-cp7c.cjs); con `store` il risultato va nella cache e lo snap lo usa.
        */
       pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; store?: boolean; clear?: boolean } = {}) => {
         const doc = pdf;
@@ -2633,7 +2634,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
         const wallMs = performance.now() - t0;
         if (o.store) pdfSnapCache.set(n, st);
-        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, hidden: st.hiddenSegments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
+        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
       },
       /**
        * Prestazioni di `findSnap` con i punti del PDF della pagina corrente (che devono essere pronti): `index` usa la griglia, `linear` la scansione lineare di tutti i punti

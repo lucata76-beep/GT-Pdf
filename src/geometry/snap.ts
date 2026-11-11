@@ -47,7 +47,8 @@ export const SNAP_LABEL: Record<SnapKind, string> = {
 export type SnapKinds = Readonly<Partial<Record<SnapSwitch, boolean>>>;
 
 /**
- * Sorgente di punti Estremo e Punto medio che NON sono oggetti del modello: i tratti rettilinei del disegno del PDF (V3.1, CP7b: `PointGrid` di src/pdf/pointIndex.ts).
+ * Sorgente di punti Estremo e Punto medio che NON sono oggetti del modello: i tratti rettilinei del disegno del PDF (V3.1, CP7b: `PointGrid` di src/pdf/pointIndex.ts) e, dal V3.2a
+ * (CP7c), gli estremi delle sue cubiche (solo Estremo: nessun Punto medio delle curve).
  * `forEachNear` chiama `emit` per ogni punto dei tipi richiesti entro `radius` pt del foglio (bordo compreso) da (x, y), nel foglio, in un ordine stabile (indice crescente dei punti).
  * Non e' un oggetto: non si seleziona, non si cancella, non entra nel modello ne' nel file progetto.
  */

@@ -41,12 +41,15 @@ const allNear = (s: Extract<PdfSnapState, { kind: 'ready' }>, x: number, y: numb
 };
 
 describe('stati di una pagina', () => {
-  it('a4-vettoriale.pdf: pronto, 12 tratti, 20 Estremi e 11 Punti medi, con i tempi di ogni fase', async () => {
+  it('a4-vettoriale.pdf: pronto, 12 tratti e 24 cubiche (6 cerchi), 20 + 24 = 44 Estremi e 11 Punti medi, con i tempi di ogni fase', async () => {
+    // CP7c: ADATTATO (in CP7b: 20 Estremi, 31 punti). I 12 tratti, i loro 20 Estremi e gli 11 Punti medi sono quelli di prima; i 6 cerchi di drawSheet danno 24 Estremi in piu'.
     const s = readyOf(await stateOf(await loadTestPdf('a4-vettoriale.pdf')));
     expect(s.segments).toBe(12);
-    expect(s.nEnd).toBe(20);
+    expect(s.curves).toBe(24);
+    expect(s.nEnd).toBe(44);
+    expect(s.endsFromCurves).toBe(24);
     expect(s.nMid).toBe(11);
-    expect(s.bytes).toBe(31 * 16 + s.source.bytes);
+    expect(s.bytes).toBe((44 + 11) * 16 + s.source.bytes);
     for (const k of ['opListMs', 'extractMs', 'pointsMs', 'indexMs'] as const) expect(s.timings[k]).toBeGreaterThanOrEqual(0);
     // il rettangolo del disegno: l'angolo in alto a sinistra e' a (10, 10) dal bordo del foglio (A4 da 595.276 x 841.89)
     const h = allNear(s, 10.5, 10.5, 2, true, false);
@@ -95,10 +98,11 @@ describe('stati di una pagina', () => {
     expect(s.nMid).toBe(1);
   });
 
-  it('troppo fitta: sopra il tetto (parametro) lo stato dice quanti tratti e qual e\' il tetto', async () => {
-    const s = await stateOf(await loadTestPdf('a4-vettoriale.pdf'), 1, { maxSegments: 11 });
-    expect(s).toEqual({ kind: 'dense', segments: 12, cap: 11 });
-    expect(await stateOf(await loadTestPdf('a4-vettoriale.pdf'), 1, { maxSegments: 12 })).toMatchObject({ kind: 'ready' }); // il tetto stesso e' ammesso
+  it('troppo fitta: sopra il tetto (parametro) lo stato dice quanti tratti e quante curve ha e qual e\' il tetto', async () => {
+    // CP7c: ADATTATO (in CP7b: tetto 11 e 12 con i 12 tratti). Il tetto conta tratti PIU' cubiche: a4-vettoriale.pdf ha 12 tratti e 24 cubiche = 36 primitive.
+    const s = await stateOf(await loadTestPdf('a4-vettoriale.pdf'), 1, { maxSegments: 35 });
+    expect(s).toEqual({ kind: 'dense', segments: 12, curves: 24, cap: 35 });
+    expect(await stateOf(await loadTestPdf('a4-vettoriale.pdf'), 1, { maxSegments: 36 })).toMatchObject({ kind: 'ready' }); // il tetto stesso e' ammesso
     expect(SNAP_MAX_SEGMENTS).toBeGreaterThan(10000);
   });
 
