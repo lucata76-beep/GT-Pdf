@@ -44,6 +44,15 @@ export const SNAP_LABEL: Record<SnapKind, string> = {
 /** Gli interruttori accesi; un tipo non elencato e' spento (cosi' le chiamate di prima, con i soli tre tipi, restano valide). */
 export type SnapKinds = Readonly<Partial<Record<SnapSwitch, boolean>>>;
 
+/**
+ * Sorgente di punti Estremo e Punto medio che NON sono oggetti del modello: i tratti rettilinei del disegno del PDF (V3.1, CP7b: `PointGrid` di src/pdf/pointIndex.ts).
+ * `forEachNear` chiama `emit` per ogni punto dei tipi richiesti entro `radius` pt del foglio (bordo compreso) da (x, y), nel foglio, in un ordine stabile (indice crescente dei punti).
+ * Non e' un oggetto: non si seleziona, non si cancella, non entra nel modello ne' nel file progetto.
+ */
+export interface PdfSnapSource {
+  forEachNear(x: number, y: number, radius: number, end: boolean, mid: boolean, emit: (x: number, y: number, kind: 'end' | 'mid') => void): void;
+}
+
 /** Dati in piu' di `findSnap` per i tipi di CP6f (tutti facoltativi). */
 export interface SnapExtra {
   /** La scena della pagina (`buildSnapScene`), da rifare quando cambiano gli oggetti o la pagina; se manca ma serve, `findSnap` la costruisce a ogni chiamata. */
