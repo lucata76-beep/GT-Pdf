@@ -68,7 +68,8 @@ const setToggle = async (page, name, on) => {
  * di CP6a (Estremo e Punto medio): con i quattro tipi nuovi SPENTI l'app si comporta come prima (provato in e2e-cp6f.cjs e nei test unitari), quindi si spengono. Dove il pannello
  * a destra e' a scomparsa lo apre e lo richiude. Su un build precedente a CP6f gli interruttori non ci sono e non succede nulla.
  */
-const NEW_KINDS = ['intersection', 'quadrant', 'perpendicular', 'tangent'];
+// CP7b: anche l'interruttore PDF (acceso all'avvio, sta nella barra di stato e nel pannello) e' trattato come i tipi nuovi: spento qui, provato in e2e-cp7b.cjs.
+const NEW_KINDS = ['intersection', 'quadrant', 'perpendicular', 'tangent', 'pdf'];
 async function newKindsOff(page) {
   const probe = page.locator('.panel-toggle[data-panel-toggle="end"]');
   if (!(await page.locator('.panel-toggle[data-panel-toggle="quadrant"]').count())) return;
@@ -79,6 +80,7 @@ async function newKindsOff(page) {
   }
   for (const k of NEW_KINDS) {
     const b = page.locator(`.panel-toggle[data-panel-toggle="${k}"]`);
+    if (!(await b.count())) continue; // (CP7b: su un build senza l'interruttore PDF non c'e')
     if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
   }
   if (hidden) {
@@ -249,7 +251,7 @@ async function mouseSuite(browser) {
 
   // -- interruttori
   // (CP6f: l'interruttore "Intersezione" sta ora fra Centro e ORTO; qui si guardano gli altri, come prima: l'elenco completo e' provato in e2e-cp6f.cjs)
-  const tg = (await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })))).filter((t) => t.id !== 'intersection');
+  const tg = (await page.$$eval('.statusbar .st-toggle', (els) => els.map((e) => ({ id: e.dataset.toggle, label: e.textContent.trim(), pressed: e.getAttribute('aria-pressed') })))).filter((t) => t.id !== 'intersection' && t.id !== 'pdf');
   await newKindsOff(page);
   check('barra di stato: interruttori Estremo, Punto medio, Centro (dalla V2b), ORTO, Griglia (stesso componente st-toggle, aria-pressed)', JSON.stringify(tg.map((t) => [t.id, t.label])) === JSON.stringify([['end', 'Estremo'], ['mid', 'Punto medio'], ['center', 'Centro'], ['ortho', 'ORTO'], ['grid', 'Griglia']]), JSON.stringify(tg));
   check('all\'avvio Estremo, Punto medio e Centro sono attivi, ORTO e Griglia spenti', JSON.stringify(tg.map((t) => t.pressed)) === JSON.stringify(['true', 'true', 'true', 'false', 'false']), JSON.stringify(tg));

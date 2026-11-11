@@ -466,10 +466,31 @@ async function ortoPagesSuite(browser) {
 }
 
 // ---------------------------------------------------------------- 4) ORTO sulle quote, tocco emulato
+/**
+ * CP7b: l'interruttore PDF (snap sul disegno del PDF, acceso all'avvio) si SPEGNE: queste prove riguardano gli oggetti disegnati e i PDF di prova hanno punti propri che ora si
+ * agganciano; lo snap sul PDF e' provato in e2e-cp7b.cjs. Dove il pannello a destra e' a scomparsa lo apre e lo richiude. Su un build senza l'interruttore (3bbe3a8) non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  const b = page.locator('.panel-toggle[data-panel-toggle="pdf"]');
+  if (!(await b.count())) return;
+  const hidden = !(await b.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(60);
+}
+
 async function ortoTouchSuite(browser) {
   setSection('ORTO sulle quote, tocco 390x780');
   const { ctx, page, cdp } = await phone(browser);
   await openDoc(page, 'A4 vettoriale', false);
+  await pdfSnapOff(page); // CP7b
   const pinfo = await pageInfo(page);
   const U = (f) => userOf(pinfo, f);
   const tap = async (c) => {

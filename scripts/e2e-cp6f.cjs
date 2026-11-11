@@ -256,12 +256,32 @@ async function readScene(page) {
   S.anchor = { ST1: S.ST1.a, ST2: S.ST2.a, ST3: S.ST3.a };
   return S;
 }
+/**
+ * CP7b: l'interruttore PDF (snap sul disegno del PDF, acceso all'avvio) si SPEGNE: queste prove riguardano gli oggetti disegnati e i PDF di prova hanno punti propri che ora si
+ * agganciano; lo snap sul PDF e' provato in e2e-cp7b.cjs. Dove il pannello a destra e' a scomparsa lo apre e lo richiude. Su un build senza l'interruttore (3bbe3a8) non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  const b = page.locator('.panel-toggle[data-panel-toggle="pdf"]');
+  if (!(await b.count())) return;
+  const hidden = !(await b.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(60);
+}
 async function openDoc(page, title = 'A4 vettoriale', scene = true) {
   await openSample(page, title);
   G = makeGeom(await page.evaluate(() => window.__gtpdf.pages()[0]));
   await page.evaluate(() => window.__gtpdf.fit());
   await page.waitForTimeout(400);
   if (scene) await page.evaluate((s) => window.__gtpdf.addSpecs(1, s), SPECS);
+  if (scene) await pdfSnapOff(page); // CP7b: le prove con la scena riguardano gli oggetti disegnati
   await page.waitForTimeout(250);
 }
 async function click(page, c, dx = 0, dy = 0) {
@@ -473,13 +493,13 @@ async function switchSuite(browser) {
   await openDoc(page, 'A4 vettoriale');
   const info0 = await pageInfo(page);
   const S = await readScene(page);
-  const pan = await page.locator('.panel-toggle').evaluateAll((els) => els.map((e) => e.dataset.panelToggle));
+  const pan = (await page.locator('.panel-toggle').evaluateAll((els) => els.map((e) => e.dataset.panelToggle))).filter((id) => id !== 'pdf'); // CP7b: l'interruttore PDF e' provato in e2e-cp7b.cjs
   check('il pannello "Aggancio e griglia" ha, in ordine, Estremo, Punto medio, Centro, Intersezione, Quadrante, Perpendicolare, Tangente e Griglia', JSON.stringify(pan) === JSON.stringify([...SW, 'grid']), JSON.stringify(pan));
-  const panLabels = await page.locator('.panel-toggle').allInnerTexts();
+  const panLabels = (await page.locator('.panel-toggle').allInnerTexts()).filter((t) => t !== 'PDF');
   check('... con i nomi "Estremo", "Punto medio", "Centro", "Intersezione", "Quadrante", "Perpendicolare", "Tangente", "Griglia"', JSON.stringify(panLabels) === JSON.stringify(['Estremo', 'Punto medio', 'Centro', 'Intersezione', 'Quadrante', 'Perpendicolare', 'Tangente', 'Griglia']), JSON.stringify(panLabels));
   const allOn = await Promise.all(SW.map((k) => isOn(panelBtn(page, k))));
   check('all\'avvio i sette interruttori dei tipi di snap sono accesi (tutti i nuovi compresi)', allOn.every(Boolean), JSON.stringify(allOn));
-  const bar = await page.locator('.statusbar .st-toggle').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.dataset.toggle));
+  const bar = await page.locator('.statusbar .st-toggle').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none' && e.dataset.toggle !== 'pdf').map((e) => e.dataset.toggle)); // CP7b: senza PDF
   check('barra di stato (>= 720 px): gli interruttori sono Estremo, Punto medio, Centro, Intersezione, ORTO, Griglia (dei nuovi SOLO Intersezione)', JSON.stringify(bar) === JSON.stringify(['end', 'mid', 'center', 'intersection', 'ortho', 'grid']), JSON.stringify(bar));
   check('barra di stato: Quadrante, Perpendicolare e Tangente non ci sono', (await page.locator('.statusbar .st-toggle[data-toggle="quadrant"], .statusbar .st-toggle[data-toggle="perpendicular"], .statusbar .st-toggle[data-toggle="tangent"]').count()) === 0);
   check('barra di stato: il testo dell\'interruttore e\' "Intersezione"', (await statusBtn(page, 'intersection').innerText()) === 'Intersezione');
@@ -886,12 +906,12 @@ async function narrowSuite(browser) {
   setSection('barra di stato sotto 720 px: invariata (portatile in verticale e telefono 390x780)');
   const { ctx, page } = await desktop(browser, 700, 800);
   await openDoc(page, 'A4 vettoriale', false);
-  const vis = (p) => p.locator('.statusbar .st-toggle').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.dataset.toggle));
-  check('desktop a 700 px: nella barra di stato resta SOLO ORTO (come prima di CP6f); Intersezione e gli altri tipi stanno nel pannello', JSON.stringify(await vis(page)) === JSON.stringify(['ortho']) && (await page.locator('.panel-toggle').count()) === 8, JSON.stringify(await vis(page)));
+  const vis = (p) => p.locator('.statusbar .st-toggle').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none' && e.dataset.toggle !== 'pdf').map((e) => e.dataset.toggle)); // CP7b: senza l'interruttore PDF (provato in e2e-cp7b.cjs)
+  check('desktop a 700 px: nella barra di stato resta SOLO ORTO (come prima di CP6f); Intersezione e gli altri tipi stanno nel pannello', JSON.stringify(await vis(page)) === JSON.stringify(['ortho']) && (await page.locator('.panel-toggle:not([data-panel-toggle="pdf"])').count()) === 8, JSON.stringify(await vis(page)));
   await ctx.close();
   const p = await phone(browser, 390, 780);
   await openDoc(p.page, 'A4 vettoriale', false);
-  check('telefono 390x780: nella barra di stato resta SOLO ORTO; i sette tipi e la Griglia stanno nel pannello', JSON.stringify(await vis(p.page)) === JSON.stringify(['ortho']) && (await p.page.locator('.panel-toggle').count()) === 8, JSON.stringify(await vis(p.page)));
+  check('telefono 390x780: nella barra di stato resta SOLO ORTO; i sette tipi e la Griglia stanno nel pannello', JSON.stringify(await vis(p.page)) === JSON.stringify(['ortho']) && (await p.page.locator('.panel-toggle:not([data-panel-toggle="pdf"])').count()) === 8, JSON.stringify(await vis(p.page)));
   await p.ctx.close();
   const w = await phone(browser, 932, 430);
   await openDoc(w.page, 'A4 vettoriale', false);
