@@ -1,6 +1,18 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7a: consegnata, non ancora provata dall'utente).
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7b: consegnata, non ancora provata dall'utente con i PDF reali; sotto, quella di CP7a).
+
+## Provare CP7b sul PC (Snap sul PDF)
+
+Sul PC con il mouse. È la prima volta che l'editor **si aggancia al disegno del PDF**: Estremo e Punto medio sui tratti rettilinei (non ancora cerchi, archi, intersezioni: V3.2). Per ogni punto rispondi con la risposta predefinita (in **grassetto**) oppure dici che cosa cambieresti.
+
+1. **Agganciare il disegno del PDF.** Apri nell'editor (non in Diagnostica) un tuo PDF **vettoriale**, scegli *Retta* e avvicina il puntatore a un'estremità e al centro di una linea del disegno: compaiono il quadrato **Estremo** e il triangolo **Punto medio**, con l'etichetta, e il punto inserito è quello del PDF. Il nuovo interruttore **PDF** (barra di stato da 720 px in su, se c'è posto; sempre nel pannello *Aggancio e griglia*) è acceso all'avvio. Risposta: **si aggancia dove deve** / no (scrivi dove sbaglia).
+2. **Spegnere «PDF».** Premi *PDF*: spariscono gli agganci sul disegno del PDF, restano quelli dei **tuoi** oggetti (Retta, Linea, ecc.); *Estremo* e *Punto medio* continuano a valere per tutti e due (con *Estremo* spento resta solo il Punto medio del PDF). Risposta: **va bene così** / no.
+3. **Misurare sul disegno.** Calibra su una distanza **nota** del disegno (*Scala*, agganciando due estremi), poi metti una *Quota* fra due punti del PDF agganciati e confronta il valore con quello che conosci. Risposta: **uguale entro la precisione che ti serve** / no (scrivi quanto differisce e su quale tratto).
+4. **Una scansione.** Aprine una: **nessun aggancio** sul disegno e la riga dei messaggi dice che è un'immagine (gli oggetti che disegni si agganciano come sempre). Risposta: **chiaro** / no.
+5. **Un PDF molto fitto.** Se ne hai uno con moltissimi tratti, aprilo: se supera il **tetto provvisorio di 300.000 tratti** per pagina lo snap sul PDF di quella pagina è spento e il messaggio dice quanti tratti ha e qual è il tetto; sotto il tetto la pagina può restare ferma per un istante all'apertura (la lettura dei punti). Dì **quanto è durato quell'istante** e **quanti tratti ha la pagina**: la riga «Snap PDF, pagina N» del registro di Diagnostica (*Copia registro*, che include il nome del file: toglilo prima di incollare) dà tratti, punti e tempi di ogni fase; *Copia misura* dà i numeri della pagina (tratti rettilinei, cubiche, livelli) senza il nome. Risposta: **nessun blocco che dà fastidio** / no.
+
+Che cosa **non** è stato provato: il tuo browser e il tuo sistema (tutte le prove sono su Chromium in un contenitore Linux, con PDF di prova fittizi e PDF sintetici), Safari e iPhone (i tempi e la memoria di Chromium non valgono per l'iPhone), qualunque PDF reale (come altri programmi scrivono linee, livelli e annotazioni; la lettura dei punti usa una **seconda copia** del PDF in memoria), pagine con `/Rotate` 180 e 270 e `UserUnit` diverso da 1 (provati solo nei test unitari), il tetto sui tuoi PDF densi (è provvisorio: lo ritari tu alla fine).
 
 ## Provare CP7a sul PC (Diagnostica geometria PDF)
 
