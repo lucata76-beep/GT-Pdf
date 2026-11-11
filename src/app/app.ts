@@ -61,11 +61,11 @@ import { ANGLE_MAX_LENGTH, parseAngle } from './angle';
 import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile, makeProjectFile } from '../export/deliver';
 import { exportFileName, projectFileName } from '../export/fileName';
-import { type OpenedPdf, type PageInfo, closePdf, openPdf } from '../pdf/loader';
+import { type OpenedPdf, type PageInfo, closePdf, openPdf, opsDocument } from '../pdf/loader';
 import { log } from '../diag/log';
 import { describeOpenError } from '../pdf/openError';
 import { scanNear } from '../pdf/pointIndex';
-import { PageCache, type PdfSnapState, loadPdfSnap, pdfSnapLogLine, pdfSnapNote } from '../pdf/snapPage';
+import { PageCache, type PdfSnapState, SNAP_MAX_SEGMENTS, loadPdfSnap, pdfSnapLogLine, pdfSnapNote } from '../pdf/snapPage';
 import { LIMITS, type Project, parseProject, serializeProject, verifyProjectText } from '../project/format';
 import { sha256Hex } from '../project/hash';
 import { comparePageGeometry, decideOutcome } from '../project/match';
@@ -370,7 +370,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     if (pdfSnapBusy.has(n)) return;
     pdfSnapBusy.add(n);
     const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
-    void loadPdfSnap(doc.doc, n, sheet).then((state) => {
+    const read = opsDocument(doc).then(
+      (d) => loadPdfSnap(d, n, sheet),
+      (e: unknown): PdfSnapState => ({ kind: 'unavailable', reason: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }),
+    );
+    void read.then((state) => {
       if (pdf !== doc) return; // documento chiuso o sostituito: il risultato non serve a nessuno
       pdfSnapBusy.delete(n);
       pdfSnapCache.set(n, state);
@@ -2611,9 +2615,9 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           st === null || st === 'busy'
             ? st
             : st.kind === 'ready'
-              ? { kind: 'ready', segments: st.segments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
+              ? { kind: 'ready', segments: st.segments, hidden: st.hiddenSegments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
               : st;
-        return { on: pdfSnapOn, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
+        return { on: pdfSnapOn, cap: SNAP_MAX_SEGMENTS, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
       },
       /**
        * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
@@ -2625,21 +2629,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         if (!doc || !info) throw new Error('nessun documento o pagina inesistente');
         const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
         const t0 = performance.now();
-        const st = await loadPdfSnap(doc.doc, n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
+        const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
         const wallMs = performance.now() - t0;
         if (o.store) pdfSnapCache.set(n, st);
-        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
+        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, hidden: st.hiddenSegments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
       },
       /**
        * Prestazioni di `findSnap` con i punti del PDF della pagina corrente (che devono essere pronti): `index` usa la griglia, `linear` la scansione lineare di tutti i punti
        * (solo come confronto). Come `snapRun`: tempo di lotti di `batch` chiamate e di `singles` chiamate una per una.
        */
-      snapRunPdf: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>> }) => {
+      snapRunPdf: (objects: PageObject[], raws: UserPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>> }) => {
         const info = pdf?.pages[pageNo - 1];
         const st = pdfSnapCache.peek(pageNo);
         if (!info || !st || st.kind !== 'ready') throw new Error('i punti del PDF della pagina corrente non sono pronti');
         const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
         const kinds = o.kinds ?? { end: true, mid: true };
+        const sheetRaws = raws.map((u) => g.userToSheet(u));
         const pts = st.source.points;
         const source = o.mode === 'index' ? st.source : { forEachNear: (x: number, y: number, r: number, e: boolean, m: boolean, emit: (x: number, y: number, k: 'end' | 'mid') => void) => scanNear(pts, x, y, r, e, m, emit) };
         const extra = { pdf: source };
@@ -2649,7 +2654,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         for (let b = 0; b < o.batches; b++) {
           const t0 = performance.now();
           for (let i = 0; i < o.batch; i++) {
-            if (findSnap(objects, g, raws[(b * o.batch + i) % raws.length] as SheetPoint, radius, kinds, [], extra)) hits++;
+            if (findSnap(objects, g, sheetRaws[(b * o.batch + i) % sheetRaws.length] as SheetPoint, radius, kinds, [], extra)) hits++;
             calls++;
           }
           batchMs.push(performance.now() - t0);
@@ -2657,7 +2662,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const singleMs: number[] = [];
         for (let i = 0; i < (o.singles ?? 500); i++) {
           const t0 = performance.now();
-          findSnap(objects, g, raws[i % raws.length] as SheetPoint, radius, kinds, [], extra);
+          findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, kinds, [], extra);
           singleMs.push(performance.now() - t0);
         }
         return { hits, calls, batch: o.batch, batchMs, singleMs, nPoints: st.nEnd + st.nMid };

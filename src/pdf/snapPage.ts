@@ -1,8 +1,10 @@
 // Snap sul PDF, per pagina (V3.1, CP7b): lettura asincrona dei tratti rettilinei di UNA pagina (`getOperatorList`, `getOptionalContentConfig`), estrazione (src/pdf/geometry.ts), punti di snap
 // (src/pdf/snapPoints.ts) e indice spaziale (src/pdf/pointIndex.ts), con lo STATO della pagina, i messaggi e la cache delle ultime N pagine.
 //
-// Niente DOM. NIENTE `page.cleanup()`: nell'editor la pagina e' del visore (a differenza di `measurePage`, la misura di Diagnostica, che la libera per misurare una lettura «fresca»).
-// I punti stanno in una cache NOSTRA, indipendente dall'elenco di operazioni di PDF.js: l'esportazione chiama `page.cleanup()` e `doc.cleanup()` e quell'elenco sparisce.
+// Niente DOM. NIENTE `page.cleanup()` (a differenza di `measurePage`, la misura di Diagnostica, che la libera per misurare una lettura «fresca»).
+// Il documento da passare a `loadPdfSnap` NON e' quello del visore ma una seconda istanza sugli stessi byte (`opsDocument` di src/pdf/loader.ts): una `getOperatorList()` in
+// parallelo a un `render()` della stessa pagina dello stesso documento da' un elenco sbagliato se la pagina ha annotazioni con un aspetto proprio (misurato in Chromium).
+// I punti stanno in una cache NOSTRA, indipendente da PDF.js: l'esportazione chiama `page.cleanup()` e `doc.cleanup()` sul documento del visore.
 // Mai eccezioni verso l'app: ogni errore (di PDF.js o dell'estrazione) diventa lo stato `unavailable`; la pagina resta usabile e lo snap sugli oggetti disegnati non cambia.
 import { OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -33,7 +35,7 @@ export type AbsentWhy = 'image' | 'hidden' | 'none';
 
 /** Stato dello snap sul PDF di una pagina. «In corso» e' tenuto dall'app (la lettura e' asincrona). */
 export type PdfSnapState =
-  | { kind: 'ready'; source: PointGrid; segments: number; nEnd: number; nMid: number; bytes: number; timings: SnapLoadTimings }
+  | { kind: 'ready'; source: PointGrid; segments: number; hiddenSegments: number; nEnd: number; nMid: number; bytes: number; timings: SnapLoadTimings }
   /** Nessun tratto rettilineo visibile: scansione o immagine (`image`), tratti solo in livelli spenti (`hidden`), solo testo, curve o riempimenti (`none`). */
   | { kind: 'absent'; why: AbsentWhy; segments: number }
   /** `ok: false` dell'estrattore, errore di PDF.js o formato non riconosciuto. */
@@ -101,6 +103,7 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
       kind: 'ready',
       source: grid,
       segments: visible,
+      hiddenSegments: pts.stats.hiddenSegments,
       nEnd: pts.nEnd,
       nMid: pts.nMid,
       bytes: pts.bytes + grid.bytes,

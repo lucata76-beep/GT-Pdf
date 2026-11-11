@@ -30,11 +30,13 @@ export interface OpenedPdf {
   task: PDFDocumentLoadingTask;
   pages: PageInfo[];
   openMs: number;
+  /** Seconda istanza di PDF.js sugli stessi byte, creata alla prima lettura dei punti dello snap (`opsDocument`): vedi la nota li'. */
+  ops?: { task: PDFDocumentLoadingTask; doc: Promise<PDFDocumentProxy> };
 }
 
-export async function openPdf(name: string, bytes: Uint8Array): Promise<OpenedPdf> {
-  const t0 = performance.now();
-  const task = pdfjs.getDocument({
+/** Opzioni di PDF.js per un documento: le stesse per quello del visore e per quello delle letture dello snap. */
+function docOptions(bytes: Uint8Array): Parameters<typeof pdfjs.getDocument>[0] {
+  return {
     data: bytes.slice(),
     wasmUrl: `${assetBase}wasm/`,
     standardFontDataUrl: `${assetBase}standard_fonts/`,
@@ -42,7 +44,12 @@ export async function openPdf(name: string, bytes: Uint8Array): Promise<OpenedPd
     // Font non incorporati: sempre quelli inclusi (Foxit/Liberation, metricamente compatibili con Helvetica/Times/Courier),
     // cosi' l'impaginazione e' uguale su ogni dispositivo.
     useSystemFonts: false,
-  });
+  };
+}
+
+export async function openPdf(name: string, bytes: Uint8Array): Promise<OpenedPdf> {
+  const t0 = performance.now();
+  const task = pdfjs.getDocument(docOptions(bytes));
   const doc = await task.promise;
   const pages: PageInfo[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -60,6 +67,21 @@ export async function openPdf(name: string, bytes: Uint8Array): Promise<OpenedPd
   return { name, bytes, doc, task, pages, openMs: performance.now() - t0 };
 }
 
+/**
+ * Il documento di PDF.js per LEGGERE i tratti del disegno (snap sul PDF, V3.1): una SECONDA istanza sugli stessi byte (un'altra copia dei byte e un altro lavoratore), creata la
+ * prima volta che serve e distrutta con il documento. NON si usa `pdf.doc` perche' misurato in Chromium (CP7b, `scripts/e2e-cp7b.cjs` e le prove nello scratch): una `getOperatorList()`
+ * in parallelo a un `render()` della STESSA pagina, nello stesso documento, da' un elenco SBAGLIATO quando la pagina ha annotazioni con un aspetto proprio (nel PDF di prova
+ * con timbro, campo e casella: 216 operazioni invece di 225, senza il contenuto del timbro; con l'ordine inverso 231, con operazioni in piu') e il visore parte sempre subito
+ * dopo `setPage`. Con un documento a parte la lettura non tocca ne' la resa ne' lo stato delle pagine del visore. Costo: memoria (i byte e l'analisi del PDF si ripetono).
+ */
+export function opsDocument(pdf: OpenedPdf): Promise<PDFDocumentProxy> {
+  if (!pdf.ops) {
+    const task = pdfjs.getDocument(docOptions(pdf.bytes));
+    pdf.ops = { task, doc: task.promise };
+  }
+  return pdf.ops.doc;
+}
+
 export async function closePdf(pdf: OpenedPdf): Promise<void> {
-  await pdf.task.destroy();
+  await Promise.allSettled([pdf.task.destroy(), pdf.ops?.task.destroy()]);
 }
