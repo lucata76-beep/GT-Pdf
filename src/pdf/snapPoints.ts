@@ -21,8 +21,8 @@ import type { PdfGeometry } from './geometry';
 export const MIN_SEGMENT_PT = 0.01;
 /** Due punti dello stesso tipo a questa distanza o meno (pt fisici) sono un punto solo (il primo). */
 export const MERGE_TOL_PT = 0.001;
-/** Lato delle celle della tabella di unione: 4 x MERGE_TOL_PT (pt fisici). */
-const CELL_PT = 4 * MERGE_TOL_PT;
+/** Lato delle celle della tabella di unione: 16 x MERGE_TOL_PT (pt fisici): il quadrato di ricerca (lato 2 x MERGE_TOL_PT) tocca quasi sempre una cella sola. */
+const CELL_PT = 16 * MERGE_TOL_PT;
 /** Un punto fuori dal foglio di piu' di cosi' (pt fisici) e' scartato; entro il margine e' riportato sul bordo. */
 export const PAGE_MARGIN_PT = 0.01;
 /** Byte per punto di `SnapPoints.xy` (due Float64). */
@@ -33,6 +33,8 @@ export interface SheetMap {
   readonly width: number;
   readonly height: number;
   userToSheet(p: { x: number; y: number }): { x: number; y: number };
+  /** Se c'e', la trasformazione come [a, b, c, d, e, f] (x' = a x + c y + e, y' = b x + d y + f), la stessa formula di `userToSheet` senza allocare un oggetto per punto. */
+  readonly matrix?: readonly [number, number, number, number, number, number];
 }
 
 export interface SnapPointStats {
@@ -77,7 +79,7 @@ const nextPow2 = (n: number): number => {
 
 /**
  * Tabella a indirizzamento aperto per unire i punti coincidenti (indice + 1; 0 = vuoto), una per tipo, senza allocazioni per punto. I punti sono ordinati in celle di lato
- * 4 x MERGE_TOL_PT; per un punto nuovo si guardano le (al piu' 4) celle che toccano il quadrato di lato 2 x MERGE_TOL_PT attorno a lui e si unisce al primo punto gia' presente a
+ * 16 x MERGE_TOL_PT; per un punto nuovo si guardano le (al piu' 4, quasi sempre 1) celle che toccano il quadrato di lato 2 x MERGE_TOL_PT attorno a lui e si unisce al primo punto gia' presente a
  * distanza <= MERGE_TOL_PT. (Provato su a4-vettoriale.pdf: le coordinate con tre decimali, come 297.638, stanno esattamente sul bordo di una cella da 0.001 pt e il Float32 le sposta di
  * 4e-6 pt: con un confronto "stessa cella" due punti coincidenti non si univano.)
  */
@@ -179,25 +181,49 @@ export function buildSnapPoints(g: PdfGeometry, sheet: SheetMap): SnapPoints {
     nMid++;
   };
 
+  const m = sheet.matrix;
+  const min2 = MIN_SEGMENT_PT * MIN_SEGMENT_PT;
   for (let i = 0; i < nL; i++) {
     if (g.pathVisible[g.linePath[i] as number] !== 1) {
       stats.hiddenSegments++;
       continue;
     }
     const o = i * 4;
-    inp.x = g.lineXY[o] as number;
-    inp.y = g.lineXY[o + 1] as number;
-    const a = sheet.userToSheet(inp);
-    inp.x = g.lineXY[o + 2] as number;
-    inp.y = g.lineXY[o + 3] as number;
-    const b = sheet.userToSheet(inp);
-    addEnd(a.x, a.y);
-    if (Math.hypot(b.x - a.x, b.y - a.y) < MIN_SEGMENT_PT) {
+    const ux0 = g.lineXY[o] as number;
+    const uy0 = g.lineXY[o + 1] as number;
+    const ux1 = g.lineXY[o + 2] as number;
+    const uy1 = g.lineXY[o + 3] as number;
+    let ax: number;
+    let ay: number;
+    let bx: number;
+    let by: number;
+    if (m) {
+      // la stessa formula di PageGeometry.userToSheet, senza un oggetto per punto
+      ax = (m[0] as number) * ux0 + (m[2] as number) * uy0 + (m[4] as number);
+      ay = (m[1] as number) * ux0 + (m[3] as number) * uy0 + (m[5] as number);
+      bx = (m[0] as number) * ux1 + (m[2] as number) * uy1 + (m[4] as number);
+      by = (m[1] as number) * ux1 + (m[3] as number) * uy1 + (m[5] as number);
+    } else {
+      inp.x = ux0;
+      inp.y = uy0;
+      const a = sheet.userToSheet(inp);
+      inp.x = ux1;
+      inp.y = uy1;
+      const b = sheet.userToSheet(inp);
+      ax = a.x;
+      ay = a.y;
+      bx = b.x;
+      by = b.y;
+    }
+    addEnd(ax, ay);
+    const dx = bx - ax;
+    const dy = by - ay;
+    if (dx * dx + dy * dy < min2) {
       stats.tinySegments++;
       continue;
     }
-    addEnd(b.x, b.y);
-    addMid((a.x + b.x) / 2, (a.y + b.y) / 2);
+    addEnd(bx, by);
+    addMid((ax + bx) / 2, (ay + by) / 2);
   }
 
   const xy = new Float64Array((nEnd + nMid) * 2);

@@ -2623,11 +2623,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
        * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
        * (misure del tetto: scripts/perf-cp7b.cjs); con `store` il risultato va nella cache e lo snap lo usa.
        */
-      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; store?: boolean } = {}) => {
+      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; store?: boolean; clear?: boolean } = {}) => {
         const doc = pdf;
         const info = doc?.pages[n - 1];
         if (!doc || !info) throw new Error('nessun documento o pagina inesistente');
         const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+        if (o.clear) pdfSnapCache.clear(); // per misurare la memoria di una lettura senza quella gia' in cache
         const t0 = performance.now();
         const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
         const wallMs = performance.now() - t0;

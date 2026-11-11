@@ -367,9 +367,9 @@ async function touchSuite(browser) {
   let last = objs[objs.length - 1];
   check('tocco: il primo punto inserito coincide con l\'Estremo del PDF', last && last.kind === 'segment' && near(last.points[0].x, target.x, USER_TOL) && near(last.points[0].y, target.y, USER_TOL), JSON.stringify(last?.points?.[0]));
   // un Punto medio
-  const mt = pts.mids['centro del lato basso'];
+  const mt = pts.mids['centro del lato destro']; // isolato: a 390 px (0.4 px/pt) il raggio del dito e' ~55 pt e altrove ci sono Estremi piu' vicini
   const sm = await clientOfUser(page, mt);
-  await touch(cdp, 'touchStart', [[sm.x - 3, sm.y - 16]]);
+  await touch(cdp, 'touchStart', [[sm.x - 16, sm.y + 2]]);
   await page.waitForTimeout(120);
   m = await snapMark(page);
   check('tocco: a 16 px da un Punto medio del PDF compare il marcatore Punto medio', !!m && m.kind === 'mid' && m.label === 'Punto medio' && dist(m, sm) < 0.75, JSON.stringify(m));
@@ -491,11 +491,14 @@ async function layoutSuite(browser) {
       else check(`${label}, A+ ${[14, 16, 18, 20, 22][uiIdx]}: se l'interruttore PDF e' nella barra, la barra NON scorre in orizzontale`, !o.vis || o.barScroll <= o.barClient + 0.5, JSON.stringify(o));
       if (w === 1280) check(`${label}: a 1280 px l'interruttore PDF sta nella barra di stato`, o.vis, JSON.stringify(o));
       // il pannello ha sempre l'interruttore
-      if (phoneLike) {
+      let drawer = false;
+      if (!(await panelToggle(page, 'pdf').isVisible())) {
+        // sotto 1280 px il pannello e' a scomparsa: si apre dal pulsante della barra superiore
+        drawer = true;
         await page.locator('.insp-toggle').click();
         await page.waitForTimeout(250);
       }
-      check(`${label}, A+ ${[14, 16, 18, 20, 22][uiIdx]}: il pannello "Aggancio e griglia" ha l'interruttore PDF visibile`, await panelToggle(page, 'pdf').isVisible());
+      check(`${label}, A+ ${[14, 16, 18, 20, 22][uiIdx]}: il pannello "Aggancio e griglia" ha l'interruttore PDF visibile${drawer ? ' (aprendo il pannello a scomparsa)' : ''}`, await panelToggle(page, 'pdf').isVisible());
       if (phoneLike) {
         // dal pannello si accende e si spegne
         await panelToggle(page, 'pdf').click();
@@ -515,6 +518,7 @@ async function scanSuite(browser) {
   setSection('scansione');
   const { ctx, page, errors } = await desktop(browser);
   await openDoc(page, 'A4 scansione (immagine)');
+  const note = await status(page); // prima di scegliere uno strumento: anche la scelta dello strumento scrive nella riga dei messaggi
   await tool(page, 'Retta');
   const st = await pdfState(page);
   if (st) check('scansione: lo stato e\' "assente" (immagine), nessun punto', st.state && st.state.kind === 'absent' && st.state.why === 'image', JSON.stringify(st.state));
@@ -527,7 +531,6 @@ async function scanSuite(browser) {
     if (m) bad.push(JSON.stringify(m));
   }
   check('scansione: nessun aggancio (nessun marcatore) in tre punti', bad.length === 0, bad.join(' | '));
-  const note = await status(page);
   check('scansione: la riga dei messaggi dice che e\' una scansione e che gli oggetti disegnati si agganciano come sempre', /scansione/.test(note) && /oggetti disegnati si agganciano come sempre/.test(note), note);
   // un oggetto disegnato si aggancia come sempre
   await page.evaluate(() => window.__gtpdf.addSpecs(1, [{ k: 'segment', pts: [[0.3, 0.5], [0.6, 0.5]] }]));
@@ -828,6 +831,16 @@ async function quoteSuite(browser) {
     const scaleLbl = await page.locator('.st-scale-btn').innerText();
     info(`${title}: calibrazione sul riferimento di 100 mm agganciato; il dialogo diceva "${measured.replace(/\s+/g, ' ')}", scala ${scaleLbl}`);
     check(`${title}: la scala e' 1:1 (il riferimento e' di 100 mm)`, /^1:1(\.0+)?$|^1:1$/.test(scaleLbl.trim()) || /^1[:.]/.test(scaleLbl.trim()), scaleLbl);
+    // Distanza fra due angoli opposti del rettangolo (messaggio di stato), prima della quota
+    await tool(page, 'Distanza');
+    await click(page, await clientOfUser(page, pts.ends['angolo rettangolo (basso sx)']), 3, -3);
+    await click(page, await clientOfUser(page, pts.ends['angolo rettangolo (alto dx)']), -3, 3);
+    await page.waitForTimeout(150);
+    const msg = await status(page);
+    const dd = Math.hypot(box[2] - 20, box[3] - 20);
+    const wantD = (dd * 25.4) / 72;
+    const got = parseFloat((/Distanza ([\d.]+) mm/.exec(msg) || [])[1]);
+    check(`${title}: Distanza fra due angoli opposti del rettangolo = ${wantD.toFixed(2)} mm entro ${MM_TOL} mm`, Math.abs(got - wantD) <= MM_TOL, `${msg} (atteso ${wantD.toFixed(4)})`);
     // quota allineata fra due punti del PDF: lato basso del rettangolo (angolo basso sx - angolo basso dx)
     const pa = pts.ends['angolo rettangolo (basso sx)'];
     const pb = pts.ends['angolo rettangolo (basso dx)'];
@@ -837,6 +850,8 @@ async function quoteSuite(browser) {
     await click(page, await clientOfUser(page, pa), 3, -3);
     await click(page, await clientOfUser(page, pb), -3, 3);
     await click(page, await clientOfUser(page, { x: box[0] + box[2] * 0.3, y: box[1] + 36 }), 0, 0);
+    await page.keyboard.press('Enter'); // conferma il valore automatico della quota (il tastierino e' aperto)
+    await page.waitForTimeout(120);
     const st = await page.evaluate(() => window.__gtpdf.state().pages[0]);
     const dim = st.objects.find((o) => o.kind === 'dim');
     check(`${title}: la quota e' stata inserita`, !!dim, JSON.stringify(st.objects.map((o) => o.kind)));
@@ -847,15 +862,6 @@ async function quoteSuite(browser) {
       info(`${title}: lato del rettangolo ${w.toFixed(3)} pt = ${wantMm.toFixed(4)} mm attesi; la quota dice "${txt}"`);
       check(`${title}: il valore della quota e' uguale a quello atteso (${wantMm.toFixed(2)} mm) entro ${MM_TOL} mm`, Math.abs(val - wantMm) <= MM_TOL, `quota ${val}, attesi ${wantMm.toFixed(4)}`);
     }
-    // la stessa misura con "Distanza": messaggio di stato
-    await tool(page, 'Distanza');
-    await click(page, await clientOfUser(page, pts.ends['angolo rettangolo (basso sx)']), 3, -3);
-    await click(page, await clientOfUser(page, pts.ends['angolo rettangolo (alto dx)']), -3, 3);
-    const msg = await status(page);
-    const dd = Math.hypot(box[2] - 20, box[3] - 20);
-    const wantD = (dd * 25.4) / 72;
-    const got = parseFloat((/Distanza ([\d.]+) mm/.exec(msg) || [])[1]);
-    check(`${title}: Distanza fra due angoli opposti del rettangolo = ${wantD.toFixed(2)} mm entro ${MM_TOL} mm`, Math.abs(got - wantD) <= MM_TOL, `${msg} (atteso ${wantD.toFixed(4)})`);
     check(`${title}: nessun errore di pagina`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }

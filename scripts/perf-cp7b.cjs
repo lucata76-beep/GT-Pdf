@@ -13,7 +13,7 @@ const { PDFDocument, PDFName } = require('@cantoo/pdf-lib');
 const { createE2E } = require('./e2e-lib.cjs');
 
 const lib = createE2E({ name: 'perf-cp7b', out: process.argv[2], port: 4240, hport: 4241, zoom: 2 });
-const { setSection, info, openBytes } = lib;
+const { setSection, info } = lib;
 const SHEET = [1190.551, 841.89]; // A3 orizzontale
 const SIZES = (process.env.PERF_SIZES || '10000,100000,300000').split(',').map(Number).concat(process.env.PERF_EXTRA ? [Number(process.env.PERF_EXTRA)] : []);
 
@@ -73,16 +73,19 @@ async function makePdf(n, rotate, rnd) {
         const t0 = Date.now();
         const { bytes, verts } = await makePdf(n, rotate, rnd);
         info(`${n} tratti, /Rotate ${rotate}: PDF di ${(bytes.length / 1048576).toFixed(2)} MB costruito in ${Date.now() - t0} ms`);
-        await openBytes(page, `perf-${n}-${rotate}.pdf`, bytes);
+        const tOpen = Date.now();
+        await page.setInputFiles('input[type=file]', { name: `perf-${n}-${rotate}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
         // aspetta la lettura avviata dall'app all'apertura (con il tetto di serie: pronto o troppo fitta)
-        await page.waitForFunction(() => window.__gtpdf.pdfSnap().busy.length === 0 && window.__gtpdf.pdfSnap().cached.length > 0, null, { timeout: 300000 });
+        await page.waitForFunction(() => window.__gtpdf && window.__gtpdf.pages().length > 0 && window.__gtpdf.pdfSnap().busy.length === 0 && window.__gtpdf.pdfSnap().cached.length > 0, null, { timeout: 300000 });
+        const openToReadyMs = Date.now() - tOpen;
+        await page.waitForSelector('.viewer-stage canvas');
         const atOpen = await page.evaluate(() => window.__gtpdf.pdfSnap().state);
         // lettura senza tetto, memoria prima e dopo
         const mem = await page.evaluate(async () => {
           const used = () => performance.memory.usedJSHeapSize;
           window.gc();
           const before = used();
-          const r = await window.__gtpdf.pdfSnapLoad(1, { maxSegments: 1e12, maxCoords: 1e12, store: true });
+          const r = await window.__gtpdf.pdfSnapLoad(1, { maxSegments: 1e12, maxCoords: 1e12, store: true, clear: true });
           window.gc();
           return { before, after: used(), r };
         });
@@ -115,16 +118,16 @@ async function makePdf(n, rotate, rnd) {
         const mouseIdx = await run('index', 10);
         const touchIdx = await run('index', 22);
         const mouseLin = await run('linear', 10);
-        rows.push({ n, rotate, atOpen: atOpen && atOpen.kind, st, wall: mem.r.wallMs, heapMB: (mem.after - mem.before) / 1048576, mouseIdx, touchIdx, mouseLin, zoom });
+        rows.push({ n, rotate, atOpen: atOpen && atOpen.kind, atOpenOp: atOpen && atOpen.timings ? atOpen.timings.opListMs : null, openToReadyMs, st, wall: mem.r.wallMs, heapMB: (mem.after - mem.before) / 1048576, mouseIdx, touchIdx, mouseLin, zoom });
         await ctx.close();
       }
     }
     console.log(`\nChromium del contenitore (non iPhone, non il browser dell'utente); zoom di adattamento ~${rows[0] ? rows[0].zoom.toFixed(3) : '?'} px/pt; foglio A3 orizzontale ${SHEET.join(' x ')} pt.`);
-    console.log('\n| tratti | Rotate | stato all\'apertura (tetto di serie) | punti (estremi + medi) | lettura getOperatorList | estrazione | punti | indice | byte punti + indice | heap dopo - prima |');
-    console.log('|---|---|---|---|---|---|---|---|---|---|');
+    console.log('\n| tratti | Rotate | stato all\'apertura (tetto di serie) | apertura del file fino alla fine della lettura | punti (estremi + medi) | getOperatorList (alla prima lettura) | estrazione | punti | indice | byte punti + indice | heap dopo - prima (cache svuotata, gc) |');
+    console.log('|---|---|---|---|---|---|---|---|---|---|---|');
     for (const r of rows) {
       const t = r.st.timings;
-      console.log(`| ${r.n} | ${r.rotate} | ${r.atOpen} | ${r.st.nEnd} + ${r.st.nMid} | ${t.opListMs.toFixed(0)} ms | ${t.extractMs.toFixed(0)} ms | ${t.pointsMs.toFixed(0)} ms | ${t.indexMs.toFixed(0)} ms | ${(r.st.bytes / 1048576).toFixed(2)} MB | ${r.heapMB.toFixed(1)} MB |`);
+      console.log(`| ${r.n} | ${r.rotate} | ${r.atOpen} | ${r.openToReadyMs} ms | ${r.st.nEnd} + ${r.st.nMid} | ${r.atOpenOp === null ? 'n/d (stato ' + r.atOpen + ')' : r.atOpenOp.toFixed(0) + ' ms'} | ${t.extractMs.toFixed(0)} ms | ${t.pointsMs.toFixed(0)} ms | ${t.indexMs.toFixed(0)} ms | ${(r.st.bytes / 1048576).toFixed(2)} MB | ${r.heapMB.toFixed(1)} MB |`);
     }
     console.log('\n| tratti | Rotate | raggio | sorgente | agganci / chiamate | mediana per chiamata (lotti) | massimo per chiamata (lotti) | singola chiamata: massimo (ris. 0,1 ms) |');
     console.log('|---|---|---|---|---|---|---|---|');

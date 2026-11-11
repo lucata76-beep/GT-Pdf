@@ -1,7 +1,7 @@
 // Snap sul PDF, per pagina (V3.1, CP7b): lettura asincrona dei tratti rettilinei di UNA pagina (`getOperatorList`, `getOptionalContentConfig`), estrazione (src/pdf/geometry.ts), punti di snap
 // (src/pdf/snapPoints.ts) e indice spaziale (src/pdf/pointIndex.ts), con lo STATO della pagina, i messaggi e la cache delle ultime N pagine.
 //
-// Niente DOM. NIENTE `page.cleanup()` (a differenza di `measurePage`, la misura di Diagnostica, che la libera per misurare una lettura «fresca»).
+// Niente DOM. `page.cleanup()` solo DOPO l'estrazione e solo perche' il documento e' dedicato (vedi sotto): sul documento del visore non va MAI chiamata da qui.
 // Il documento da passare a `loadPdfSnap` NON e' quello del visore ma una seconda istanza sugli stessi byte (`opsDocument` di src/pdf/loader.ts): una `getOperatorList()` in
 // parallelo a un `render()` della stessa pagina dello stesso documento da' un elenco sbagliato se la pagina ha annotazioni con un aspetto proprio (misurato in Chromium).
 // I punti stanno in una cache NOSTRA, indipendente da PDF.js: l'esportazione chiama `page.cleanup()` e `doc.cleanup()` sul documento del visore.
@@ -14,11 +14,12 @@ import { type SheetMap, buildSnapPoints, visibleLineCount } from './snapPoints';
 
 /**
  * TETTO PROVVISORIO di tratti rettilinei VISIBILI per pagina: sopra, lo snap sul PDF di quella pagina e' spento (e il messaggio dice quanti tratti ha la pagina e qual e' il tetto).
- * Scelto da Code misurando nel browser (Chromium, NON iPhone) con scripts/perf-cp7b.cjs: vedi docs/PIANO.md (decisione 111). L'utente lo ritara alla fine con i suoi PDF densi.
+ * Scelto da Code misurando nel browser (Chromium, NON iPhone) con scripts/perf-cp7b.cjs (ragione e numeri: docs/PIANO.md, decisione 111): con l'indice `findSnap` resta sotto 4 ms
+ * anche a 600.000 tratti; a limitare e' il blocco una tantum della lettura (estrazione, punti e indice, in fasi separate) e la memoria. L'utente lo ritara alla fine con i suoi PDF densi.
  */
-export const SNAP_MAX_SEGMENTS = 150_000;
+export const SNAP_MAX_SEGMENTS = 300_000;
 /** Limite di sicurezza dell'estrazione per lo snap (numeri letti dai Float32Array dei percorsi): sopra, la pagina e' «troppo grande» e lo snap PDF e' spento (la geometria sarebbe parziale). */
-export const SNAP_MAX_COORDS = 3_000_000;
+export const SNAP_MAX_COORDS = 4_000_000;
 /** Quante pagine tiene la cache per documento (le ultime usate). */
 export const SNAP_CACHE_PAGES = 3;
 
@@ -81,6 +82,12 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
       maxCoords: deps.maxCoords ?? SNAP_MAX_COORDS,
     });
     const t3 = now();
+    // Il documento e' dedicato alle letture dello snap (non e' quello del visore): l'elenco di operazioni, finito il suo lavoro, si libera (memoria). I punti sono nella nostra cache.
+    try {
+      page.cleanup();
+    } catch {
+      /* nessun effetto sul risultato */
+    }
     if (!res.ok) return { kind: 'unavailable', reason: res.reason };
     if (res.stats.truncated) return { kind: 'truncated' };
     const g = res.geometry;

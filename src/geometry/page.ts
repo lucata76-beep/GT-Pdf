@@ -70,6 +70,11 @@ export class PageGeometry {
     this.m = [a * s, b * s, c * s, d * s, offX - a * s * cx - c * s * cy, offY - b * s * cx - d * s * cy];
   }
 
+  /** I sei numeri [a, b, c, d, e, f] della trasformazione utente -> foglio (x' = a x + c y + e, y' = b x + d y + f): per chi converte molti punti senza allocare (src/pdf/snapPoints.ts). */
+  get matrix(): readonly [number, number, number, number, number, number] {
+    return this.m;
+  }
+
   userToSheet(p: UserPoint): SheetPoint {
     const m = this.m;
     return { x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] };

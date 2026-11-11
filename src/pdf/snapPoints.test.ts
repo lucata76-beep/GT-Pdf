@@ -383,9 +383,9 @@ describe('regole di costruzione su elenchi di tratti scritti a mano', () => {
     expect(p.nMid).toBe(1);
     expect(Math.abs(Math.fround(x - 100) / 2 + Math.fround(x + 100) / 2 - fx)).toBeLessThan(1e-4);
     expect(p.stats.mergedMid).toBe(1);
-    // e a destra e a sinistra del bordo di ogni cella da 4 x MERGE_TOL_PT: sempre uniti entro la tolleranza
+    // e a destra e a sinistra del bordo di ogni cella da 16 x MERGE_TOL_PT: sempre uniti entro la tolleranza
     for (let k = 0; k < 200; k++) {
-      const base = 100 + k * 0.004; // ogni bordo di cella
+      const base = 100 + k * 0.016; // ogni bordo di cella (celle da 16 x MERGE_TOL_PT)
       const q = buildSnapPoints(geom([[base - 0.0004, 50, 450, 50], [base + 0.0004, 50, 300, 300]]), flat); // due punti a 0.0008 pt, uno per parte del bordo
       expect(q.stats.mergedEnd, `bordo ${base}`).toBe(1);
     }

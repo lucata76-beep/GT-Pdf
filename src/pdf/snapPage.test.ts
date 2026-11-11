@@ -124,20 +124,21 @@ describe('stati di una pagina', () => {
     expect((await loadPdfSnap(strange, 1, sheet, { yieldToUi: noYield })).kind).toBe('unavailable');
   });
 
-  it('non chiama page.cleanup() e lascia l\'elenco di operazioni condiviso con il visore (stesso oggetto prima e dopo)', async () => {
-    const doc = await open(await loadTestPdf('a4-vettoriale.pdf'));
-    const page = await doc.getPage(1);
-    let cleaned = 0;
-    const orig = page.cleanup.bind(page);
-    page.cleanup = (...a: Parameters<typeof orig>) => {
-      cleaned++;
-      return orig(...a);
-    };
-    const before = await page.getOperatorList(); // come farebbe render() del visore
+  it('libera l\'elenco di operazioni della SUA pagina dopo la lettura (page.cleanup una volta, dopo l\'estrazione: il documento e\' dedicato) e non tocca le altre pagine', async () => {
+    const doc = await open(await loadTestPdf('misto-3-pagine.pdf'));
+    const p1 = await doc.getPage(1);
+    const p2 = await doc.getPage(2);
+    const calls: string[] = [];
+    for (const [n, p] of [[1, p1], [2, p2]] as const) {
+      const orig = p.cleanup.bind(p);
+      p.cleanup = (...a: Parameters<typeof orig>) => {
+        calls.push(`pagina ${n}`);
+        return orig(...a);
+      };
+    }
     const s = await loadPdfSnap(doc, 1, await sheetOf(doc, 1), { yieldToUi: noYield });
     expect(s.kind).toBe('ready');
-    expect(cleaned).toBe(0);
-    expect(await page.getOperatorList()).toBe(before);
+    expect(calls).toEqual(['pagina 1']);
   });
 
   it('usa la geometria del foglio della pagina data: misto-3-pagine.pdf (A4, A3 orizzontale, A4 con /Rotate 90) ha tre insiemi di punti diversi', async () => {
