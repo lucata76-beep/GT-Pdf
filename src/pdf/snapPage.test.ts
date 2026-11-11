@@ -217,6 +217,16 @@ describe('cache delle ultime N pagine', () => {
     expect(c.size).toBe(0);
     expect(c.get(1)).toBeUndefined();
   });
+  it('peek legge senza cambiare l\'ordine di uso', () => {
+    const c = new PageCache<string>(2);
+    c.set(1, 'a');
+    c.set(2, 'b');
+    expect(c.peek(1)).toBe('a');
+    expect(c.pages()).toEqual([1, 2]); // get() la metterebbe in coda
+    c.set(3, 'c'); // esce la 1: peek non l'ha resa piu' recente
+    expect(c.pages()).toEqual([2, 3]);
+    expect(c.peek(9)).toBeUndefined();
+  });
   it('max 1: tiene solo l\'ultima', () => {
     const c = new PageCache<number>(1);
     c.set(1, 1);

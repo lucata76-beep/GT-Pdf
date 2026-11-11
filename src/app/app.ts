@@ -62,7 +62,10 @@ import { DEFAULT_TEXT_PT } from '../model/textStyle';
 import { makePdfFile, makeProjectFile } from '../export/deliver';
 import { exportFileName, projectFileName } from '../export/fileName';
 import { type OpenedPdf, type PageInfo, closePdf, openPdf } from '../pdf/loader';
+import { log } from '../diag/log';
 import { describeOpenError } from '../pdf/openError';
+import { scanNear } from '../pdf/pointIndex';
+import { PageCache, type PdfSnapState, loadPdfSnap, pdfSnapLogLine, pdfSnapNote } from '../pdf/snapPage';
 import { LIMITS, type Project, parseProject, serializeProject, verifyProjectText } from '../project/format';
 import { sha256Hex } from '../project/hash';
 import { comparePageGeometry, decideOutcome } from '../project/match';
@@ -166,6 +169,17 @@ const SNAP_MESSAGE: Record<SnapSwitch, { on: string; off: string }> = {
   tangent: { on: 'Tangente attiva: dopo il primo punto il punto si aggancia al punto di tangenza su cerchi e archi', off: 'Tangente disattivata' },
 };
 
+/**
+ * Interruttore «PDF» (V3.1, CP7b): Estremo e Punto medio si agganciano anche ai tratti rettilinei del disegno del PDF. NON e' un tipo di snap (non sta in `SnapSwitch`): e' la
+ * sorgente dei punti; stessi marcatori e stessi nomi di Estremo e Punto medio, che restano i loro interruttori (con Estremo spento non c'e' l'Estremo del PDF).
+ */
+const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, oltre che ai tuoi oggetti (non vale per le scansioni)';
+const PDF_SNAP_MESSAGE = {
+  on: 'PDF attivo: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF',
+  off: 'PDF disattivato: l\'aggancio resta solo sugli oggetti disegnati',
+  reading: 'PDF attivo: il disegno di questa pagina è in lettura, l\'aggancio compare tra un momento',
+};
+
 export interface AppOptions {
   openDiagnostics: () => void;
 }
@@ -187,6 +201,16 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
    * salva nel progetto (come ORTO). L'Origine non ha un interruttore: e' un candidato quando la pagina ha un'origine e c'e' almeno un interruttore acceso.
    */
   const snapOn: Record<SnapSwitch, boolean> = { end: true, mid: true, center: true, intersection: true, quadrant: true, perpendicular: true, tangent: true };
+  /**
+   * Snap sul PDF (V3.1, CP7b): interruttore «PDF», acceso all'avvio, stato della sessione (NON si salva nel progetto, come gli altri). I punti dei tratti rettilinei di ogni pagina si
+   * leggono in modo asincrono all'apertura della pagina e stanno in una cache NOSTRA delle ultime 3 pagine (l'esportazione libera le cache di PDF.js: `page.cleanup()`, `doc.cleanup()`).
+   */
+  let pdfSnapOn = true;
+  const pdfSnapCache = new PageCache<PdfSnapState>();
+  /** Pagine con una lettura in corso, e pagine il cui stato e' gia' stato scritto nel registro e detto nella riga dei messaggi (una volta per pagina e per documento). */
+  const pdfSnapBusy = new Set<number>();
+  const pdfSnapLogged = new Set<number>();
+  const pdfSnapSaid = new Set<number>();
   /** La scena dei tipi calcolati (riquadri in pt del foglio): si rifa' quando cambiano gli oggetti o la pagina (versione del modello), non a ogni movimento del mouse. */
   let snapScene: SnapScene | null = null;
   let snapSceneKey = '';
@@ -311,7 +335,73 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const g = viewer.geometry;
     if (!g || !pdf || !SNAP_KINDS.some((k) => snapOn[k])) return null;
     const calc = snapOn.intersection || snapOn.quadrant || snapOn.perpendicular || snapOn.tangent;
-    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn, pending, { scene: calc ? sceneFor(g) : undefined, anchor: construction.anchor, origin: model.origin(pageNo) });
+    const ps = pdfSnapOn ? pdfSnapCache.peek(pageNo) : undefined; // i punti del PDF della pagina corrente, solo se pronti (peek: leggere non cambia l'ordine della cache)
+    return findSnap(model.objects(pageNo), g, raw, snapRadiusPt(touch, viewer.zoomValue), snapOn, pending, {
+      scene: calc ? sceneFor(g) : undefined,
+      anchor: construction.anchor,
+      origin: model.origin(pageNo),
+      pdf: ps?.kind === 'ready' ? ps.source : null,
+    });
+  }
+
+  // ---------- Snap sul PDF: lettura per pagina, cache, messaggi (V3.1, CP7b) ----------
+  /** Lo stato dello snap sul PDF della pagina `n`: `'busy'` se la lettura e' in corso, `null` se non e' mai partita. */
+  const pdfSnapStateOf = (n: number): PdfSnapState | 'busy' | null => pdfSnapCache.peek(n) ?? (pdfSnapBusy.has(n) ? 'busy' : null);
+  /** Dice nella riga dei messaggi (una volta per pagina) perche' lo snap sul PDF non c'e', se la pagina e' pronta e non ce l'ha. Con `force` anche se gia' detto. */
+  function announcePdfSnap(n: number, force = false): void {
+    const st = pdfSnapCache.peek(n);
+    if (!st || st.kind === 'ready' || (!force && pdfSnapSaid.has(n))) return;
+    pdfSnapSaid.add(n);
+    const note = pdfSnapNote(st, n);
+    if (note) say(note);
+  }
+  /**
+   * Avvia (se serve) la lettura dei punti del PDF della pagina `n`: in modo asincrono, senza bloccare il visore ne' il disegno (le fasi sincrone sono separate da cedimenti al browser).
+   * Il risultato va nella cache della SUA pagina: se nel frattempo la pagina e' cambiata non viene applicato a quella sbagliata (`snapAt` legge la cache della pagina corrente).
+   */
+  function ensurePdfSnap(n: number): void {
+    const doc = pdf;
+    const info = doc?.pages[n - 1];
+    if (!doc || !info) return;
+    if (pdfSnapCache.get(n) !== undefined) {
+      if (!opening) announcePdfSnap(n);
+      return;
+    }
+    if (pdfSnapBusy.has(n)) return;
+    pdfSnapBusy.add(n);
+    const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+    void loadPdfSnap(doc.doc, n, sheet).then((state) => {
+      if (pdf !== doc) return; // documento chiuso o sostituito: il risultato non serve a nessuno
+      pdfSnapBusy.delete(n);
+      pdfSnapCache.set(n, state);
+      if (!pdfSnapLogged.has(n)) {
+        pdfSnapLogged.add(n);
+        log(pdfSnapLogLine(state, n), state.kind === 'unavailable' ? 'err' : 'info');
+      }
+      if (pageNo === n) {
+        if (!opening) announcePdfSnap(n);
+        viewer.refreshAim(); // l'aggancio compare anche a mouse fermo
+      }
+    });
+  }
+  /** Svuota cache e memoria dei messaggi: cambio o chiusura del documento. Le letture in corso non vengono piu' applicate (il documento non e' piu' lo stesso). */
+  function resetPdfSnap(): void {
+    pdfSnapCache.clear();
+    pdfSnapBusy.clear();
+    pdfSnapLogged.clear();
+    pdfSnapSaid.clear();
+  }
+  function setPdfSnap(on: boolean): void {
+    pdfSnapOn = on;
+    setPressed('pdf', on);
+    const st = pdf ? pdfSnapStateOf(pageNo) : null;
+    if (!on) say(PDF_SNAP_MESSAGE.off);
+    else if (st === 'busy') say(PDF_SNAP_MESSAGE.reading);
+    else if (st && st.kind !== 'ready') {
+      pdfSnapSaid.add(pageNo);
+      say(`PDF attivo. ${pdfSnapNote(st, pageNo) ?? ''}`.trim());
+    } else say(PDF_SNAP_MESSAGE.on);
+    viewer.refreshAim();
   }
 
   /** Passo della griglia in pt FISICI del foglio per la pagina corrente (mm reali con la scala della pagina, altrimenti mm del foglio). */
@@ -373,22 +463,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   const nextBtn = h('button', { class: 'btn st-btn', type: 'button', 'aria-label': 'Pagina successiva', disabled: true, onclick: () => void goTo(pageNo + 1) }, icon('chevron-right'));
   const pager = h('div', { class: 'st-pager' }, prevBtn, stPage, nextBtn);
   const scaleBtn = h('button', { class: 'st-scale-btn num', type: 'button', title: 'Calibra la scala di questa pagina', onclick: () => selectTool('calibrate') }, 'non calibrata');
-  /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio, Centro, Intersezione e ORTO (`data-toggle` li distingue). */
-  const mkToggle = (id: 'end' | 'mid' | 'center' | 'intersection' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
+  /** Interruttore della barra di stato: stesso componente per Estremo, Punto medio, Centro, Intersezione, PDF e ORTO (`data-toggle` li distingue). */
+  const mkToggle = (id: 'end' | 'mid' | 'center' | 'intersection' | 'pdf' | 'ortho', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement =>
     h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': String(on), 'data-toggle': id, title, onclick: fn }, label);
   const endBtn = mkToggle('end', SNAP_LABEL.end, SNAP_TITLE.end, snapOn.end, () => setSnap('end', !snapOn.end));
   const midBtn = mkToggle('mid', SNAP_LABEL.mid, SNAP_TITLE.mid, snapOn.mid, () => setSnap('mid', !snapOn.mid));
   const centerBtn = mkToggle('center', SNAP_LABEL.center, SNAP_TITLE.center, snapOn.center, () => setSnap('center', !snapOn.center));
   const interBtn = mkToggle('intersection', SNAP_LABEL.intersection, SNAP_TITLE.intersection, snapOn.intersection, () => setSnap('intersection', !snapOn.intersection));
+  const pdfBtn = mkToggle('pdf', 'PDF', PDF_SNAP_TITLE, pdfSnapOn, () => setPdfSnap(!pdfSnapOn));
   const orthoBtn = mkToggle('ortho', 'ORTO', 'Ortogonale: il secondo punto va in orizzontale o in verticale', false, () => setOrtho(!ortho));
   const gridBtn = h('button', { class: 'st-toggle', type: 'button', 'aria-pressed': 'false', 'data-toggle': 'grid', title: 'Griglia: mostra i nodi e arrotonda i punti ai nodi (passo nel pannello a destra)', onclick: () => setGridOn(!gridOn) }, 'Griglia');
   // Gli stessi interruttori stanno anche nel pannello a destra ("Aggancio e griglia"): sotto 720 px la barra di stato resta compatta (X, Y, scala, ORTO: DESIGN.md) e
   // quei tre vivono solo li'. Ogni interruttore ha piu' pulsanti, che mostrano tutti lo stesso stato.
-  const toggleBtns: Record<SnapSwitch | 'grid', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], center: [centerBtn], intersection: [interBtn], quadrant: [], perpendicular: [], tangent: [], grid: [gridBtn] };
-  const setPressed = (id: SnapSwitch | 'grid', on: boolean): void => {
+  const toggleBtns: Record<SnapSwitch | 'grid' | 'pdf', HTMLButtonElement[]> = { end: [endBtn], mid: [midBtn], center: [centerBtn], intersection: [interBtn], quadrant: [], perpendicular: [], tangent: [], pdf: [pdfBtn], grid: [gridBtn] };
+  const setPressed = (id: SnapSwitch | 'grid' | 'pdf', on: boolean): void => {
     for (const b of toggleBtns[id]) b.setAttribute('aria-pressed', String(on));
   };
-  const panelToggle = (id: SnapSwitch | 'grid', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
+  const panelToggle = (id: SnapSwitch | 'grid' | 'pdf', label: string, title: string, on: boolean, fn: () => void): HTMLButtonElement => {
     const b = h('button', { class: 'btn panel-toggle', type: 'button', 'aria-pressed': String(on), 'data-panel-toggle': id, title, onclick: fn }, label);
     toggleBtns[id].push(b);
     return b;
@@ -402,11 +493,22 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     midBtn,
     centerBtn,
     interBtn,
+    pdfBtn,
     orthoBtn,
     gridBtn,
     statusMsg,
     pager,
   );
+  /**
+   * Il pulsante «PDF» sta nella barra di stato da 720 px in su SOLO se ci sta senza scorrimento orizzontale (come l'Intersezione, decisione I1 di CP6f, ma qui la barra non deve
+   * scorrere); altrimenti, e sotto 720 px (dove la barra tiene solo ORTO: CSS), vive solo nel pannello «Aggancio e griglia». Si rimisura quando cambiano la larghezza della barra,
+   * la dimensione dell'interfaccia (A-/A+), l'etichetta della scala e le pagine. Una barra non visibile (schermata Diagnostica) ha larghezza 0: non si decide.
+   */
+  function fitPdfBarBtn(): void {
+    pdfBtn.hidden = false;
+    if (statusbar.clientWidth > 0 && statusbar.scrollWidth > statusbar.clientWidth + 0.5) pdfBtn.hidden = true;
+  }
+  new ResizeObserver(() => fitPdfBarBtn()).observe(statusbar);
   /** Ultima posizione del cursore sul foglio (pt fisici), o null se e' fuori dalla pagina: serve a rifare i valori quando cambiano origine, scala, zoom o pagina. */
   let lastCursor: SheetPoint | null = null;
   function renderCursor(): void {
@@ -459,6 +561,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const s = pdf ? model.scale(pageNo) : null;
     scaleBtn.textContent = s ? scaleLabel(s) : 'non calibrata';
     scaleBtn.disabled = !pdf;
+    fitPdfBarBtn(); // l'etichetta cambia larghezza
   };
 
   // ---------- Barra superiore ----------
@@ -479,6 +582,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     saveUiSize(uiSize);
     sizeDown.disabled = uiSize <= 0;
     sizeUp.disabled = uiSize >= UI_SIZES.length - 1;
+    fitPdfBarBtn();
   };
   setUiSize(uiSize);
 
@@ -786,6 +890,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     panelToggle('quadrant', SNAP_LABEL.quadrant, SNAP_TITLE.quadrant, snapOn.quadrant, () => setSnap('quadrant', !snapOn.quadrant)),
     panelToggle('perpendicular', SNAP_LABEL.perpendicular, SNAP_TITLE.perpendicular, snapOn.perpendicular, () => setSnap('perpendicular', !snapOn.perpendicular)),
     panelToggle('tangent', SNAP_LABEL.tangent, SNAP_TITLE.tangent, snapOn.tangent, () => setSnap('tangent', !snapOn.tangent)),
+    panelToggle('pdf', 'PDF', PDF_SNAP_TITLE, pdfSnapOn, () => setPdfSnap(!pdfSnapOn)),
     panelToggle('grid', 'Griglia', gridBtn.title, false, () => setGridOn(!gridOn)),
   );
 
@@ -2021,6 +2126,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     updateChrome();
     try {
       const rendering = viewer.setPage(await pdf.doc.getPage(pageNo));
+      ensurePdfSnap(pageNo); // V3.1: i punti del disegno del PDF di questa pagina, in modo asincrono (non aspetta il disegno)
       refreshScene(); // la geometria della nuova pagina e' gia' impostata: gli oggetti compaiono subito
       gridReportedPt = gridOn ? gridStepNow() : 0;
       refreshGrid(); // ogni pagina ha la sua scala, quindi il suo passo in pt
@@ -2039,6 +2145,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     cancelEntry();
     const old = pdf;
     pdf = null;
+    resetPdfSnap();
     pageNo = 1;
     history.clear();
     model.clear();
@@ -2384,6 +2491,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     const prev = pdf;
     cancelEntry();
     pdf = next;
+    resetPdfSnap();
     pageNo = 1;
     history.clear();
     model.clear();
@@ -2403,6 +2511,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       const next = await openPdf(name, bytes);
       await installPdf(next, null);
       say(`${name}: ${next.pages.length} ${next.pages.length === 1 ? 'pagina' : 'pagine'}, aperto in ${fmt(next.openMs, 0)} ms`);
+      announcePdfSnap(pageNo); // se la lettura dei punti del PDF e' gia' finita e la pagina non ha snap, lo dice adesso (non prima: il messaggio di apertura lo avrebbe coperto)
     } catch (e) {
       say('');
       const d = describeOpenError(name, e);
@@ -2495,6 +2604,63 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           singleMs.push(performance.now() - t0);
         }
         return { hits, calls, batch: o.batch, batchMs, singleMs, sceneMs };
+      },
+      /** Snap sul PDF (CP7b): stato della pagina corrente, interruttore, pagine in cache e in lettura (per le prove). */
+      pdfSnap: () => {
+        const summarize = (st: PdfSnapState | 'busy' | null): unknown =>
+          st === null || st === 'busy'
+            ? st
+            : st.kind === 'ready'
+              ? { kind: 'ready', segments: st.segments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
+              : st;
+        return { on: pdfSnapOn, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
+      },
+      /**
+       * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
+       * (misure del tetto: scripts/perf-cp7b.cjs); con `store` il risultato va nella cache e lo snap lo usa.
+       */
+      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; store?: boolean } = {}) => {
+        const doc = pdf;
+        const info = doc?.pages[n - 1];
+        if (!doc || !info) throw new Error('nessun documento o pagina inesistente');
+        const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+        const t0 = performance.now();
+        const st = await loadPdfSnap(doc.doc, n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
+        const wallMs = performance.now() - t0;
+        if (o.store) pdfSnapCache.set(n, st);
+        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, nEnd: st.nEnd, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
+      },
+      /**
+       * Prestazioni di `findSnap` con i punti del PDF della pagina corrente (che devono essere pronti): `index` usa la griglia, `linear` la scansione lineare di tutti i punti
+       * (solo come confronto). Come `snapRun`: tempo di lotti di `batch` chiamate e di `singles` chiamate una per una.
+       */
+      snapRunPdf: (objects: PageObject[], raws: SheetPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>> }) => {
+        const info = pdf?.pages[pageNo - 1];
+        const st = pdfSnapCache.peek(pageNo);
+        if (!info || !st || st.kind !== 'ready') throw new Error('i punti del PDF della pagina corrente non sono pronti');
+        const g = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
+        const kinds = o.kinds ?? { end: true, mid: true };
+        const pts = st.source.points;
+        const source = o.mode === 'index' ? st.source : { forEachNear: (x: number, y: number, r: number, e: boolean, m: boolean, emit: (x: number, y: number, k: 'end' | 'mid') => void) => scanNear(pts, x, y, r, e, m, emit) };
+        const extra = { pdf: source };
+        let hits = 0;
+        let calls = 0;
+        const batchMs: number[] = [];
+        for (let b = 0; b < o.batches; b++) {
+          const t0 = performance.now();
+          for (let i = 0; i < o.batch; i++) {
+            if (findSnap(objects, g, raws[(b * o.batch + i) % raws.length] as SheetPoint, radius, kinds, [], extra)) hits++;
+            calls++;
+          }
+          batchMs.push(performance.now() - t0);
+        }
+        const singleMs: number[] = [];
+        for (let i = 0; i < (o.singles ?? 500); i++) {
+          const t0 = performance.now();
+          findSnap(objects, g, raws[i % raws.length] as SheetPoint, radius, kinds, [], extra);
+          singleMs.push(performance.now() - t0);
+        }
+        return { hits, calls, batch: o.batch, batchMs, singleMs, nPoints: st.nEnd + st.nMid };
       },
       goTo: (n: number) => goTo(n),
       /** Gli id selezionati (nell'ordine del modello) e le proprieta' dei NUOVI oggetti: per provare che la selezione multipla non le cambia. */

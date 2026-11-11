@@ -166,6 +166,10 @@ export class PageCache<T> {
     this.m.set(n, v);
     return v;
   }
+  /** Legge senza cambiare l'ordine di uso (per le letture frequenti, come a ogni movimento del mouse). */
+  peek(n: number): T | undefined {
+    return this.m.get(n);
+  }
   has(n: number): boolean {
     return this.m.has(n);
   }
