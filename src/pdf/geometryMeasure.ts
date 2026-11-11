@@ -1,11 +1,11 @@
-// Misura per pagina della geometria di un PDF (V3.0, CP7a): chiama page.getOperatorList() (tempi, stesso oggetto la seconda volta), passa l'elenco all'estrattore
-// (src/pdf/geometry.ts), classifica la pagina, legge i livelli del documento e compone il testo di "Copia misura".
+// Misura per pagina della geometria di un PDF (V3.0, CP7a; righe in piu' su cerchi e archi V3.2a, CP7c): chiama page.getOperatorList() (tempi, stesso oggetto la seconda volta), passa
+// l'elenco all'estrattore (src/pdf/geometry.ts), classifica la pagina, legge i livelli del documento e compone il testo di "Copia misura".
 // NIENTE snap, niente uso nell'editor o nel visore: lo usa solo la scheda "Geometria PDF" della pagina Diagnostica (src/diag/geometryCard.ts).
 // Mai eccezioni verso la scheda: ogni errore (di PDF.js o dell'estrazione) torna come { ok: false, reason }.
 import { OPS, version as pdfjsVersion } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { fmt, fmtTrim } from '../geometry/numbers';
-import { BYTES_PER_CUBIC, BYTES_PER_LINE, DEFAULT_MAX_COORDS, type GeometryStats, type OpsTable, type PdfGeometry, extractGeometry } from './geometry';
+import { BYTES_PER_CUBIC, BYTES_PER_LINE, CIRCLE_TOL_ABS, CIRCLE_TOL_REL, DEFAULT_MAX_COORDS, GAP_EDGES, type GeometryStats, type OpsTable, type PdfGeometry, extractGeometry } from './geometry';
 
 /** Massimo di pagine di "Misura tutte le pagine" (le altre non si misurano: la scheda lo dice). */
 export const MAX_PAGES = 200;
@@ -225,6 +225,14 @@ export function measureLines(m: PageMeasure, layers: DocLayers | null): string[]
   lines.push(`segmenti rettilinei dei candidati (lineTo e chiusure con segmento): ${n0(m.nLines)}`);
   lines.push(`lunghezza dei segmenti rettilinei (pt utente): sotto 0.01: ${n0(h[0]!)} · 0.01-0.1: ${n0(h[1]!)} · 0.1-1: ${n0(h[2]!)} · 1-10: ${n0(h[3]!)} · 10 e oltre: ${n0(h[4]!)}`);
   lines.push(`lunghezza minima e massima dei segmenti rettilinei (pt utente): ${s.lineMin === null ? 'nessun segmento' : `${fmtTrim(s.lineMin, 4)} e ${fmtTrim(s.lineMax ?? 0, 4)}`}`);
+  // ---- CP7c: i segmenti sotto 0.01 divisi (lunghezza esattamente 0 e lunghezza fra 0 escluso e 0.01) e le corde delle cubiche
+  lines.push(`segmenti rettilinei dei candidati sotto 0.01 pt utente, divisi: lunghezza esattamente 0: ${n0(s.lineZero)} · fra 0 (escluso) e 0.01: ${n0(h[0]! - s.lineZero)}`);
+  const ch = s.cubicChordHist;
+  lines.push(
+    `corde delle cubiche dei candidati (distanza fra primo e ultimo punto, pt utente; le quadratiche non entrano): sotto 0.01: ${n0(ch[0]!)} · 0.01-0.1: ${n0(ch[1]!)} · 0.1-1: ${n0(ch[2]!)} · 1-10: ${n0(ch[3]!)} · 10 e oltre: ${n0(ch[4]!)}`,
+  );
+  lines.push(`corde delle cubiche dei candidati sotto 0.01 pt utente, divise: lunghezza esattamente 0: ${n0(s.cubicChordZero)} · fra 0 (escluso) e 0.01: ${n0(ch[0]! - s.cubicChordZero)}`);
+  lines.push(`corda minima e massima delle cubiche dei candidati (pt utente): ${s.cubicChordMin === null ? 'nessuna cubica' : `${fmtTrim(s.cubicChordMin, 4)} e ${fmtTrim(s.cubicChordMax ?? 0, 4)}`}`);
   for (const [label, x] of [
     ['tutti i percorsi', s.shapesAll],
     ['candidati', s.shapesCand],
@@ -235,6 +243,42 @@ export function measureLines(m: PageMeasure, layers: DocLayers | null): string[]
     lines.push(`poligoni fitti (chiusi, almeno 12 lineTo, nessuna cubica), ${label}: ${n0(x.denseClosedPolygons)}`);
     lines.push(`cubiche in sottopercorsi aperti, ${label}: ${n0(x.cubicsInOpen)}`);
     lines.push(`sottopercorsi chiusi solo per coincidenza dell'ultimo punto (senza chiusura), ${label}: ${n0(x.closedByCoincidence)}`);
+    // ---- CP7c: che cosa contengono i sottopercorsi con cubiche. Aperto = senza closePath e con l'ultimo punto a piu' di 0.001 pt dal primo; chiuso = closePath o ultimo punto entro 0.001 pt.
+    // "Di sole cubiche" = nessun lineTo e nessuna quadratica; "misto" = almeno una cubica e almeno un lineTo o una quadratica.
+    const o = x.openCubicOnly;
+    lines.push(
+      `sottopercorsi APERTI di sole cubiche, ${label}, per numero di cubiche: 1: ${n0(o[0]!)} · 2: ${n0(o[1]!)} · 3: ${n0(o[2]!)} · 4: ${n0(o[3]!)} · 5-8: ${n0(o[4]!)} · oltre 8: ${n0(o[5]!)} (cubiche che contengono: ${n0(x.openCubicOnlyCubics)})`,
+    );
+    for (const [state, mx] of [
+      ['APERTI', x.openMixed],
+      ['CHIUSI', x.closedMixed],
+    ] as const) {
+      const c = mx.byCubics;
+      const l = mx.byLineTo;
+      lines.push(
+        `sottopercorsi ${state} misti (cubiche e lineTo o quadratiche), ${label}: ${n0(mx.subpaths)} (cubiche ${n0(mx.cubics)}, lineTo ${n0(mx.lineTo)}, quadratiche ${n0(mx.quad)}); per numero di cubiche: 1: ${n0(c[0]!)} · 2: ${n0(c[1]!)} · 3: ${n0(c[2]!)} · 4: ${n0(c[3]!)} · 5-8: ${n0(c[4]!)} · oltre 8: ${n0(c[5]!)}`,
+      );
+      lines.push(`sottopercorsi ${state} misti, ${label}, per numero di lineTo: 0: ${n0(l[0]!)} · 1: ${n0(l[1]!)} · 2: ${n0(l[2]!)} · 3-4: ${n0(l[3]!)} · 5-8: ${n0(l[4]!)} · oltre 8: ${n0(l[5]!)}`);
+    }
+    const parts = x.closedCubicOnlyCubics + x.openCubicOnlyCubics + x.openMixed.cubics + x.closedMixed.cubics;
+    const total = label === 'candidati' ? s.cand.cubic : s.all.cubic;
+    lines.push(
+      `conto delle cubiche, ${label}: chiusi di sole cubiche ${n0(x.closedCubicOnlyCubics)} + aperti di sole cubiche ${n0(x.openCubicOnlyCubics)} + aperti misti ${n0(x.openMixed.cubics)} + chiusi misti ${n0(x.closedMixed.cubics)} = ${n0(parts)}; cubiche dei percorsi ${n0(total)} (${parts === total ? 'il conto torna' : 'IL CONTO NON TORNA'})`,
+    );
+    lines.push(
+      `conto delle cubiche in sottopercorsi aperti, ${label}: aperti di sole cubiche ${n0(x.openCubicOnlyCubics)} + aperti misti ${n0(x.openMixed.cubics)} = ${n0(x.openCubicOnlyCubics + x.openMixed.cubics)}; riga "cubiche in sottopercorsi aperti" ${n0(x.cubicsInOpen)} (${x.openCubicOnlyCubics + x.openMixed.cubics === x.cubicsInOpen ? 'il conto torna' : 'IL CONTO NON TORNA'})`,
+    );
+    const f = x.four;
+    const g = f.gapHist;
+    lines.push(
+      `sottopercorsi di sole cubiche con 4 cubiche (aperti o chiusi), ${label}: ${n0(f.subpaths)} (aperti ${n0(f.open)}); distanza fra ultimo e primo punto (pt utente): fino a ${GAP_EDGES[0]}: ${n0(g[0]!)} · fino a ${GAP_EDGES[1]}: ${n0(g[1]!)} · fino a ${GAP_EDGES[2]}: ${n0(g[2]!)} · fino a ${GAP_EDGES[3]}: ${n0(g[3]!)} · fino a ${GAP_EDGES[4]}: ${n0(g[4]!)} · oltre ${GAP_EDGES[4]}: ${n0(g[5]!)}`,
+    );
+    lines.push(
+      `distanza minima e massima fra ultimo e primo punto dei sottopercorsi di sole cubiche con 4 cubiche, ${label} (pt utente): ${f.gapMin === null ? 'nessuno' : `${fmtTrim(f.gapMin, 6)} e ${fmtTrim(f.gapMax ?? 0, 6)}`}`,
+    );
+    lines.push(
+      `di 4 cubiche che rispettano la regola del cerchio SENZA la condizione di chiusura, ${label}: ${n0(f.circleNoClose)} su ${n0(f.subpaths)} (scostamento massimo ${fmtTrim(f.circleNoCloseMaxDev, 6)} pt, chiusura esclusa; tolleranza ${CIRCLE_TOL_ABS} pt + ${CIRCLE_TOL_REL} x raggio)`,
+    );
   }
   lines.push(`livelli del documento: gruppi OCG ${layers ? n0(layers.groups) : 'non letti'}, spenti nella configurazione predefinita ${layers ? n0(layers.off) : 'non letti'}`);
   const L = s.layers;

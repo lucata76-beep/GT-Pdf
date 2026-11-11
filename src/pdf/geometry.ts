@@ -44,6 +44,13 @@ export const LENGTH_EDGES = [0.01, 0.1, 1, 10] as const;
 export const CUBIC_BUCKETS = 6;
 /** Poligono fitto: sottopercorso chiuso con almeno cosi' tanti lineTo e nessuna cubica. */
 export const DENSE_POLYGON_LINETO = 12;
+/**
+ * Contenitori della distanza fra l'ultimo e il primo punto dei sottopercorsi di sole cubiche con 4 cubiche (misura di CP7c, pt utente; limite superiore INCLUSO, come `<=` di
+ * CLOSE_COINCIDENCE): fino a 1e-4; fino a 1e-3 (= CLOSE_COINCIDENCE: chiusi per coincidenza); fino a 5e-3; fino a 5e-2; fino a 0,5; oltre.
+ */
+export const GAP_EDGES = [1e-4, CLOSE_COINCIDENCE, 5e-3, 5e-2, 0.5] as const;
+/** Contenitori dei sottopercorsi misti per numero di lineTo (CP7c): 0 (solo con quadratiche), 1, 2, 3-4, 5-8, oltre 8. */
+export const LINETO_BUCKETS = 6;
 
 export interface ExtractInput {
   fnArray: ArrayLike<number>;
@@ -88,6 +95,34 @@ export interface PathTotals {
   closeNoSegment: number;
 }
 
+/** Sottopercorsi MISTI (CP7c): con almeno una cubica e almeno un altro tratto (lineTo o quadratica). Una per gruppo e per stato (aperti, chiusi). */
+export interface MixedStats {
+  subpaths: number;
+  /** Cubiche, lineTo e quadratiche che contengono. */
+  cubics: number;
+  lineTo: number;
+  quad: number;
+  /** Per numero di cubiche: [1, 2, 3, 4, 5-8, oltre 8]. */
+  byCubics: number[];
+  /** Per numero di lineTo: [0, 1, 2, 3-4, 5-8, oltre 8] (lo 0 solo se contengono quadratiche). */
+  byLineTo: number[];
+}
+
+/** Sottopercorsi di sole cubiche con ESATTAMENTE 4 cubiche, aperti o chiusi (CP7c): quanto distano l'ultimo e il primo punto e se somigliano a un cerchio ignorando la chiusura. */
+export interface FourCubicStats {
+  /** Sottopercorsi di sole cubiche (nessun lineTo, nessuna quadratica) con esattamente 4 cubiche. */
+  subpaths: number;
+  /** Fra questi, quelli aperti (senza closePath e con l'ultimo punto a piu' di CLOSE_COINCIDENCE dal primo). */
+  open: number;
+  /** Distanza fra l'ultimo punto della quarta cubica e il primo della prima (pt utente), per GAP_EDGES: [<=1e-4, <=1e-3, <=5e-3, <=5e-2, <=0.5, oltre]. */
+  gapHist: number[];
+  gapMin: number | null;
+  gapMax: number | null;
+  /** Quanti rispettano la regola del cerchio SENZA la condizione di chiusura (`circleFrom4Cubics(c, false)`), e il loro scostamento massimo (pt utente; senza la distanza di chiusura), 0 se nessuno. */
+  circleNoClose: number;
+  circleNoCloseMaxDev: number;
+}
+
 /** Forma dei sottopercorsi (cerchi e archi): una per gruppo (tutti i percorsi; solo stroke e fillStroke). */
 export interface ShapeStats {
   /** Sottopercorsi chiusi composti SOLO da cubiche, per numero di cubiche: [1, 2, 3, 4, 5-8, oltre 8]. */
@@ -102,6 +137,17 @@ export interface ShapeStats {
   cubicsInOpen: number;
   /** Sottopercorsi chiusi solo per coincidenza dell'ultimo punto con il primo (nessun closePath). */
   closedByCoincidence: number;
+  // ---- CP7c (misura in piu': che cosa sono le cubiche dei sottopercorsi aperti). Le definizioni sono nelle righe di `measureLines` e in docs/PIANO.md.
+  /** Cubiche dei sottopercorsi chiusi di sole cubiche (somma dei `closedCubicOnly` per cubica). */
+  closedCubicOnlyCubics: number;
+  /** Sottopercorsi APERTI di sole cubiche, per numero di cubiche: [1, 2, 3, 4, 5-8, oltre 8], e le cubiche che contengono. */
+  openCubicOnly: number[];
+  openCubicOnlyCubics: number;
+  /** Sottopercorsi con cubiche E lineTo (o quadratiche), aperti e chiusi. */
+  openMixed: MixedStats;
+  closedMixed: MixedStats;
+  /** Sottopercorsi di sole cubiche con 4 cubiche. */
+  four: FourCubicStats;
 }
 
 export interface LayerStats {
@@ -143,6 +189,13 @@ export interface GeometryStats {
   lineHist: number[];
   lineMin: number | null;
   lineMax: number | null;
+  /** CP7c: segmenti rettilinei dei candidati di lunghezza ESATTAMENTE 0 (stanno nel primo contenitore di `lineHist`: gli altri sono fra 0 escluso e 0,01). */
+  lineZero: number;
+  /** CP7c: corde delle cubiche dei candidati (distanza fra primo e ultimo punto, pt utente; le quadratiche non entrano): istogramma per LENGTH_EDGES come `lineHist`, minimo, massimo, e quante di lunghezza ESATTAMENTE 0. */
+  cubicChordHist: number[];
+  cubicChordMin: number | null;
+  cubicChordMax: number | null;
+  cubicChordZero: number;
   shapesAll: ShapeStats;
   shapesCand: ShapeStats;
   layers: LayerStats;
@@ -241,8 +294,24 @@ const TEXT_NAMES = ['showText', 'showSpacedText', 'nextLineShowText', 'nextLineS
 function newTotals(): PathTotals {
   return { paths: 0, subpaths: 0, emptySubpaths: 0, lineTo: 0, cubic: 0, quad: 0, close: 0, closeSegments: 0, closeNoSegment: 0 };
 }
+function newMixed(): MixedStats {
+  return { subpaths: 0, cubics: 0, lineTo: 0, quad: 0, byCubics: new Array<number>(CUBIC_BUCKETS).fill(0), byLineTo: new Array<number>(LINETO_BUCKETS).fill(0) };
+}
 function newShapes(): ShapeStats {
-  return { closedCubicOnly: new Array<number>(CUBIC_BUCKETS).fill(0), circles4: 0, circles4MaxDev: 0, denseClosedPolygons: 0, cubicsInOpen: 0, closedByCoincidence: 0 };
+  return {
+    closedCubicOnly: new Array<number>(CUBIC_BUCKETS).fill(0),
+    circles4: 0,
+    circles4MaxDev: 0,
+    denseClosedPolygons: 0,
+    cubicsInOpen: 0,
+    closedByCoincidence: 0,
+    closedCubicOnlyCubics: 0,
+    openCubicOnly: new Array<number>(CUBIC_BUCKETS).fill(0),
+    openCubicOnlyCubics: 0,
+    openMixed: newMixed(),
+    closedMixed: newMixed(),
+    four: { subpaths: 0, open: 0, gapHist: new Array<number>(GAP_EDGES.length + 1).fill(0), gapMin: null, gapMax: null, circleNoClose: 0, circleNoCloseMaxDev: 0 },
+  };
 }
 function newLayers(): LayerStats {
   return {
@@ -270,14 +339,24 @@ export function lengthBucket(len: number): number {
 export function cubicBucket(n: number): number {
   return n <= 4 ? n - 1 : n <= 8 ? 4 : 5;
 }
+/** Contenitore dei sottopercorsi misti per numero di lineTo (>= 0): [0, 1, 2, 3-4, 5-8, oltre 8]. */
+export function lineToBucket(n: number): number {
+  return n <= 2 ? n : n <= 4 ? 3 : n <= 8 ? 4 : 5;
+}
+/** Contenitore della distanza fra ultimo e primo punto (pt utente), limite superiore incluso: vedi GAP_EDGES. */
+export function gapBucket(d: number): number {
+  return d <= GAP_EDGES[0] ? 0 : d <= GAP_EDGES[1] ? 1 : d <= GAP_EDGES[2] ? 2 : d <= GAP_EDGES[3] ? 3 : d <= GAP_EDGES[4] ? 4 : 5;
+}
 
 /**
  * Regola del cerchio (misura, NON una primitiva): `c` contiene quattro cubiche consecutive (x0, y0, c1x, c1y, c2x, c2y, x1, y1 ciascuna, 32 numeri); i 4 punti di fine
  * stanno a 90 gradi su una circonferenza: l'ultimo coincide con il primo, A e C (primo punto e fine della seconda) e B e D (fine della prima e della terza) sono estremi di due
  * diametri con lo stesso centro e la stessa lunghezza, perpendicolari; e il punto a meta' di ogni cubica sta a distanza ~raggio dal centro, dalla parte della corda.
  * Restituisce lo scostamento massimo (pt utente) se la regola e' rispettata, altrimenti null.
+ * `needClosed` (predefinito true: la regola di CP7a, invariata): con `false` la condizione di chiusura (l'ultimo punto coincide con il primo) NON si controlla e lo scostamento di
+ * chiusura non entra nel massimo restituito (CP7c: per capire se un sottopercorso aperto di 4 cubiche e' un cerchio la cui chiusura dista un poco piu' di CLOSE_COINCIDENCE).
  */
-export function circleFrom4Cubics(c: ArrayLike<number>): number | null {
+export function circleFrom4Cubics(c: ArrayLike<number>, needClosed = true): number | null {
   const ax = c[0] as number;
   const ay = c[1] as number;
   const bx = c[6] as number;
@@ -303,7 +382,7 @@ export function circleFrom4Cubics(c: ArrayLike<number>): number | null {
   const devR = Math.abs(r1 - r2);
   // perpendicolarita': lo spostamento di B dalla posizione a 90 gradi vale ~ r * cos(angolo) = |(A-O).(B-O)| / r
   const devPerp = Math.abs((ax - o1x) * (bx - o1x) + (ay - o1y) * (by - o1y)) / r;
-  if (devClose > tol || devCenter > tol || devR > tol || devPerp > tol) return null;
+  if ((needClosed && devClose > tol) || devCenter > tol || devR > tol || devPerp > tol) return null;
   let devMid = 0;
   for (let k = 0; k < 4; k++) {
     const o = k * 8;
@@ -317,7 +396,7 @@ export function circleFrom4Cubics(c: ArrayLike<number>): number | null {
     if ((mx - o1x) * chx + (my - o1y) * chy <= 0) return null;
     if (dev > devMid) devMid = dev;
   }
-  return Math.max(devClose, devCenter, devR, devPerp, devMid);
+  return Math.max(needClosed ? devClose : 0, devCenter, devR, devPerp, devMid);
 }
 
 // ------------------------------------------------------------------ matrici (x' = a x + c y + e, y' = b x + d y + f)
@@ -459,6 +538,11 @@ function extract(input: ExtractInput): ExtractResult {
     lineHist: [0, 0, 0, 0, 0],
     lineMin: null,
     lineMax: null,
+    lineZero: 0,
+    cubicChordHist: [0, 0, 0, 0, 0],
+    cubicChordMin: null,
+    cubicChordMax: null,
+    cubicChordZero: 0,
     shapesAll: newShapes(),
     shapesCand: newShapes(),
     layers: newLayers(),
@@ -706,6 +790,43 @@ function extract(input: ExtractInput): ExtractResult {
               }
             } else if (subCubics === 0 && subQuads === 0 && subLines >= DENSE_POLYGON_LINETO) g.denseClosedPolygons++;
           }
+          // ---- CP7c: che cosa contengono i sottopercorsi con cubiche (apertura e chiusura come sopra: closePath o coincidenza dell'ultimo punto)
+          if (subCubics > 0) {
+            const cubicOnly = subLines === 0 && subQuads === 0;
+            const four = cubicOnly && subCubics === 4;
+            // 4 cubiche: il primo punto della prima e l'ultimo della quarta (le prime 4 cubiche stanno in `cub`: qui sono tutte)
+            const gap = four ? Math.hypot((cub[30] as number) - (cub[0] as number), (cub[31] as number) - (cub[1] as number)) : 0;
+            const noClose = four ? circleFrom4Cubics(cub, false) : null;
+            for (const g of groups) {
+              if (cubicOnly) {
+                if (closed) g.closedCubicOnlyCubics += subCubics;
+                else {
+                  g.openCubicOnly[cubicBucket(subCubics)]!++;
+                  g.openCubicOnlyCubics += subCubics;
+                }
+                if (four) {
+                  const f = g.four;
+                  f.subpaths++;
+                  if (!closed) f.open++;
+                  f.gapHist[gapBucket(gap)]!++;
+                  if (f.gapMin === null || gap < f.gapMin) f.gapMin = gap;
+                  if (f.gapMax === null || gap > f.gapMax) f.gapMax = gap;
+                  if (noClose !== null) {
+                    f.circleNoClose++;
+                    if (noClose > f.circleNoCloseMaxDev) f.circleNoCloseMaxDev = noClose;
+                  }
+                }
+              } else {
+                const m = closed ? g.closedMixed : g.openMixed;
+                m.subpaths++;
+                m.cubics += subCubics;
+                m.lineTo += subLines;
+                m.quad += subQuads;
+                m.byCubics[cubicBucket(subCubics)]!++;
+                m.byLineTo[lineToBucket(subLines)]!++;
+              }
+            }
+          }
           hasCur = false;
         };
         const addLine = (x0: number, y0: number, x1: number, y1: number): void => {
@@ -713,6 +834,7 @@ function extract(input: ExtractInput): ExtractResult {
           if (!cand) return;
           const len = Math.hypot(x1 - x0, y1 - y0);
           stats.lineHist[lengthBucket(len)]!++;
+          if (len === 0) stats.lineZero++;
           if (stats.lineMin === null || len < stats.lineMin) stats.lineMin = len;
           if (stats.lineMax === null || len > stats.lineMax) stats.lineMax = len;
           if (!vis) L.hiddenCandidateSegments++;
@@ -743,6 +865,11 @@ function extract(input: ExtractInput): ExtractResult {
           subCubics++;
           subSegs++;
           if (!cand) return;
+          const chord = Math.hypot(x1 - x0, y1 - y0);
+          stats.cubicChordHist[lengthBucket(chord)]!++;
+          if (chord === 0) stats.cubicChordZero++;
+          if (stats.cubicChordMin === null || chord < stats.cubicChordMin) stats.cubicChordMin = chord;
+          if (stats.cubicChordMax === null || chord > stats.cubicChordMax) stats.cubicChordMax = chord;
           if (!vis) L.hiddenCandidateSegments++;
           const o = nCubics * 8;
           if (o + 8 > cubicXY.length) {

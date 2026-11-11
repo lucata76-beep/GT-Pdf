@@ -1,5 +1,5 @@
-// Scheda "Geometria PDF" della pagina Diagnostica (V3.0, CP7a): misura sul PDF aperto in questa pagina (non nell'editor) quanta geometria vettoriale contiene ciascuna
-// pagina e come e' scritta (tratti, cubiche, cerchi, livelli, tempi). NIENTE snap, niente uso nell'editor o nel visore: serve a decidere V3.1 con i numeri dei PDF reali.
+// Scheda "Geometria PDF" della pagina Diagnostica (V3.0, CP7a; misura in piu' su cerchi e archi V3.2a, CP7c): misura sul PDF aperto in questa pagina (non nell'editor) quanta geometria
+// vettoriale contiene ciascuna pagina e come e' scritta (tratti, cubiche, cerchi e archi, livelli, tempi). NIENTE snap, niente uso nell'editor o nel visore: serve a decidere con i numeri dei PDF reali.
 // La misura NON parte da sola: si preme "Misura questa pagina" o "Misura tutte le pagine". "Copia misura" non contiene il nome del file, testi ne' metadati del documento.
 import type { OpenedPdf } from '../pdf/loader';
 import { type DocLayers, MAX_PAGES, type PageMeasure, measureLines, measurePage, measureText, readDocLayers, summaryRow } from '../pdf/geometryMeasure';
@@ -229,6 +229,11 @@ export function geometryCard(card: (title: string, open: boolean, ...body: Child
     pickerLabel,
     detail,
     fallback,
+    h(
+      'p',
+      { class: 'hint geo-defs' },
+      'Cerchi e archi (misura in più di V3.2a, solo misura): “aperto” = senza chiusura e con l’ultimo punto a più di 0.001 pt dal primo; “chiuso” = closePath, oppure ultimo punto entro 0.001 pt dal primo; “di sole cubiche” = nessun lineTo e nessuna quadratica; “misto” = almeno una cubica e almeno un lineTo o una quadratica. Il conto delle cubiche (chiusi di sole cubiche + aperti di sole cubiche + aperti misti + chiusi misti) deve tornare con le cubiche dei percorsi. Per i sottopercorsi di sole cubiche con 4 cubiche si misura la distanza fra l’ultimo e il primo punto e se rispettano la regola del cerchio ignorando la chiusura (stesse tolleranze della regola completa). “Lunghezza esattamente 0” = i due estremi coincidono; la corda di una cubica è la distanza fra il suo primo e il suo ultimo punto.',
+    ),
     h(
       'p',
       { class: 'hint' },
