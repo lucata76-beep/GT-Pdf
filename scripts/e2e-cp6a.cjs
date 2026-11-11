@@ -698,10 +698,32 @@ const gridLinesOf = (page) =>
 const stepField = (page) => page.locator('.grid-ctl input.field');
 const spacing = (a) => (a.length > 1 ? (a[a.length - 1] - a[0]) / (a.length - 1) : NaN);
 
+/**
+ * CP7c: l'interruttore PDF (snap sul disegno del PDF, acceso all'avvio) si SPEGNE dove queste prove riguardano gli oggetti disegnati o la griglia: i cerchi dei PDF di prova hanno
+ * ora punti propri (Estremo delle curve) che si agganciano. Lo snap sul PDF e' provato in e2e-cp7b.cjs e e2e-cp7c.cjs. Dove il pannello a destra e' a scomparsa lo apre e lo
+ * richiude. Su un build senza l'interruttore non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  const b = page.locator('.panel-toggle[data-panel-toggle="pdf"]');
+  if (!(await b.count())) return;
+  const hidden = !(await b.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(60);
+}
+
 async function gridSuite(browser) {
   setSection('griglia, mouse 1280x900');
   const { ctx, page } = await desktop(browser);
   await openDoc(page, 'A4 vettoriale', false);
+  await pdfSnapOff(page); // CP7c
   const step = 10 * MM_PT; // 10 mm del foglio (pagina non calibrata), in pt
   await tool(page, 'Retta');
   let r = await canvasRect(page);
@@ -874,6 +896,7 @@ async function gridPageSuite(browser) {
     setSection(`griglia, mouse, ${title}`);
     const { ctx, page } = await desktop(browser);
     await openDoc(page, title, false);
+    await pdfSnapOff(page); // CP7c
     const step = 10 * MM_PT;
     await tool(page, 'Retta');
     await setToggle(page, 'grid', true);

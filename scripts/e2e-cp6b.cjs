@@ -238,6 +238,7 @@ async function ortoMouseSuite(browser) {
   setSection('ORTO sulle quote, mouse 1280x900');
   const { ctx, page } = await desktop(browser);
   await openDoc(page, 'A4 vettoriale', false);
+  await pdfSnapOff(page); // CP7c
   const pinfo = await pageInfo(page);
   const U = (f) => userOf(pinfo, f);
   await tool(page, 'Quota');
@@ -357,6 +358,7 @@ async function priorityMouseSuite(browser) {
   setSection('ORTO sulle quote, priorita\' (snap, griglia)');
   const { ctx, page } = await desktop(browser);
   await openDoc(page, 'A4 vettoriale', false);
+  await pdfSnapOff(page); // CP7c
   const pinfo = await pageInfo(page);
   const U = (f) => userOf(pinfo, f);
   // un'unica retta di prova: il suo estremo (0.6, 0.30) e' fuori asse rispetto al primo punto della quota (0.3, 0.55)

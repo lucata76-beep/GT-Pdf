@@ -152,6 +152,27 @@ const ANCH = {
 };
 const addAnchors = (page, names = Object.keys(ANCH)) => page.evaluate(([A, ns]) => window.__gtpdf.addSpecs(1, ns.map((n) => ({ k: 'segment', pts: A[n] }))), [ANCH, names]);
 
+/**
+ * CP7c: l'interruttore PDF (snap sul disegno del PDF, acceso all'avvio) si SPEGNE dove queste prove riguardano gli oggetti disegnati o la griglia: i cerchi dei PDF di prova hanno
+ * ora punti propri (Estremo delle curve) che si agganciano. Lo snap sul PDF e' provato in e2e-cp7b.cjs e e2e-cp7c.cjs. Dove il pannello a destra e' a scomparsa lo apre e lo
+ * richiude. Su un build senza l'interruttore non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  const b = page.locator('.panel-toggle[data-panel-toggle="pdf"]');
+  if (!(await b.count())) return;
+  const hidden = !(await b.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(60);
+}
+
 async function openDoc(page, title = 'A4 vettoriale', anchors = true) {
   await openSample(page, title);
   G = makeGeom(await page.evaluate(() => window.__gtpdf.pages()[0]));
@@ -354,6 +375,7 @@ async function pendingSuite(browser, title) {
   setSection(`punti in costruzione come candidati, mouse 1280x900, ${title}`);
   const { ctx, page } = await desktop(browser);
   await openDoc(page, title, false);
+  await pdfSnapOff(page); // CP7c
   const pinfo = await pageInfo(page);
   const U = (f) => userOf(pinfo, f);
   const A = U([0.2, 0.7]), B = U([0.55, 0.78]), C = U([0.5, 0.4]);
@@ -534,6 +556,7 @@ async function buildSuite(browser) {
   setSection('costruzione: Annulla di un punto, anteprima e ORTO, mouse 1280x900');
   const { ctx, page } = await desktop(browser);
   await openDoc(page, 'A4 vettoriale', false);
+  await pdfSnapOff(page); // CP7c
   const pinfo = await pageInfo(page);
   const U = (f) => userOf(pinfo, f);
   await curveTool(page, 'arc');
