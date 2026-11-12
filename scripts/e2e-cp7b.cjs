@@ -264,9 +264,24 @@ async function checkSheetPoints(page, name, box, tag = name) {
 }
 
 // ---------------------------------------------------------------- serie 1: punti del PDF (mouse)
+/**
+ * CP7d: Intersezione e Perpendicolare si SPENGONO nelle serie sui punti Estremo e Punto medio del PDF (pointsSuite e annotationsSuite): dal CP7d anche i tratti del PDF hanno incontri e piedi, e dove
+ * un incontro cade su un punto medio (gli assi di drawSheet si incrociano nei loro punti medi) il Float32 di PDF.js (circa 1e-5 pt) decide quale dei due punti e' piu' vicino al cursore. Intersezione e
+ * Perpendicolare sul PDF sono provate in e2e-cp7d.cjs. Su un build che li ha gia' (interruttori da CP6f) non cambia altro.
+ */
+async function calcTypesOff(page) {
+  for (const id of ['intersection', 'perpendicular']) {
+    const b = panelToggle(page, id);
+    if ((await b.count()) && (await b.getAttribute('aria-pressed')) === 'true') {
+      await b.click();
+      await page.waitForTimeout(60);
+    }
+  }
+}
 async function pointsSuite(browser) {
   setSection('punti del PDF, mouse 1280x900');
   const { ctx, page, errors } = await desktop(browser);
+  await calcTypesOff(page); // CP7d
   for (const [title, box] of Object.entries(SHEET_BOXES)) {
     await openDoc(page, title);
     await tool(page, 'Retta');
@@ -303,6 +318,7 @@ async function pointsSuite(browser) {
 async function annotationsSuite(browser) {
   setSection('annotazioni e pagine miste');
   const { ctx, page, errors } = await desktop(browser);
+  await calcTypesOff(page); // CP7d
   await openDoc(page, 'A4 con annotazioni');
   await tool(page, 'Retta');
   const st = (await pdfState(page))?.state;

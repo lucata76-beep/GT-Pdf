@@ -510,9 +510,29 @@ async function deleteSuite(browser) {
 
 // ---------------------------------------------------------------- strumenti per le trasformazioni
 /** Apre una pagina di prova pronta per le trasformazioni: griglia accesa (nodi esatti), snap spenti, tutti i tipi di oggetto presenti, strumento Seleziona. `scale` = mm reali per pt. */
+/**
+ * CP7d: l'interruttore PDF (snap sul disegno del PDF, acceso all'avvio) si SPEGNE nelle serie che preparano un foglio di prova con prepare(): queste prove riguardano gli oggetti disegnati e la
+ * griglia, e dal CP7d anche i tratti del PDF hanno Intersezione e Perpendicolare (la Perpendicolare parte dal primo punto di «Sposta»: un piede su una linea del PDF si agganciava al posto del nodo
+ * della griglia). Lo snap sul PDF e' provato in e2e-cp7b.cjs, e2e-cp7c.cjs e e2e-cp7d.cjs. Su un build senza l'interruttore non fa nulla.
+ */
+async function pdfSnapOff(page) {
+  const b = page.locator('.panel-toggle[data-panel-toggle="pdf"]');
+  if (!(await b.count())) return;
+  const hidden = !(await b.isVisible());
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+  if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
+  if (hidden) {
+    await page.locator('.insp-toggle').click();
+    await page.waitForTimeout(150);
+  }
+}
 async function prepare(browser, title, scale = null) {
   const { ctx, page } = await desktop(browser);
   await openDoc(page, title);
+  await pdfSnapOff(page); // CP7d
   if (scale) {
     await page.evaluate((m) => window.__gtpdf.setScale(1, m), scale);
     STEP = 10 / scale; // 10 mm REALI sul foglio
