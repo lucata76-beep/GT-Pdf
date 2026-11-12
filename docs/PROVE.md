@@ -1,6 +1,28 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7c: consegnata, non ancora provata dall'utente con i PDF reali; sotto, quelle di CP7b e CP7a).
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7d: consegnata su ramo, non integrata su `main`, non ancora provata dall'utente; sotto, quelle di CP7c, CP7b e CP7a).
+
+## Provare CP7d sul PC (Intersezione e Perpendicolare sul PDF)
+
+Sul PC con il mouse. **CP7d si prova solo DOPO CP7c e solo su un build che la contiene**: il ramo di CP7d parte da CP7c, ma **non è su `main`** (`main` resta a CP7c; il sito si ripubblica a ogni avanzamento di `main`, quindi se avanzasse la prova di CP7c cambierebbe sotto di te). Per provarla in locale, dalla cartella del progetto (serve Node 22.12 o successivo):
+
+```
+git fetch origin claude/v3-2b-pdf-intersection-perpendicular-kpp8tu
+git switch claude/v3-2b-pdf-intersection-perpendicular-kpp8tu
+npm ci
+npm run build
+npm run preview
+```
+
+Poi apri nel browser l'indirizzo che `npm run preview` stampa (di norma `http://localhost:4173/`; il comando resta in esecuzione finché non lo fermi con Ctrl+C). I PDF non escono dal computer. Dopo CP7c l'editor si aggancia anche alle **linee rette del disegno del PDF** per **Intersezione** (dove due linee si incrociano) e **Perpendicolare** (il piede della perpendicolare dal punto di partenza a una linea): stessi marcatori e stesse etichette degli oggetti che disegni, stessi interruttori (**Intersezione**, **Perpendicolare**, **PDF**), nessun interruttore nuovo. Non ci sono prolungamenti (solo dentro le linee) né Intersezione o Perpendicolare con le **curve** (cerchi, archi, raccordi) del PDF. Per ogni punto rispondi con la risposta predefinita (in **grassetto**) oppure dici che cosa cambieresti.
+
+1. **Incroci del disegno.** Apri nell'editor (non in Diagnostica) il tuo PDF **vettoriale**, scegli *Retta* e avvicina il puntatore a un **incrocio fra due linee** del disegno che si incrociano a metà, lontano dai loro estremi: compare la **X** (**Intersezione**) con l'etichetta e il punto è quello dell'incrocio. Dove l'incrocio coincide con un estremo o con il centro di una linea compare l'**Estremo** o il **Punto medio** (hanno la precedenza), e dove due linee si toccano in un angolo o in un vertice non c'è nessuna Intersezione (è un Estremo). Risposta: **si aggancia dove deve** / no (scrivi dove sbaglia o dove ne manca uno).
+2. **Un tuo oggetto contro il PDF.** Disegna una *Retta* che attraversa una linea del disegno e poi riavvicina il puntatore al punto in cui si incrociano: compare la **X**, e un nuovo punto cade proprio lì. Vale anche per un *Cerchio* o un *Arco* disegnati che attraversano una linea del PDF. Risposta: **si aggancia dove deve** / no.
+3. **Misurare fra due incroci.** Calibra su una distanza **nota** del disegno (*Scala*), poi metti una *Quota* (o una *Distanza*) fra due **incroci** agganciati e confronta il valore con quello che conosci. Risposta: **uguale entro la precisione che ti serve** / no (scrivi quanto differisce).
+4. **Perpendicolare.** Scegli *Retta*, indica un primo punto lontano da una linea del disegno e poi avvicina il puntatore a quella linea: compare l'**angolo retto** (**Perpendicolare**) nel punto in cui la perpendicolare dal primo punto la incontra, solo se quel punto cade **dentro** la linea (non sul suo prolungamento). Risposta: **si aggancia dove deve** / no.
+5. **Spegnere.** Premi *PDF*: spariscono le Intersezioni e le Perpendicolari sul disegno del PDF (restano quelle dei **tuoi** oggetti, e l'Estremo e il Punto medio dei tuoi oggetti); con *Intersezione* spenta non ci sono le X, con *Perpendicolare* spenta non ci sono gli angoli retti, sul PDF come sui tuoi oggetti. Risposta: **va bene così** / no.
+
+Che cosa **non** è stato provato: il tuo browser e il tuo sistema (tutte le prove sono su Chromium in un contenitore Linux, con PDF di prova fittizi e PDF sintetici), Safari e iPhone (i tempi e la memoria di Chromium non valgono per l'iPhone), qualunque PDF reale (come altri programmi scrivono linee, livelli e annotazioni; quanti tratti e quanto fitti sono i tuoi), le prestazioni su PDF densi reali, i due limiti **provvisori e non tarati** (il tetto delle voci d'indice per pagina, sopra il quale Intersezione e Perpendicolare sul PDF sono spente per quella pagina con un messaggio, e le **256 linee** al massimo entro il raggio del puntatore, oltre le quali in quel punto non si offre nessuna Intersezione o Perpendicolare del PDF: con lo zoom il raggio si riduce), e pagine con `/Rotate` 180 e 270 e `UserUnit` diverso da 1 (provati solo nei test unitari con PDF.js; nelle prove su Chromium solo `/Rotate` 0 e 90 e un CropBox). I punti 4 e 5 di «Provare CP7b sul PC» (scansione e PDF fitto) e la scheda di CP7c **non sono stati fatti**.
 
 ## Provare CP7c sul PC (Estremo delle curve e misura in più)
 
