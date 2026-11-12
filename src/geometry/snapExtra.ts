@@ -16,6 +16,12 @@
 // Tolleranze (dichiarate e provate in `snapExtra.test.ts`): `PARAM_EPS` (parametro di un tratto, relativo alla sua lunghezza), `PARALLEL_EPS` (seno dell'angolo fra due tratti),
 // `TOUCH_REL` (due curve che si toccano in un punto, con uno scarto di calcolo sotto TOUCH_REL volte la loro scala, almeno TOUCH_REL pt, sono TANGENTI: UN candidato; oltre, 0 o 2),
 // `ANGLE_EPS` (angolo di un punto rispetto agli estremi di un arco, in radianti).
+//
+// CP7d (V3.2b): Intersezione e Perpendicolare anche sui TRATTI rettilinei del disegno del PDF. I tratti non si copiano nella scena degli oggetti (centinaia di migliaia, una `Prim` di 18
+// campi ciascuno): li fornisce una `PdfSegmentSource` (src/pdf/segmentIndex.ts, con un indice spaziale) che chiama `emit` per i soli tratti entro il raggio dal cursore, in un ordine
+// stabile. `pdfCandidates` li tratta come le primitive-tratto degli oggetti (stesse funzioni `footOnSegment`, `intersectSegSeg`, `overlaps`, `intersections`): Perpendicolare dall'ancora,
+// Intersezione fra due tratti del PDF e fra un tratto del PDF e un oggetto disegnato. Nessun prolungamento, nessuna curva del PDF. I candidati del PDF si emettono DOPO quelli degli
+// oggetti: a parita' di distanza e di tipo vince l'oggetto disegnato (`findSnap` tiene il primo).
 import type { PageObject } from '../model/model';
 import { type SheetArc, curveOnSheet, isFullCircle } from './arc';
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
@@ -35,6 +41,38 @@ export const ANGLE_EPS = 1e-9;
 export const SAME_POINT_EPS = 1e-9;
 
 const TWO_PI = 2 * Math.PI;
+
+/**
+ * CP7d. Massimo di tratti del PDF entro il raggio dal cursore: se sono di piu', il PDF non offre NESSUN candidato calcolato (Intersezione o Perpendicolare) in quel punto: il confronto a
+ * coppie dei vicini cresce col quadrato del loro numero (a 256: 32.640 coppie). Con lo zoom il raggio in pt si riduce e i vicini calano. VALORE DI PARTENZA scelto da Code (numeri in
+ * docs/PIANO.md, decisione 117), NON tarato sui PDF dell'utente.
+ */
+export const PDF_MAX_NEAR = 256;
+
+/**
+ * Sorgente dei TRATTI rettilinei del PDF per Intersezione e Perpendicolare (V3.2b, CP7d), nel foglio. `forEachNear` chiama `emit(id, path, x1, y1, x2, y2)` per ogni tratto la cui distanza
+ * REALE dal punto (x, y) e' al piu' `radius` (stesso predicato di `segmentNearPoint`, bordo compreso), in ordine di `id` crescente (l'indice del tratto nella sorgente; `path` e' il
+ * percorso del PDF a cui appartiene). Se i tratti sono piu' di `max` NON emette nulla e restituisce false; altrimenti true. Non e' un oggetto: non si seleziona, non si cancella.
+ */
+export interface PdfSegmentSource {
+  forEachNear(x: number, y: number, radius: number, max: number, emit: (id: number, path: number, x1: number, y1: number, x2: number, y2: number) => void): boolean;
+}
+
+/**
+ * Il tratto (x1, y1)-(x2, y2) passa entro `radius` dal punto (x, y)? `r2` = radius * radius. E' la stessa prova che `extraCandidates` fa sulle primitive-tratto (riquadro allargato di
+ * `radius`, poi distanza reale dal punto piu' vicino del tratto, `<= r2`): indice e scansione lineare dei tratti del PDF la usano entrambi, cosi' danno lo stesso risultato.
+ */
+export function segmentNearPoint(x1: number, y1: number, x2: number, y2: number, x: number, y: number, radius: number, r2: number): boolean {
+  if (x < (x1 < x2 ? x1 : x2) - radius || x > (x1 < x2 ? x2 : x1) + radius || y < (y1 < y2 ? y1 : y2) - radius || y > (y1 < y2 ? y2 : y1) + radius) return false;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((x - x1) * dx + (y - y1) * dy) / len2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ex = x1 + t * dx - x;
+  const ey = y1 + t * dy - y;
+  return ex * ex + ey * ey <= r2;
+}
 
 /**
  * Una primitiva della scena, nel foglio: un tratto (`t` 0) o un cerchio/arco (`t` 1). Un solo tipo di oggetto con tutti i campi (forma monomorfa: il ciclo che scarta
