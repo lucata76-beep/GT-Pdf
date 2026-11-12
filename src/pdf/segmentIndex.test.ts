@@ -296,6 +296,14 @@ describe('«troppi vicini» e tetto delle voci', () => {
     expect(scanSegmentsNear(grid.xy, grid.path, grid.n, 130, 102, 6, 9, (...a) => rows.push(a))).toBe(false);
     expect(rows).toEqual([]);
   });
+  it('il contatore delle interrogazioni che fa il giro (4 miliardi) non cambia il risultato: dopo il giro i contrassegni si azzerano', () => {
+    const grid = gridOf([[100, 100, 300, 100], [150, 50, 150, 200], [400, 400, 500, 500]]);
+    const before = collect(grid, 150, 100, 5);
+    (grid as unknown as { epoch: number }).epoch = 0xffffffff; // la prossima interrogazione porta il contatore a 0: riparte da 1
+    expect(collect(grid, 150, 100, 5)).toEqual(before);
+    expect(collect(grid, 150, 100, 5)).toEqual(before);
+    expect(before.rows.map((r) => r[0])).toEqual([0, 1]);
+  });
   it('PDF_MAX_NEAR e\' il valore dichiarato nel commento di snapExtra.ts', () => {
     expect(PDF_MAX_NEAR).toBe(256);
   });
@@ -340,7 +348,7 @@ describe('«troppi vicini» e tetto delle voci', () => {
 });
 
 describe('memoria', () => {
-  it('byte della scena = 36 per tratto + 4 per voce + offset delle celle', () => {
+  it('byte della scena = 40 per tratto (4 Float64, percorso e contrassegno) + 4 per voce + offset delle celle', () => {
     const grid = gridOf([[10, 10, 300, 10], [50, 50, 60, 60]]);
     expect(grid.bytes).toBe(2 * BYTES_PER_SEGMENT + 4 * grid.refs + 4 * (grid.nx * grid.ny + 1));
   });

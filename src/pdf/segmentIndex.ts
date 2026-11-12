@@ -15,11 +15,12 @@
 //    che passa per un angolo di cella in tutte e quattro). Il lato della cella parte da SEGMENT_GRID_CELL_PT e RADDOPPIA (fino a SEGMENT_GRID_MAX_CELL_PT) se le voci registrate sarebbero
 //    piu' di `maxRefs` (tratti lunghi attraversano molte celle); se non basta neppure alla cella massima la scena e' «fitta» e non si costruisce (stato dichiarato da `snapPage.ts`);
 //  - risultato IDENTICO alla scansione lineare `scanSegmentsNear`, sequenza compresa: l'indice sceglie solo quali tratti provare (un insieme che contiene sempre quelli vicini), poi applica
-//    lo STESSO predicato (`segmentNearPoint`, snapExtra.ts) e ordina gli indici in modo crescente senza doppioni; l'ordine conta perche' `findSnap` tiene il primo fra due candidati alla
-//    stessa distanza e dello stesso tipo.
+//    lo STESSO predicato (`segmentNearPoint`, snapExtra.ts) a ogni tratto UNA volta sola (un contrassegno per tratto dice «gia' provato in questa interrogazione»: un tratto lungo sta in molte
+//    celle) e ordina gli indici trovati in modo crescente; l'ordine conta perche' `findSnap` tiene il primo fra due candidati alla stessa distanza e dello stesso tipo. Appena i tratti vicini
+//    DISTINTI superano `max` ci si ferma (il risultato e' «nessuno»: non serve contarli tutti: con migliaia di vicini l'interrogazione costa come con `max` + 1).
 //
-// Memoria per tratto: 4 Float64 (32 byte) + il percorso (4 byte) + 4 byte per ogni voce di cella (di solito 1-3 voci per tratto corto) + le offset delle celle. Costruzione: due passaggi
-// sui tratti (conteggio e riempimento, in stile CSR come `PointGrid`), senza oggetti per tratto.
+// Memoria per tratto: 4 Float64 (32 byte) + il percorso (4 byte) + il contrassegno (4 byte) + 4 byte per ogni voce di cella (di solito 1-3 voci per tratto corto) + le offset delle celle.
+// Costruzione: due passaggi sui tratti (conteggio e riempimento, in stile CSR come `PointGrid`), senza oggetti per tratto.
 import { type PdfSegmentSource, segmentNearPoint } from '../geometry/snapExtra';
 import type { PdfGeometry } from './geometry';
 import { MIN_SEGMENT_PT, PAGE_MARGIN_PT, type SheetMap } from './snapPoints';
@@ -37,8 +38,8 @@ export const SEGMENT_GRID_MAX_CELLS = 1 << 22;
 export const SEGMENT_MAX_REFS = 6_000_000;
 /** Margine (pt) con cui si registra un tratto nelle celle: copre gli errori di arrotondamento del percorso colonna per colonna e della divisione per il lato della cella. */
 const REG_EPS = 1e-6;
-/** Byte per tratto senza le voci di cella: 4 Float64 e l'indice del percorso. */
-export const BYTES_PER_SEGMENT = 36;
+/** Byte per tratto senza le voci di cella: 4 Float64, l'indice del percorso e il contrassegno di interrogazione. */
+export const BYTES_PER_SEGMENT = 40;
 
 export interface SegmentSceneStats {
   /** Tratti rettilinei dei percorsi candidati (visibili o no). */
@@ -162,9 +163,12 @@ function walkCells(xy: Float64Array, i: number, c: number, nx: number, ny: numbe
 
 /** La griglia di tratti: indice spaziale e sorgente `PdfSegmentSource`. Si costruisce con `buildSegmentScene`. */
 export class SegmentGrid implements PdfSegmentSource {
-  /** Byte della scena: tratti, percorsi, voci e offset delle celle (esclusi i buffer di lavoro). */
+  /** Byte della scena: tratti, percorsi, contrassegni, voci e offset delle celle (escluso il buffer di lavoro, al piu' `max` indici). */
   readonly bytes: number;
   private scratch = new Uint32Array(256);
+  /** Per tratto: il numero dell'ultima interrogazione che lo ha provato (0 = mai). */
+  private readonly seen: Uint32Array;
+  private epoch = 0;
 
   constructor(
     /** x1, y1, x2, y2 per tratto, nel foglio, ritagliati sul foglio. */
@@ -180,7 +184,8 @@ export class SegmentGrid implements PdfSegmentSource {
     private readonly cellStart: Uint32Array,
     private readonly items: Uint32Array,
   ) {
-    this.bytes = xy.byteLength + path.byteLength + cellStart.byteLength + items.byteLength;
+    this.seen = new Uint32Array(n);
+    this.bytes = xy.byteLength + path.byteLength + this.seen.byteLength + cellStart.byteLength + items.byteLength;
   }
 
   /** Voci di cella registrate. */
@@ -204,6 +209,12 @@ export class SegmentGrid implements PdfSegmentSource {
     const cy1 = Math.min(this.ny - 1, Math.floor(y1 / c));
     const r2 = radius * radius;
     const xy = this.xy;
+    const seen = this.seen;
+    if (this.epoch >= 0xffffffff) {
+      seen.fill(0); // il contatore sta per uscire da un Uint32 (4 miliardi di interrogazioni): si riparte da 1
+      this.epoch = 0;
+    }
+    const epoch = ++this.epoch;
     let sc = this.scratch;
     let k = 0;
     for (let cy = cy0; cy <= cy1; cy++) {
@@ -213,8 +224,11 @@ export class SegmentGrid implements PdfSegmentSource {
         const e = this.cellStart[id + 1] as number;
         for (let j = this.cellStart[id] as number; j < e; j++) {
           const i = this.items[j] as number;
+          if (seen[i] === epoch) continue; // un tratto che attraversa piu' celle toccate: provato una volta sola
+          seen[i] = epoch;
           const o = 4 * i;
           if (!segmentNearPoint(xy[o] as number, xy[o + 1] as number, xy[o + 2] as number, xy[o + 3] as number, x, y, radius, r2)) continue;
+          if (k === max) return false; // il (max + 1)-esimo vicino distinto: troppi, nessuno si emette
           if (k === sc.length) {
             const bigger = new Uint32Array(sc.length * 2);
             bigger.set(sc);
@@ -225,14 +239,7 @@ export class SegmentGrid implements PdfSegmentSource {
       }
     }
     if (k === 0) return true;
-    // un tratto che attraversa piu' celle toccate e' stato trovato piu' volte: ordine crescente e senza doppioni, come la scansione lineare
-    if (k > 1) {
-      sc.subarray(0, k).sort();
-      let m = 1;
-      for (let j = 1; j < k; j++) if (sc[j] !== sc[m - 1]) sc[m++] = sc[j] as number;
-      k = m;
-    }
-    if (k > max) return false;
+    if (k > 1) sc.subarray(0, k).sort(); // numerico, in sito: l'ordine dei tratti, come la scansione lineare
     for (let j = 0; j < k; j++) {
       const i = sc[j] as number;
       const o = 4 * i;
