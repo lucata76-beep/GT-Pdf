@@ -156,11 +156,17 @@ describe('stati di una pagina', () => {
     for (const s of out) expect(allNear(s, 10, 10, 0.5, true, false)).toHaveLength(1);
   });
 
-  it('esegue le tre fasi con un cedimento al browser fra l\'una e l\'altra', async () => {
+  it('esegue le fasi con un cedimento al browser fra l\'una e l\'altra: quattro con tratti (CP7d: la scena dei tratti e\' la quarta fase)', async () => {
+    // CP7d: ADATTATO (in CP7b e CP7c: tre fasi, tre cedimenti). Con tratti visibili la scena per Intersezione e Perpendicolare e' una fase in piu', separata dalle altre.
     let pauses = 0;
     const s = await stateOf(await loadTestPdf('a4-vettoriale.pdf'), 1, { yieldToUi: async () => void pauses++ });
     expect(s.kind).toBe('ready');
-    expect(pauses).toBe(3);
+    expect(pauses).toBe(4);
+    // senza tratti (solo curve) la scena non c'e' e i cedimenti sono i tre di prima
+    let curvePauses = 0;
+    const c = await stateOf(await makePdf({ content: '100 100 m 140 100 140 140 100 140 c 60 140 60 100 100 100 c S', mediabox: [300, 300] }), 1, { yieldToUi: async () => void curvePauses++ });
+    expect(c.kind).toBe('ready');
+    expect(curvePauses).toBe(3);
   });
 });
 

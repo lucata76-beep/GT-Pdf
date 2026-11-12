@@ -65,6 +65,7 @@ import { type OpenedPdf, type PageInfo, closePdf, openPdf, opsDocument } from '.
 import { log } from '../diag/log';
 import { describeOpenError } from '../pdf/openError';
 import { scanNear } from '../pdf/pointIndex';
+import { scanSegmentsNear } from '../pdf/segmentIndex';
 import { PageCache, type PdfSnapState, SNAP_MAX_SEGMENTS, loadPdfSnap, pdfSnapLogLine, pdfSnapNote } from '../pdf/snapPage';
 import { LIMITS, type Project, parseProject, serializeProject, verifyProjectText } from '../project/format';
 import { sha256Hex } from '../project/hash';
@@ -170,13 +171,14 @@ const SNAP_MESSAGE: Record<SnapSwitch, { on: string; off: string }> = {
 };
 
 /**
- * Interruttore «PDF» (V3.1, CP7b): Estremo e Punto medio si agganciano anche ai tratti rettilinei del disegno del PDF; dal V3.2a (CP7c) l'Estremo anche agli estremi delle cubiche. NON e'
- * un tipo di snap (non sta in `SnapSwitch`): e' la sorgente dei punti; stessi marcatori e stessi nomi di Estremo e Punto medio, che restano i loro interruttori (con Estremo spento non
- * c'e' l'Estremo del PDF, nemmeno quello delle curve).
+ * Interruttore «PDF» (V3.1, CP7b): Estremo e Punto medio si agganciano anche ai tratti rettilinei del disegno del PDF; dal V3.2a (CP7c) l'Estremo anche agli estremi delle cubiche; dal V3.2b
+ * (CP7d) Intersezione e Perpendicolare anche sui tratti rettilinei (non sulle curve). NON e' un tipo di snap (non sta in `SnapSwitch`): e' la sorgente dei punti e dei tratti; stessi marcatori
+ * e stessi nomi dei tipi, che restano i loro interruttori (con Estremo spento non c'e' l'Estremo del PDF, nemmeno quello delle curve; con Intersezione o Perpendicolare spenti non c'e' quel tipo
+ * sul PDF).
  */
-const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, e l\'Estremo anche agli estremi delle sue curve, oltre che ai tuoi oggetti (non vale per le scansioni)';
+const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo, Punto medio, Intersezione e Perpendicolare si agganciano anche alle linee del disegno del PDF, e l\'Estremo anche agli estremi delle sue curve, oltre che ai tuoi oggetti (non vale per le scansioni)';
 const PDF_SNAP_MESSAGE = {
-  on: 'PDF attivo: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, l\'Estremo anche alle sue curve',
+  on: 'PDF attivo: Estremo, Punto medio, Intersezione e Perpendicolare si agganciano anche alle linee del disegno del PDF, l\'Estremo anche alle sue curve',
   off: 'PDF disattivato: l\'aggancio resta solo sugli oggetti disegnati',
   reading: 'PDF attivo: il disegno di questa pagina è in lettura, l\'aggancio compare tra un momento',
 };
@@ -342,6 +344,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       anchor: construction.anchor,
       origin: model.origin(pageNo),
       pdf: ps?.kind === 'ready' ? ps.source : null,
+      pdfSegments: ps?.kind === 'ready' ? (ps.scene ?? null) : null, // i tratti del PDF per Intersezione e Perpendicolare (assenti se la scena e' fitta)
     });
   }
 
@@ -351,10 +354,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
   /** Dice nella riga dei messaggi (una volta per pagina) perche' lo snap sul PDF non c'e', se la pagina e' pronta e non ce l'ha. Con `force` anche se gia' detto. */
   function announcePdfSnap(n: number, force = false): void {
     const st = pdfSnapCache.peek(n);
-    if (!st || st.kind === 'ready' || (!force && pdfSnapSaid.has(n))) return;
+    if (!st || (!force && pdfSnapSaid.has(n))) return;
+    const note = pdfSnapNote(st, n); // `null` per una pagina pronta con tutto (e per una pronta con la scena dei tratti fitta il messaggio c'e')
+    if (!note) return;
     pdfSnapSaid.add(n);
-    const note = pdfSnapNote(st, n);
-    if (note) say(note);
+    say(note);
   }
   /**
    * Avvia (se serve) la lettura dei punti del PDF della pagina `n`: in modo asincrono, senza bloccare il visore ne' il disegno (le fasi sincrone sono separate da cedimenti al browser).
@@ -400,11 +404,12 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     pdfSnapOn = on;
     setPressed('pdf', on);
     const st = pdf ? pdfSnapStateOf(pageNo) : null;
+    const note = st && st !== 'busy' ? pdfSnapNote(st, pageNo) : null;
     if (!on) say(PDF_SNAP_MESSAGE.off);
     else if (st === 'busy') say(PDF_SNAP_MESSAGE.reading);
-    else if (st && st.kind !== 'ready') {
+    else if (note) {
       pdfSnapSaid.add(pageNo);
-      say(`PDF attivo. ${pdfSnapNote(st, pageNo) ?? ''}`.trim());
+      say(`PDF attivo. ${note}`.trim());
     } else say(PDF_SNAP_MESSAGE.on);
     viewer.refreshAim();
   }
@@ -2616,7 +2621,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           st === null || st === 'busy'
             ? st
             : st.kind === 'ready'
-              ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes }
+              ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene }
               : st;
         return { on: pdfSnapOn, cap: SNAP_MAX_SEGMENTS, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
       },
@@ -2624,23 +2629,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
        * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
        * (misure del tetto: scripts/perf-cp7b.cjs e scripts/perf-cp7c.cjs); con `store` il risultato va nella cache e lo snap lo usa.
        */
-      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; store?: boolean; clear?: boolean } = {}) => {
+      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; maxSceneRefs?: number; store?: boolean; clear?: boolean } = {}) => {
         const doc = pdf;
         const info = doc?.pages[n - 1];
         if (!doc || !info) throw new Error('nessun documento o pagina inesistente');
         const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
         if (o.clear) pdfSnapCache.clear(); // per misurare la memoria di una lettura senza quella gia' in cache
         const t0 = performance.now();
-        const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords });
+        const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords, maxSceneRefs: o.maxSceneRefs });
         const wallMs = performance.now() - t0;
         if (o.store) pdfSnapCache.set(n, st);
-        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes } : st };
+        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene } : st };
       },
       /**
        * Prestazioni di `findSnap` con i punti del PDF della pagina corrente (che devono essere pronti): `index` usa la griglia, `linear` la scansione lineare di tutti i punti
        * (solo come confronto). Come `snapRun`: tempo di lotti di `batch` chiamate e di `singles` chiamate una per una.
        */
-      snapRunPdf: (objects: PageObject[], raws: UserPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>> }) => {
+      snapRunPdf: (objects: PageObject[], raws: UserPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>>; anchor?: UserPoint | null }) => {
         const info = pdf?.pages[pageNo - 1];
         const st = pdfSnapCache.peek(pageNo);
         if (!info || !st || st.kind !== 'ready') throw new Error('i punti del PDF della pagina corrente non sono pronti');
@@ -2649,7 +2654,11 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const sheetRaws = raws.map((u) => g.userToSheet(u));
         const pts = st.source.points;
         const source = o.mode === 'index' ? st.source : { forEachNear: (x: number, y: number, r: number, e: boolean, m: boolean, emit: (x: number, y: number, k: 'end' | 'mid') => void) => scanNear(pts, x, y, r, e, m, emit) };
-        const extra = { pdf: source };
+        // CP7d: con Intersezione o Perpendicolare accese anche i tratti del PDF (`index`: la griglia dei tratti; `linear`: la scansione lineare dei tratti, solo come confronto)
+        const sceneGrid = st.scene ?? null;
+        const segSource = !sceneGrid ? null : o.mode === 'index' ? sceneGrid : { forEachNear: (x: number, y: number, r: number, max: number, emit: (id: number, path: number, x1: number, y1: number, x2: number, y2: number) => void) => scanSegmentsNear(sceneGrid.xy, sceneGrid.path, sceneGrid.n, x, y, r, max, emit) };
+        const calc = !!(kinds.intersection || kinds.perpendicular || kinds.quadrant || kinds.tangent);
+        const extra = { pdf: source, pdfSegments: segSource, anchor: o.anchor ?? null, scene: calc ? buildSnapScene(objects, g) : undefined };
         let hits = 0;
         let calls = 0;
         const batchMs: number[] = [];
@@ -2667,7 +2676,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           findSnap(objects, g, sheetRaws[i % sheetRaws.length] as SheetPoint, radius, kinds, [], extra);
           singleMs.push(performance.now() - t0);
         }
-        return { hits, calls, batch: o.batch, batchMs, singleMs, nPoints: st.nEnd + st.nMid };
+        return { hits, calls, batch: o.batch, batchMs, singleMs, nPoints: st.nEnd + st.nMid, nSegments: sceneGrid?.n ?? 0 };
       },
       goTo: (n: number) => goTo(n),
       /** Gli id selezionati (nell'ordine del modello) e le proprieta' dei NUOVI oggetti: per provare che la selezione multipla non le cambia. */

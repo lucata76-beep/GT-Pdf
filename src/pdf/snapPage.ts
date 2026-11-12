@@ -1,5 +1,6 @@
-// Snap sul PDF, per pagina (V3.1, CP7b; Estremo delle curve V3.2a, CP7c): lettura asincrona dei tratti rettilinei e delle curve di UNA pagina (`getOperatorList`, `getOptionalContentConfig`),
-// estrazione (src/pdf/geometry.ts), punti di snap (src/pdf/snapPoints.ts) e indice spaziale (src/pdf/pointIndex.ts), con lo STATO della pagina, i messaggi e la cache delle ultime N pagine.
+// Snap sul PDF, per pagina (V3.1, CP7b; Estremo delle curve V3.2a, CP7c; Intersezione e Perpendicolare sui tratti V3.2b, CP7d): lettura asincrona dei tratti rettilinei e delle curve di UNA
+// pagina (`getOperatorList`, `getOptionalContentConfig`), estrazione (src/pdf/geometry.ts), punti di snap (src/pdf/snapPoints.ts), indice spaziale dei punti (src/pdf/pointIndex.ts) e, dal
+// CP7d, scena dei tratti con il suo indice (src/pdf/segmentIndex.ts), con lo STATO della pagina, i messaggi e la cache delle ultime N pagine.
 //
 // Niente DOM. `page.cleanup()` solo DOPO l'estrazione e solo perche' il documento e' dedicato (vedi sotto): sul documento del visore non va MAI chiamata da qui.
 // Il documento da passare a `loadPdfSnap` NON e' quello del visore ma una seconda istanza sugli stessi byte (`opsDocument` di src/pdf/loader.ts): una `getOperatorList()` in
@@ -10,6 +11,7 @@ import { OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { type OpsTable, extractGeometry } from './geometry';
 import { PointGrid } from './pointIndex';
+import { SEGMENT_GRID_MAX_CELL_PT, type SegmentGrid, type SegmentSceneStats, buildSegmentScene } from './segmentIndex';
 import { type SheetMap, buildSnapPoints, visibleCubicCount, visibleLineCount } from './snapPoints';
 
 /**
@@ -31,6 +33,8 @@ export interface SnapLoadTimings {
   extractMs: number;
   pointsMs: number;
   indexMs: number;
+  /** CP7d: costruzione della scena dei tratti (ritaglio, conteggio, indice); assente se non e' stata costruita (nessun tratto visibile). */
+  sceneMs?: number;
 }
 
 /** Perche' una pagina non ha tratti ne' curve da agganciare. */
@@ -50,8 +54,15 @@ export type PdfSnapState =
       nEnd: number;
       endsFromCurves?: number;
       nMid: number;
+      /** Byte dei punti e della loro griglia (CP7b); la scena dei tratti ha i suoi in `sceneStats.bytes`. */
       bytes: number;
       timings: SnapLoadTimings;
+      /**
+       * CP7d: i TRATTI rettilinei per Intersezione e Perpendicolare. `scene` e' la sorgente (assente se la pagina non ha tratti o se la scena e' fitta); `sceneStats` i conti, e se la
+       * scena e' fitta (`sceneStats.dense`) Intersezione e Perpendicolare del PDF sono spente per questa pagina mentre Estremo e Punto medio restano. Assenti = come in CP7c.
+       */
+      scene?: SegmentGrid;
+      sceneStats?: SegmentSceneStats;
     }
   /** Nessun tratto e nessuna curva visibile: scansione o immagine (`image`), tratti e curve solo in livelli spenti (`hidden`), solo testo o riempimenti (`none`). `curves` solo se ci sono cubiche (visibili o no). */
   | { kind: 'absent'; why: AbsentWhy; segments: number; curves?: number }
@@ -65,6 +76,8 @@ export type PdfSnapState =
 export interface SnapLoadDeps {
   ops?: OpsTable;
   maxSegments?: number;
+  /** CP7d: tetto delle voci di cella della scena dei tratti (predefinito SEGMENT_MAX_REFS). */
+  maxSceneRefs?: number;
   maxCoords?: number;
   now?: () => number;
   /** Cede il controllo al browser fra una fase e l'altra (predefinito: un giro del ciclo degli eventi). */
@@ -123,6 +136,15 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
     const t6 = now();
     const grid = new PointGrid(pts);
     const t7 = now();
+    // CP7d: la scena dei tratti (solo se ce ne sono di visibili: con sole curve non c'e' nulla da confrontare)
+    let sceneRes: ReturnType<typeof buildSegmentScene> | null = null;
+    let sceneMs: number | undefined;
+    if (visibleLines > 0) {
+      await pause();
+      const t8 = now();
+      sceneRes = buildSegmentScene(g, sheet, deps.maxSceneRefs === undefined ? {} : { maxRefs: deps.maxSceneRefs });
+      sceneMs = now() - t8;
+    }
     return {
       kind: 'ready',
       source: grid,
@@ -133,7 +155,8 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
       endsFromCurves: pts.curves?.endsFromCurves ?? 0,
       nMid: pts.nMid,
       bytes: pts.bytes + grid.bytes,
-      timings: { opListMs: t1 - t0, extractMs: t3 - t2, pointsMs: t5 - t4, indexMs: t7 - t6 },
+      timings: sceneMs === undefined ? { opListMs: t1 - t0, extractMs: t3 - t2, pointsMs: t5 - t4, indexMs: t7 - t6 } : { opListMs: t1 - t0, extractMs: t3 - t2, pointsMs: t5 - t4, indexMs: t7 - t6, sceneMs },
+      ...(sceneRes ? { sceneStats: sceneRes.stats, ...(sceneRes.grid ? { scene: sceneRes.grid } : {}) } : {}),
     };
   } catch (e) {
     return { kind: 'unavailable', reason: errText(e) };
@@ -150,7 +173,10 @@ export function pdfSnapNote(state: PdfSnapState, pageNo: number): string | null 
   const tail = 'Gli oggetti disegnati si agganciano come sempre.';
   switch (state.kind) {
     case 'ready':
-      return null;
+      // CP7d: lo stato e' pronto (Estremo e Punto medio ci sono) ma la scena dei tratti e' troppo fitta: Intersezione e Perpendicolare del PDF sono spente per questa pagina
+      return state.sceneStats?.dense
+        ? `Pagina ${pageNo}: troppi tratti lunghi e fitti per l'Intersezione e la Perpendicolare sul PDF (${n0(state.sceneStats.kept)} tratti, ${n0(state.sceneStats.refs)} voci di indice, tetto ${n0(state.sceneStats.maxRefs)}): spente per questa pagina; l'Estremo e il Punto medio del PDF restano. ${tail}`
+        : null;
     case 'absent':
       return state.why === 'image'
         ? `Pagina ${pageNo}: è un'immagine (scansione): non ci sono linee del PDF da agganciare. ${tail}`
@@ -178,7 +204,14 @@ export function pdfSnapLogLine(state: PdfSnapState, pageNo: number): string {
       const fromCurves = state.endsFromCurves ?? 0;
       const lineEnds = state.nEnd - fromCurves;
       const curveText = curves > 0 ? `; curve: ${n0(fromCurves)} estremi da ${n0(curves)} cubiche (${n0(state.nEnd)} estremi in tutto)` : '';
-      return `Snap PDF, pagina ${pageNo}: pronto, ${n0(lineEnds)} estremi e ${n0(state.nMid)} punti medi da ${n0(state.segments)} tratti${curveText} (${(state.bytes / 1048576).toFixed(2)} MB; lettura ${t.opListMs.toFixed(0)} ms, estrazione ${t.extractMs.toFixed(0)} ms, punti ${t.pointsMs.toFixed(0)} ms, indice ${t.indexMs.toFixed(0)} ms)`;
+      // CP7d: la scena dei tratti (Intersezione e Perpendicolare): tratti, celle, voci, byte e tempo di costruzione; o il motivo per cui non c'e'
+      const sc = state.sceneStats;
+      const sceneText = !sc
+        ? ''
+        : sc.dense
+          ? `; scena dei tratti: spenta (${n0(sc.kept)} tratti, ${n0(sc.refs)} voci di indice con celle da ${SEGMENT_GRID_MAX_CELL_PT} pt, tetto ${n0(sc.maxRefs)})`
+          : `; scena dei tratti: ${n0(sc.kept)} tratti (${n0(sc.clipped)} ritagliati sul foglio, ${n0(sc.outside)} fuori dal foglio), celle da ${sc.cellPt} pt, ${n0(sc.refs)} voci, ${(sc.bytes / 1048576).toFixed(2)} MB, ${(t.sceneMs ?? 0).toFixed(0)} ms`;
+      return `Snap PDF, pagina ${pageNo}: pronto, ${n0(lineEnds)} estremi e ${n0(state.nMid)} punti medi da ${n0(state.segments)} tratti${curveText} (${(state.bytes / 1048576).toFixed(2)} MB; lettura ${t.opListMs.toFixed(0)} ms, estrazione ${t.extractMs.toFixed(0)} ms, punti ${t.pointsMs.toFixed(0)} ms, indice ${t.indexMs.toFixed(0)} ms)${sceneText}`;
     }
     case 'absent':
       return `Snap PDF, pagina ${pageNo}: assente (${state.why === 'image' ? 'immagine' : state.why === 'hidden' ? 'solo livelli spenti' : 'nessun tratto né curva'}; tratti letti ${n0(state.segments)}${state.curves ? `, cubiche lette ${n0(state.curves)}` : ''})`;
