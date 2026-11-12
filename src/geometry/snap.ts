@@ -19,12 +19,14 @@
 // Senza `extra` e con i tipi nuovi spenti il risultato e' quello di prima.
 // CP7b (V3.1): `extra.pdf` aggiunge come candidati Estremo e Punto medio i punti dei tratti rettilinei del PDF (src/pdf/snapPoints.ts, indicizzati da src/pdf/pointIndex.ts); non e' un
 // tipo nuovo ne' un interruttore di `SnapKind`: l'interruttore «PDF» e' dell'app, che passa o no la sorgente.
+// CP7d (V3.2b): `extra.pdfSegments` aggiunge Intersezione e Perpendicolare sui TRATTI rettilinei del PDF (src/pdf/segmentIndex.ts): con gli interruttori Intersezione e Perpendicolare gia'
+// esistenti e con «PDF» acceso; i candidati sono quelli di `extraCandidates` (snapExtra.ts), emessi dopo quelli degli oggetti.
 // A parita' di distanza (1e-9 pt) vince il tipo con priorita' piu' alta: Estremo, Punto medio, Centro, Origine, Intersezione, Quadrante, Perpendicolare, Tangente (i punti gia'
 // presenti negli oggetti prima di quelli calcolati).
 import type { PageObject } from '../model/model';
 import { arcEnd, arcMid, arcStart, curveOnSheet } from './arc';
 import type { PageGeometry, SheetPoint, UserPoint } from './page';
-import { type ExtraKind, type SnapScene, buildSnapScene, extraCandidates } from './snapExtra';
+import { type ExtraKind, type PdfSegmentSource, type SnapScene, buildSnapScene, extraCandidates } from './snapExtra';
 
 /** I tipi di snap; l'Origine non ha un interruttore proprio (e' sempre un candidato quando c'e' almeno un interruttore acceso). */
 export type SnapKind = 'end' | 'mid' | 'center' | 'origin' | ExtraKind;
@@ -70,6 +72,12 @@ export interface SnapExtra {
    * A parita' di distanza e di tipo vince il punto di un oggetto disegnato (i punti del PDF si considerano per ultimi). Assente: il risultato e' quello di prima.
    */
   pdf?: PdfSnapSource | null;
+  /**
+   * I tratti rettilinei del disegno del PDF (V3.2b, CP7d) per Intersezione (fra tratti del PDF e fra un tratto del PDF e un oggetto disegnato) e Perpendicolare (dall'ancora): stessi
+   * tipi, stesse etichette e stessi marcatori degli oggetti, e gli interruttori Intersezione e Perpendicolare (con uno spento non c'e' quel tipo sul PDF). A parita' di distanza e di tipo
+   * vince il candidato di un oggetto disegnato. Assente: il risultato e' quello di prima.
+   */
+  pdfSegments?: PdfSegmentSource | null;
 }
 
 export interface SnapHit {
@@ -235,7 +243,7 @@ export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw
   }
   if (calc) {
     const scene = extra?.scene ?? buildSnapScene(objects, geom);
-    extraCandidates(scene, raw, radius, kinds, extra?.anchor ? geom.userToSheet(extra.anchor) : null, consider);
+    extraCandidates(scene, raw, radius, kinds, extra?.anchor ? geom.userToSheet(extra.anchor) : null, consider, extra?.pdfSegments);
   }
   return found ? { point: { x: bestX, y: bestY }, kind: bestKind } : null;
 }

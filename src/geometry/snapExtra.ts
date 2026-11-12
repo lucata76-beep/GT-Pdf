@@ -333,12 +333,14 @@ function intersections(a: Prim, b: Prim, emit: (p: SheetPoint) => void): void {
  * `findSnap`); scarta pero' le primitive lontane (vedi il commento in testa). `anchor` (foglio) e' il punto di partenza di Perpendicolare e Tangente: senza, quei due tipi
  * non hanno candidati.
  */
-export function extraCandidates(scene: SnapScene, raw: SheetPoint, radius: number, kinds: ExtraKinds, anchor: SheetPoint | null, emit: (x: number, y: number, kind: ExtraKind) => void): void {
+export function extraCandidates(scene: SnapScene, raw: SheetPoint, radius: number, kinds: ExtraKinds, anchor: SheetPoint | null, emit: (x: number, y: number, kind: ExtraKind) => void, pdf?: PdfSegmentSource | null): void {
   const wantInter = kinds.intersection === true;
   const wantQuad = kinds.quadrant === true;
   const wantPerp = kinds.perpendicular === true && anchor !== null;
   const wantTan = kinds.tangent === true && anchor !== null;
   if (!wantInter && !wantQuad && !wantPerp && !wantTan) return;
+  // CP7d: i tratti del PDF danno l'Intersezione (la Perpendicolare e' del punto successivo)
+  const wantPdf = !!pdf && wantInter;
   const prims = scene.prims;
   const r2 = radius * radius;
   // (1) scarto: riquadro e poi distanza reale dal cursore
@@ -369,7 +371,7 @@ export function extraCandidates(scene: SnapScene, raw: SheetPoint, radius: numbe
       near.push(p);
     }
   }
-  if (near.length === 0) return;
+  if (near.length === 0 && !wantPdf) return;
   // (2) candidati sulle primitive rimaste
   for (let i = 0; i < near.length; i++) {
     const p = near[i] as Prim;
@@ -387,15 +389,67 @@ export function extraCandidates(scene: SnapScene, raw: SheetPoint, radius: numbe
       if (f && Math.hypot(f.x - anchor.x, f.y - anchor.y) > SAME_POINT_EPS) emit(f.x, f.y, 'perpendicular');
     }
   }
-  if (!wantInter) return;
-  for (let i = 0; i < near.length; i++) {
-    const a = near[i] as Prim;
-    if (a.quadOnly) continue;
-    for (let j = i + 1; j < near.length; j++) {
-      const b = near[j] as Prim;
+  if (wantInter) {
+    for (let i = 0; i < near.length; i++) {
+      const a = near[i] as Prim;
+      if (a.quadOnly) continue;
+      for (let j = i + 1; j < near.length; j++) {
+        const b = near[j] as Prim;
+        if (b.quadOnly || !overlaps(a, b)) continue;
+        if (a.owner === b.owner && a.t === 0 && b.t === 0 && Math.abs(a.idx - b.idx) === 1) continue; // tratti adiacenti di una Linea: si toccano nel vertice (Estremo)
+        intersections(a, b, (p) => emit(p.x, p.y, 'intersection'));
+      }
+    }
+  }
+  // (3) CP7d: i tratti del PDF, dopo tutti i candidati degli oggetti
+  if (wantPdf) pdfCandidates(pdf as PdfSegmentSource, near, raw, radius, emit);
+}
+
+/** I due tratti hanno un estremo in comune (uguale al bit: gli stessi numeri del PDF portati nel foglio con la stessa formula)? */
+function shareEndpoint(a: Prim, b: Prim): boolean {
+  return (a.x1 === b.x1 && a.y1 === b.y1) || (a.x1 === b.x2 && a.y1 === b.y2) || (a.x2 === b.x1 && a.y2 === b.y1) || (a.x2 === b.x2 && a.y2 === b.y2);
+}
+
+/** Primitive-tratto riutilizzate fra una chiamata e l'altra (al piu' PDF_MAX_NEAR): nessun oggetto nuovo a ogni movimento del mouse. */
+const pdfPool: Prim[] = [];
+
+/**
+ * Candidati dei tratti del PDF entro `radius` da `raw` (CP7d). Intersezione: (i) fra due tratti del PDF, (ii) fra un tratto del PDF e una primitiva degli oggetti vicina al cursore (`objNear`: Retta, Linea, Cerchio, Arco). Due tratti dello
+ * STESSO percorso del PDF con un estremo in comune si toccano nel vertice, che e' un Estremo (come i tratti adiacenti di una Linea): nessuna Intersezione li'. `PdfSegmentSource` non
+ * dice quale sottopercorso e' di quale: fra tratti dello stesso percorso e con un estremo uguale al bit si salta il confronto (anche la chiusura di un poligono); a parita' di distanza
+ * l'Estremo vince comunque per priorita'. Con piu' di `PDF_MAX_NEAR` tratti vicini non si emette nulla.
+ */
+function pdfCandidates(src: PdfSegmentSource, objNear: readonly Prim[], raw: SheetPoint, radius: number, emit: (x: number, y: number, kind: ExtraKind) => void): void {
+  let n = 0;
+  const ok = src.forEachNear(raw.x, raw.y, radius, PDF_MAX_NEAR, (id, path, ax, ay, bx, by) => {
+    let p = pdfPool[n];
+    if (!p) pdfPool[n] = p = blank(0, 0, 0);
+    p.owner = path;
+    p.idx = id;
+    p.x1 = ax;
+    p.y1 = ay;
+    p.x2 = bx;
+    p.y2 = by;
+    p.minX = ax < bx ? ax : bx;
+    p.maxX = ax < bx ? bx : ax;
+    p.minY = ay < by ? ay : by;
+    p.maxY = ay < by ? by : ay;
+    n++;
+  });
+  if (!ok || n === 0) return;
+  const out = (p: SheetPoint): void => emit(p.x, p.y, 'intersection');
+  for (let i = 0; i < n; i++) {
+    const a = pdfPool[i] as Prim;
+    for (let j = i + 1; j < n; j++) {
+      const b = pdfPool[j] as Prim;
+      if (!overlaps(a, b) || (a.owner === b.owner && shareEndpoint(a, b))) continue;
+      const p = intersectSegSeg(a, b);
+      if (p) out(p);
+    }
+    for (let k = 0; k < objNear.length; k++) {
+      const b = objNear[k] as Prim;
       if (b.quadOnly || !overlaps(a, b)) continue;
-      if (a.owner === b.owner && a.t === 0 && b.t === 0 && Math.abs(a.idx - b.idx) === 1) continue; // tratti adiacenti di una Linea: si toccano nel vertice (Estremo)
-      intersections(a, b, (p) => emit(p.x, p.y, 'intersection'));
+      intersections(a, b, out);
     }
   }
 }
