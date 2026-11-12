@@ -176,9 +176,9 @@ const SNAP_MESSAGE: Record<SnapSwitch, { on: string; off: string }> = {
  * e stessi nomi dei tipi, che restano i loro interruttori (con Estremo spento non c'e' l'Estremo del PDF, nemmeno quello delle curve; con Intersezione o Perpendicolare spenti non c'e' quel tipo
  * sul PDF).
  */
-const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo, Punto medio, Intersezione e Perpendicolare si agganciano anche alle linee del disegno del PDF, e l\'Estremo anche agli estremi delle sue curve, oltre che ai tuoi oggetti (non vale per le scansioni)';
+const PDF_SNAP_TITLE = 'Snap sul PDF: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, Intersezione e Perpendicolare anche alle sue linee rette, e l\'Estremo anche agli estremi delle sue curve, oltre che ai tuoi oggetti (non vale per le scansioni)';
 const PDF_SNAP_MESSAGE = {
-  on: 'PDF attivo: Estremo, Punto medio, Intersezione e Perpendicolare si agganciano anche alle linee del disegno del PDF, l\'Estremo anche alle sue curve',
+  on: 'PDF attivo: Estremo e Punto medio si agganciano anche alle linee del disegno del PDF, Intersezione e Perpendicolare anche alle sue linee rette, l\'Estremo anche alle sue curve',
   off: 'PDF disattivato: l\'aggancio resta solo sugli oggetti disegnati',
   reading: 'PDF attivo: il disegno di questa pagina è in lettura, l\'aggancio compare tra un momento',
 };
