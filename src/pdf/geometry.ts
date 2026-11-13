@@ -16,6 +16,9 @@
 // node_modules/pdfjs-dist/legacy/build/pdf.mjs (riga 6377), e NON esportata (letto a runtime: 'DrawOPS' in pdfjs e' false). Quindi sono ricopiati qui.
 // Se un aggiornamento di PDF.js cambia il formato, i test di src/pdf/geometry.test.ts ("sentinella") falliscono con "aggiornare src/pdf/geometry.ts".
 
+import { type ArcStats, addArcMeasure, newArcStats, vertexBucket } from './arcStats';
+import { ARC_MAX_CUBICS, ARC_MAX_VERTICES, measureCubicChain, measurePolygon, newArcMeasure } from './circleFit';
+
 /** DrawOPS di PDF.js 6.5.438 (ricopiati: la costante NON e' esportata). */
 export const DRAW_MOVE_TO = 0;
 export const DRAW_LINE_TO = 1;
@@ -148,6 +151,8 @@ export interface ShapeStats {
   closedMixed: MixedStats;
   /** Sottopercorsi di sole cubiche con 4 cubiche. */
   four: FourCubicStats;
+  /** CP7e (V3.2c, SOLA MISURA): quanto i sottopercorsi di sole cubiche (da 1 a ARC_MAX_CUBICS) e i poligoni fitti somigliano a un cerchio. Vedi src/pdf/arcStats.ts e circleFit.ts. */
+  arcs: ArcStats;
 }
 
 export interface LayerStats {
@@ -311,6 +316,7 @@ function newShapes(): ShapeStats {
     openMixed: newMixed(),
     closedMixed: newMixed(),
     four: { subpaths: 0, open: 0, gapHist: new Array<number>(GAP_EDGES.length + 1).fill(0), gapMin: null, gapMax: null, circleNoClose: 0, circleNoCloseMaxDev: 0 },
+    arcs: newArcStats(ARC_MAX_CUBICS),
   };
 }
 function newLayers(): LayerStats {
@@ -397,6 +403,16 @@ export function circleFrom4Cubics(c: ArrayLike<number>, needClosed = true): numb
     if (dev > devMid) devMid = dev;
   }
   return Math.max(needClosed ? devClose : 0, devCenter, devR, devPerp, devMid);
+}
+
+/**
+ * Riferimento di CP7e (NON una regola di riconoscimento): le tolleranze di CP7a applicate alla misura. `devNodes` e' lo scostamento massimo dei nodi (estremi e giunti), `devMid` quello dei
+ * punti a t = 0.5 (0 per i poligoni): entro CIRCLE_TOL_ABS + CIRCLE_TOL_REL x raggio i primi, entro la stessa tolleranza + CIRCLE_MID_REL x raggio i secondi.
+ */
+export function withinCp7aTolerance(isArc: boolean, r: number, devNodes: number, devMid: number): boolean {
+  if (!isArc) return false;
+  const tol = CIRCLE_TOL_ABS + CIRCLE_TOL_REL * r;
+  return devNodes <= tol && devMid <= tol + CIRCLE_MID_REL * r;
 }
 
 // ------------------------------------------------------------------ matrici (x' = a x + c y + e, y' = b x + d y + f)
@@ -570,7 +586,9 @@ function extract(input: ExtractInput): ExtractResult {
   let hidden = 0; // marcatori spenti aperti
 
   // ---- stato del percorso corrente
-  const cub = new Float64Array(32); // prime 4 cubiche del sottopercorso (per la regola del cerchio)
+  const cub = new Float64Array(ARC_MAX_CUBICS * 8); // prime ARC_MAX_CUBICS cubiche del sottopercorso (le prime 4 per la regola del cerchio di CP7a, tutte per la misura di CP7e)
+  const pv = new Float64Array((ARC_MAX_VERTICES + 1) * 2); // punto iniziale e primi ARC_MAX_VERTICES estremi dei lineTo del sottopercorso (misura dei poligoni fitti, CP7e)
+  const arc = newArcMeasure();
 
   const pushMarker = (visible: boolean): void => {
     markers.push(visible);
@@ -761,6 +779,8 @@ function extract(input: ExtractInput): ExtractResult {
         let subQuads = 0;
         let subClosedCmd = false;
         let subSegs = 0;
+        let lx = 0; // ultimo estremo di un lineTo del sottopercorso (per i vertici dei poligoni fitti)
+        let ly = 0;
         const endSub = (): void => {
           if (!hasCur) return;
           if (subSegs === 0) {
@@ -827,6 +847,38 @@ function extract(input: ExtractInput): ExtractResult {
               }
             }
           }
+          // ---- CP7e (V3.2c, SOLA MISURA): sole cubiche (aperte o chiuse, stessa definizione di sopra) fino a ARC_MAX_CUBICS, e poligoni fitti fino a ARC_MAX_VERTICES vertici.
+          // Si misura una volta sola e si somma ai gruppi (tutti i percorsi; candidati).
+          if (subCubics > 0 && subLines === 0 && subQuads === 0) {
+            if (subCubics <= ARC_MAX_CUBICS) {
+              measureCubicChain(cub, subCubics, arc);
+              const within = withinCp7aTolerance(arc.status === 'arc', arc.r, arc.devNodes, arc.devMid);
+              for (const g of groups) addArcMeasure(closed ? g.arcs.cubicClosed : g.arcs.cubicOpen, subCubics - 1, arc, subCubics, within);
+            } else {
+              for (const g of groups) {
+                const sk = closed ? g.arcs.cubicClosedSkipped : g.arcs.cubicOpenSkipped;
+                sk.subpaths++;
+                sk.units += subCubics;
+              }
+            }
+          } else if (closed && subCubics === 0 && subQuads === 0 && subLines >= DENSE_POLYGON_LINETO) {
+            // vertici: punto iniziale e estremi dei lineTo, senza l'ultimo se coincide con il primo (closePath o coincidenza)
+            const nv = subLines + 1 - (Math.hypot(lx - sx, ly - sy) <= CLOSE_COINCIDENCE ? 1 : 0);
+            if (nv <= ARC_MAX_VERTICES) {
+              measurePolygon(pv, nv, arc);
+              const within = withinCp7aTolerance(arc.status === 'arc', arc.r, arc.devNodes, arc.devMid);
+              for (const g of groups) {
+                g.arcs.polyVertices += nv;
+                addArcMeasure(g.arcs.poly, vertexBucket(nv), arc, nv, within);
+              }
+            } else {
+              for (const g of groups) {
+                g.arcs.polyVertices += nv;
+                g.arcs.polySkipped.subpaths++;
+                g.arcs.polySkipped.units += nv;
+              }
+            }
+          }
           hasCur = false;
         };
         const addLine = (x0: number, y0: number, x1: number, y1: number): void => {
@@ -851,7 +903,7 @@ function extract(input: ExtractInput): ExtractResult {
           nLines++;
         };
         const addCubic = (x0: number, y0: number, c1x: number, c1y: number, c2x: number, c2y: number, x1: number, y1: number): void => {
-          if (subCubics < 4) {
+          if (subCubics < ARC_MAX_CUBICS) {
             const o = subCubics * 8;
             cub[o] = x0;
             cub[o + 1] = y0;
@@ -891,6 +943,10 @@ function extract(input: ExtractInput): ExtractResult {
           hasCur = true;
           cx = sx = x;
           cy = sy = y;
+          pv[0] = x;
+          pv[1] = y;
+          lx = x;
+          ly = y;
           subLines = 0;
           subCubics = 0;
           subQuads = 0;
@@ -924,6 +980,12 @@ function extract(input: ExtractInput): ExtractResult {
               }
               addLine(cx, cy, tx, ty);
               subLines++;
+              if (subLines <= ARC_MAX_VERTICES) {
+                pv[subLines * 2] = tx;
+                pv[subLines * 2 + 1] = ty;
+              }
+              lx = tx;
+              ly = ty;
               cx = tx;
               cy = ty;
             }

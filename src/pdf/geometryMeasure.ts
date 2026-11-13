@@ -1,11 +1,26 @@
-// Misura per pagina della geometria di un PDF (V3.0, CP7a; righe in piu' su cerchi e archi V3.2a, CP7c): chiama page.getOperatorList() (tempi, stesso oggetto la seconda volta), passa
+// Misura per pagina della geometria di un PDF (V3.0, CP7a; righe in piu' su cerchi e archi V3.2a, CP7c; misura degli archi V3.2c, CP7e): chiama page.getOperatorList() (tempi, stesso oggetto la seconda volta), passa
 // l'elenco all'estrattore (src/pdf/geometry.ts), classifica la pagina, legge i livelli del documento e compone il testo di "Copia misura".
 // NIENTE snap, niente uso nell'editor o nel visore: lo usa solo la scheda "Geometria PDF" della pagina Diagnostica (src/diag/geometryCard.ts).
 // Mai eccezioni verso la scheda: ogni errore (di PDF.js o dell'estrazione) torna come { ok: false, reason }.
 import { OPS, version as pdfjsVersion } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { fmt, fmtTrim } from '../geometry/numbers';
-import { BYTES_PER_CUBIC, BYTES_PER_LINE, CIRCLE_TOL_ABS, CIRCLE_TOL_REL, DEFAULT_MAX_COORDS, GAP_EDGES, type GeometryStats, type OpsTable, type PdfGeometry, extractGeometry } from './geometry';
+import { ABS_EDGES, ANGLE_EDGES, ANGLE_MARGIN, type ArcBucket, type ArcSkipped, REL_EDGES, RADIUS_EDGES, TAN_EDGES, VERTEX_BUCKETS } from './arcStats';
+import { ARC_MAX_CUBICS, ARC_MAX_VERTICES, BENT_FRACTION, STRAIGHT_RATIO } from './circleFit';
+import {
+  BYTES_PER_CUBIC,
+  BYTES_PER_LINE,
+  CIRCLE_MID_REL,
+  CIRCLE_TOL_ABS,
+  CIRCLE_TOL_REL,
+  DEFAULT_MAX_COORDS,
+  GAP_EDGES,
+  type GeometryStats,
+  type OpsTable,
+  type PdfGeometry,
+  type ShapeStats,
+  extractGeometry,
+} from './geometry';
 
 /** Massimo di pagine di "Misura tutte le pagine" (le altre non si misurano: la scheda lo dice). */
 export const MAX_PAGES = 200;
@@ -196,6 +211,110 @@ export function summaryRow(m: PageMeasure): string {
   return `pagina ${m.meta.pageNo}: ${m.pageClass} · percorsi ${n0(s.all.paths)} · segmenti ${n0(allSegments(s))} · ${fmt(ms, 0)} ms · Rotate ${m.meta.rotate} · ${fmtTrim(m.meta.widthPt, 1)} x ${fmtTrim(m.meta.heightPt, 1)} pt${s.truncated ? ' · LIMITE' : ''}`;
 }
 
+// ------------------------------------------------------------------------------------------------ misura degli archi (CP7e)
+const sci = (v: number): string => (v === 0 ? '0' : v.toExponential(2));
+const num = (v: number): string => fmtTrim(v, 6);
+const joinHist = (labels: string[], hist: number[]): string => labels.map((l, i) => `${l}: ${n0(hist[i] ?? 0)}`).join(' · ');
+const sum = (a: number[]): number => a.reduce((x, y) => x + y, 0);
+const upTo = (edges: readonly number[], f: (e: number) => string, last: string): string[] => [...edges.map((e) => `fino a ${f(e)}`), last];
+const REL_LABELS = upTo(REL_EDGES, num, `oltre ${num(REL_EDGES[REL_EDGES.length - 1]!)}`);
+const ABS_LABELS = upTo(ABS_EDGES, num, `oltre ${num(ABS_EDGES[ABS_EDGES.length - 1]!)}`);
+const TAN_LABELS = upTo(TAN_EDGES, num, `oltre ${num(TAN_EDGES[TAN_EDGES.length - 1]!)}`);
+const RADIUS_LABELS = [`sotto ${num(RADIUS_EDGES[0]!)}`, ...RADIUS_EDGES.slice(0, -1).map((e, i) => `${num(e)}-${num(RADIUS_EDGES[i + 1]!)}`), `${num(RADIUS_EDGES[RADIUS_EDGES.length - 1]!)} e oltre`];
+const ANGLE_LABELS = [...ANGLE_EDGES.map((e) => `fino a ${e}`), 'meno di 360', 'circa 360', 'oltre 360'];
+const VERTEX_LABELS = ['12-16', '17-24', '25-32', '33-64', '65-128', '129-256'];
+const verdict = (ok: boolean): string => (ok ? 'il conto torna' : 'IL CONTO NON TORNA');
+
+/** Le righe di un contenitore (stato e numero di cubiche, o numero di vertici): scostamenti, raggio, angolo e, per le catene, tangenti. */
+function bucketLines(head: string, b: ArcBucket, tangents: boolean): string[] {
+  const out: string[] = [];
+  out.push(`${head}: sottopercorsi ${n0(b.subpaths)} (raggio determinato ${n0(b.arcs)}, quasi rettilinei ${n0(b.straight)}, di cui raggio non determinabile ${n0(b.undetermined)} e non piatti ${n0(b.bent)}${b.straight - b.undetermined > 0 ? `; piattezza massima ${sci(b.flatMax)}` : ''}); scostamento massimo RELATIVO (scostamento diviso raggio), ${joinHist(REL_LABELS, b.relHist)} (massimo ${sci(b.relMax)})`);
+  out.push(
+    `${head}: scostamento massimo ASSOLUTO (pt utente), ${joinHist(ABS_LABELS, b.absHist)} (massimo ${sci(b.absMax)}); entro le tolleranze di CP7a (riferimento): ${n0(b.withinCp7a)} su ${n0(b.arcs)}`,
+  );
+  out.push(
+    `${head}: raggio (pt utente), ${joinHist(RADIUS_LABELS, b.radiusHist)}; minimo e massimo ${b.radiusMin === null ? 'nessuno' : `${num(b.radiusMin)} e ${num(b.radiusMax ?? 0)}`}; angolo coperto (gradi), ${joinHist(ANGLE_LABELS, b.angleHist)}; minimo e massimo ${b.angleMin === null ? 'nessuno' : `${fmtTrim(b.angleMin, 4)} e ${fmtTrim(b.angleMax ?? 0, 4)}`}`,
+  );
+  if (tangents) {
+    out.push(
+      `${head}: scostamento delle tangenti dal cerchio negli estremi delle cubiche (gradi), ${joinHist(TAN_LABELS, b.tanHist)} (misurato su ${n0(b.tanMeasured)} di ${n0(b.arcs)}; massimo ${sci(b.tanMax)}); salto massimo della tangente nei giunti (gradi): ${b.jointMax < 0 ? 'nessun giunto misurato' : sci(b.jointMax)}`,
+    );
+  }
+  return out;
+}
+
+/** Somma delle classi dei contenitori di un gruppo, per istogramma. */
+function classSums(buckets: (ArcBucket | null)[]): { rel: number; abs: number; radius: number; angle: number; tan: number; tanMeasured: number; arcs: number; straight: number; undetermined: number; bent: number; subpaths: number; units: number } {
+  const r = { rel: 0, abs: 0, radius: 0, angle: 0, tan: 0, tanMeasured: 0, arcs: 0, straight: 0, undetermined: 0, bent: 0, subpaths: 0, units: 0 };
+  for (const b of buckets) {
+    if (!b) continue;
+    r.rel += sum(b.relHist);
+    r.abs += sum(b.absHist);
+    r.radius += sum(b.radiusHist);
+    r.angle += sum(b.angleHist);
+    r.tan += sum(b.tanHist);
+    r.tanMeasured += b.tanMeasured;
+    r.arcs += b.arcs;
+    r.straight += b.straight;
+    r.undetermined += b.undetermined;
+    r.bent += b.bent;
+    r.subpaths += b.subpaths;
+    r.units += b.units;
+  }
+  return r;
+}
+
+/**
+ * Le righe della misura degli archi (CP7e), per gruppo di percorsi: sottopercorsi di sole cubiche (aperti e chiusi, da 1 a ARC_MAX_CUBICS cubiche) e poligoni fitti. Un contenitore senza
+ * sottopercorsi non ha righe; i totali e i conti ci sono sempre. SOLA MISURA: nessuna riga dice che un gruppo «e'» un arco o un cerchio.
+ */
+function arcLines(label: string, x: ShapeStats): string[] {
+  const out: string[] = [];
+  const A = x.arcs;
+  for (const [state, stateWord, slots, skipped, reported, reportedCubics] of [
+    ['APERTI', 'aperti', A.cubicOpen, A.cubicOpenSkipped, sum(x.openCubicOnly), x.openCubicOnlyCubics],
+    ['CHIUSI', 'chiusi', A.cubicClosed, A.cubicClosedSkipped, sum(x.closedCubicOnly), x.closedCubicOnlyCubics],
+  ] as [string, string, (ArcBucket | null)[], ArcSkipped, number, number][]) {
+    const s = classSums(slots);
+    out.push(
+      `archi, sottopercorsi ${state} di sole cubiche, ${label}: ${n0(reported)} = misurati ${n0(s.subpaths)} (raggio determinato ${n0(s.arcs)}, quasi rettilinei ${n0(s.straight)}, di cui raggio non determinabile ${n0(s.undetermined)} e non piatti ${n0(s.bent)}) + oltre ${ARC_MAX_CUBICS} cubiche non misurati ${n0(skipped.subpaths)}; cubiche: misurate ${n0(s.units)} + non misurate ${n0(skipped.units)} = ${n0(s.units + skipped.units)}`,
+    );
+    slots.forEach((b, i) => {
+      if (b) out.push(...bucketLines(`archi ${state}, ${i + 1} ${i === 0 ? 'cubica' : 'cubiche'}, ${label}`, b, true));
+    });
+    out.push(
+      `archi, conto dei sottopercorsi ${state} di sole cubiche, ${label}: somma delle classi (scostamento relativo ${n0(s.rel)}, assoluto ${n0(s.abs)}, raggio ${n0(s.radius)}, angolo ${n0(s.angle)}, tangenti ${n0(s.tan)} + non misurate ${n0(s.arcs - s.tanMeasured)}) = raggio determinato ${n0(s.arcs)}; ${n0(s.arcs)} + quasi rettilinei ${n0(s.straight)} + oltre ${ARC_MAX_CUBICS} cubiche ${n0(skipped.subpaths)} = ${n0(s.arcs + s.straight + skipped.subpaths)}; sottopercorsi ${stateWord} di sole cubiche già riportati ${n0(reported)} (${verdict(s.rel === s.arcs && s.abs === s.arcs && s.radius === s.arcs && s.angle === s.arcs && s.tan + s.arcs - s.tanMeasured === s.arcs && s.arcs + s.straight + skipped.subpaths === reported)})`,
+    );
+    out.push(
+      `archi, conto delle cubiche misurate e non misurate, ${state}, ${label}: ${n0(s.units)} + ${n0(skipped.units)} = ${n0(s.units + skipped.units)}; cubiche dei sottopercorsi ${stateWord} di sole cubiche già riportate ${n0(reportedCubics)} (${verdict(s.units + skipped.units === reportedCubics)})`,
+    );
+  }
+  const poly = classSums(A.poly);
+  out.push(
+    `archi, poligoni fitti (chiusi, almeno 12 lineTo, nessuna cubica), ${label}: ${n0(x.denseClosedPolygons)} = misurati ${n0(poly.subpaths)} (raggio determinato ${n0(poly.arcs)}, quasi rettilinei ${n0(poly.straight)}, di cui raggio non determinabile ${n0(poly.undetermined)} e non piatti ${n0(poly.bent)}) + oltre ${ARC_MAX_VERTICES} vertici non misurati ${n0(A.polySkipped.subpaths)}; vertici (punto iniziale e estremi dei lineTo, senza l'ultimo se coincide con il primo): misurati ${n0(poly.units)} + non misurati ${n0(A.polySkipped.units)} = ${n0(poly.units + A.polySkipped.units)}`,
+  );
+  A.poly.forEach((b, i) => {
+    if (b) out.push(...bucketLines(`archi, poligoni fitti, ${VERTEX_LABELS[i]} vertici, ${label}`, b, false));
+  });
+  out.push(
+    `archi, conto dei poligoni fitti, ${label}: somma delle classi (scostamento relativo ${n0(poly.rel)}, assoluto ${n0(poly.abs)}, raggio ${n0(poly.radius)}, angolo ${n0(poly.angle)}) = raggio determinato ${n0(poly.arcs)}; ${n0(poly.arcs)} + quasi rettilinei ${n0(poly.straight)} + oltre ${ARC_MAX_VERTICES} vertici ${n0(A.polySkipped.subpaths)} = ${n0(poly.arcs + poly.straight + A.polySkipped.subpaths)}; poligoni fitti già riportati ${n0(x.denseClosedPolygons)} (${verdict(poly.rel === poly.arcs && poly.abs === poly.arcs && poly.radius === poly.arcs && poly.angle === poly.arcs && poly.arcs + poly.straight + A.polySkipped.subpaths === x.denseClosedPolygons)})`,
+  );
+  out.push(
+    `archi, conto dei vertici misurati e non misurati, poligoni fitti, ${label}: ${n0(poly.units)} + ${n0(A.polySkipped.units)} = ${n0(poly.units + A.polySkipped.units)}; vertici di tutti i poligoni fitti contati a parte ${n0(A.polyVertices)} (${verdict(poly.units + A.polySkipped.units === A.polyVertices)})`,
+  );
+  return out;
+}
+
+/** Le righe che spiegano la misura degli archi (una volta sola, prima di quelle dei gruppi). */
+function arcDefinitionLines(): string[] {
+  return [
+    `archi (CP7e, SOLA MISURA: nessuna tolleranza decisa, nessun gruppo riconosciuto): cerchio adattato ai minimi quadrati della distanza dai punti; punti delle catene di cubiche: nodi (estremi e giunti) e, per ogni cubica, t = 0.25, 0.5 e 0.75; punti dei poligoni fitti: tutti i vertici`,
+    `archi, definizioni: scostamento = distanza massima dei punti dal cerchio adattato, assoluto in pt utente e relativo (diviso il raggio); angolo coperto = somma degli angoli fra punti consecutivi visti dal centro (poligoni: il lato di chiusura conta solo se non e' piu' ampio degli altri lati, altrimenti e' una corda che chiude un arco); tangenti = angolo fra la tangente della cubica e quella del cerchio negli estremi delle cubiche e, nei giunti, salto fra tangente uscente ed entrante`,
+    `archi, quasi rettilinei: raggio oltre ${STRAIGHT_RATIO} volte la diagonale del riquadro dei punti (angolo coperto sotto circa 0.57 gradi) oppure raggio non determinabile; contati a parte, fuori dagli istogrammi; fra loro «non piatti» = punti a piu' dell'${BENT_FRACTION * 100}% della diagonale dalla retta ai minimi quadrati (per esempio una S: ha un cerchio adattato enorme ma non e' una retta); tetti: ${ARC_MAX_CUBICS} cubiche per sottopercorso e ${ARC_MAX_VERTICES} vertici per poligono (oltre sono solo contati: ${VERTEX_BUCKETS} contenitori di vertici); limiti superiori inclusi (il raggio: escluso), margine degli angoli ${ANGLE_MARGIN} gradi`,
+    `archi, riferimento di CP7a (NON la regola del cerchio, che vale solo per 4 cubiche): tolleranza ${CIRCLE_TOL_ABS} pt + ${CIRCLE_TOL_REL} x raggio per i nodi e, a meta' curva (t = 0.5), in piu' ${CIRCLE_MID_REL} x raggio, applicata allo scostamento dal cerchio adattato`,
+  ];
+}
+
 /** Le righe di una misura, una per voce (i numeri sempre con "."). */
 export function measureLines(m: PageMeasure, layers: DocLayers | null): string[] {
   const s = m.stats;
@@ -279,6 +398,14 @@ export function measureLines(m: PageMeasure, layers: DocLayers | null): string[]
     lines.push(
       `di 4 cubiche che rispettano la regola del cerchio SENZA la condizione di chiusura, ${label}: ${n0(f.circleNoClose)} su ${n0(f.subpaths)} (scostamento massimo ${fmtTrim(f.circleNoCloseMaxDev, 6)} pt, chiusura esclusa; tolleranza ${CIRCLE_TOL_ABS} pt + ${CIRCLE_TOL_REL} x raggio)`,
     );
+  }
+  // ---- CP7e: misura degli archi (righe nuove, in coda a quelle di CP7c)
+  lines.push(...arcDefinitionLines());
+  for (const [label, x] of [
+    ['tutti i percorsi', s.shapesAll],
+    ['candidati', s.shapesCand],
+  ] as const) {
+    lines.push(...arcLines(label, x));
   }
   lines.push(`livelli del documento: gruppi OCG ${layers ? n0(layers.groups) : 'non letti'}, spenti nella configurazione predefinita ${layers ? n0(layers.off) : 'non letti'}`);
   const L = s.layers;
