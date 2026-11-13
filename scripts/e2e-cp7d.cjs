@@ -825,7 +825,8 @@ async function geoPress(page, name) {
   await page.waitForFunction(() => /^(Misurat[ae] \d+|Nessuna pagina misurata|Misura fallita)/.test(document.querySelector('.geo-status').innerText), null, { timeout: 60000 });
 }
 /** Lo scheletro di un testo: ogni numero diventa `#` (tempi e memoria cambiano da una corsa all'altra; le righe, le parole e l'ordine no). */
-const skeleton = (t) => t.split('\n').map((l) => l.replace(/-?\d+([.,]\d+)?/g, '#')).join('\n');
+// CP7e: le righe NUOVE della misura degli archi (cominciano con «archi») non entrano nello scheletro: lo scheletro e' quello delle righe di f5e4947 (su d4903c4 e su f5e4947 il filtro non toglie nulla: neutro).
+const skeleton = (t) => t.split('\n').filter((l) => !l.startsWith('archi')).map((l) => l.replace(/-?\d+([.,]\d+)?/g, '#')).join('\n');
 const sha = (t) => createHash('sha256').update(t).digest('hex').slice(0, 16);
 /** SHA-256 (primi 16 caratteri) dello scheletro della scheda e di «Copia misura» MISURATI SU f5e4947 con questa stessa prova (E2E_DIST=<build di f5e4947> E2E_ONLY=diag): il testo e' lo stesso. */
 const BASE_CARD = '54e4ea4cf928d4bb';
