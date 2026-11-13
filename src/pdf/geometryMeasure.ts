@@ -162,6 +162,7 @@ export async function measurePage(doc: PDFDocumentProxy, pageNo: number, deps: M
       ops: deps.ops ?? (OPS as unknown as OpsTable),
       isLayerVisible: (data) => config.isVisible(data as never),
       maxCoords: deps.maxCoords ?? DEFAULT_MAX_COORDS,
+      measureArcs: true, // CP7e: la misura degli archi si fa solo qui (Diagnostica), mai nell'editor
     });
     const t3 = now();
     if (!res.ok) return { ok: false, reason: res.reason, meta };

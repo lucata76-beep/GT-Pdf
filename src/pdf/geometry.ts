@@ -63,6 +63,12 @@ export interface ExtractInput {
   isLayerVisible: (data: unknown) => boolean;
   /** Limite di sicurezza: dopo questo numero di numeri letti dai Float32Array si smette di leggere i percorsi (le conte delle operazioni restano complete). */
   maxCoords?: number;
+  /**
+   * CP7e: misura degli archi (`ShapeStats.arcs`): bufferizza fino a ARC_MAX_CUBICS cubiche e ARC_MAX_VERTICES vertici per sottopercorso e adatta un cerchio a ognuno. SPENTA se non e' `true`:
+   * la accende solo la scheda «Geometria PDF» di Diagnostica (src/pdf/geometryMeasure.ts); lo snap dell'editor (src/pdf/snapPage.ts) non la chiede e non ne paga il costo (a spenta le
+   * statistiche `arcs` restano vuote e il resto dell'estrazione e' quello di CP7d).
+   */
+  measureArcs?: boolean;
 }
 
 /** Conte per tipo di operazione (sempre su TUTTA la pagina, anche se il limite scatta). */
@@ -477,6 +483,9 @@ export function extractGeometry(input: ExtractInput): ExtractResult {
 function extract(input: ExtractInput): ExtractResult {
   const { fnArray, argsArray, ops, isLayerVisible } = input;
   const limit = input.maxCoords ?? DEFAULT_MAX_COORDS;
+  const arcsOn = input.measureArcs === true;
+  /** Cubiche per sottopercorso che si tengono nel buffer: 4 (regola del cerchio di CP7a) o ARC_MAX_CUBICS con la misura degli archi accesa. */
+  const cubCap = arcsOn ? ARC_MAX_CUBICS : 4;
   const nOps = fnArray.length;
   if (nOps !== argsArray.length) return { ok: false, reason: `Elenco di operazioni incoerente: ${nOps} codici e ${argsArray.length} argomenti (${FIX}).` };
   for (const name of REQUIRED) {
@@ -586,8 +595,8 @@ function extract(input: ExtractInput): ExtractResult {
   let hidden = 0; // marcatori spenti aperti
 
   // ---- stato del percorso corrente
-  const cub = new Float64Array(ARC_MAX_CUBICS * 8); // prime ARC_MAX_CUBICS cubiche del sottopercorso (le prime 4 per la regola del cerchio di CP7a, tutte per la misura di CP7e)
-  const pv = new Float64Array((ARC_MAX_VERTICES + 1) * 2); // punto iniziale e primi ARC_MAX_VERTICES estremi dei lineTo del sottopercorso (misura dei poligoni fitti, CP7e)
+  const cub = new Float64Array(cubCap * 8); // prime `cubCap` cubiche del sottopercorso: 4 per la regola del cerchio di CP7a (32 numeri, come prima di CP7e), ARC_MAX_CUBICS con la misura degli archi
+  const pv = new Float64Array(arcsOn ? (ARC_MAX_VERTICES + 1) * 2 : 0); // punto iniziale e primi ARC_MAX_VERTICES estremi dei lineTo del sottopercorso (poligoni fitti, solo con la misura degli archi)
   const arc = newArcMeasure();
 
   const pushMarker = (visible: boolean): void => {
@@ -847,9 +856,11 @@ function extract(input: ExtractInput): ExtractResult {
               }
             }
           }
-          // ---- CP7e (V3.2c, SOLA MISURA): sole cubiche (aperte o chiuse, stessa definizione di sopra) fino a ARC_MAX_CUBICS, e poligoni fitti fino a ARC_MAX_VERTICES vertici.
-          // Si misura una volta sola e si somma ai gruppi (tutti i percorsi; candidati).
-          if (subCubics > 0 && subLines === 0 && subQuads === 0) {
+          // ---- CP7e (V3.2c, SOLA MISURA, solo con `measureArcs`): sole cubiche (aperte o chiuse, stessa definizione di sopra) fino a ARC_MAX_CUBICS, e poligoni fitti fino a ARC_MAX_VERTICES
+          // vertici. Si misura una volta sola e si somma ai gruppi (tutti i percorsi; candidati).
+          if (!arcsOn) {
+            // spenta: niente
+          } else if (subCubics > 0 && subLines === 0 && subQuads === 0) {
             if (subCubics <= ARC_MAX_CUBICS) {
               measureCubicChain(cub, subCubics, arc);
               const within = withinCp7aTolerance(arc.status === 'arc', arc.r, arc.devNodes, arc.devMid);
@@ -903,7 +914,7 @@ function extract(input: ExtractInput): ExtractResult {
           nLines++;
         };
         const addCubic = (x0: number, y0: number, c1x: number, c1y: number, c2x: number, c2y: number, x1: number, y1: number): void => {
-          if (subCubics < ARC_MAX_CUBICS) {
+          if (subCubics < cubCap) {
             const o = subCubics * 8;
             cub[o] = x0;
             cub[o + 1] = y0;
@@ -943,10 +954,12 @@ function extract(input: ExtractInput): ExtractResult {
           hasCur = true;
           cx = sx = x;
           cy = sy = y;
-          pv[0] = x;
-          pv[1] = y;
-          lx = x;
-          ly = y;
+          if (arcsOn) {
+            pv[0] = x;
+            pv[1] = y;
+            lx = x;
+            ly = y;
+          }
           subLines = 0;
           subCubics = 0;
           subQuads = 0;
@@ -980,12 +993,14 @@ function extract(input: ExtractInput): ExtractResult {
               }
               addLine(cx, cy, tx, ty);
               subLines++;
-              if (subLines <= ARC_MAX_VERTICES) {
-                pv[subLines * 2] = tx;
-                pv[subLines * 2 + 1] = ty;
+              if (arcsOn) {
+                if (subLines <= ARC_MAX_VERTICES) {
+                  pv[subLines * 2] = tx;
+                  pv[subLines * 2 + 1] = ty;
+                }
+                lx = tx;
+                ly = ty;
               }
-              lx = tx;
-              ly = ty;
               cx = tx;
               cy = ty;
             }

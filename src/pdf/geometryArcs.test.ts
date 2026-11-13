@@ -29,8 +29,9 @@ const OPS = pdfjs.OPS as unknown as Record<string, number>;
 type Op = [string, unknown];
 const DEG = Math.PI / 180;
 const path = (paint: string, cmds: number[]): Op => ['constructPath', [OPS[paint], [cmds], null]];
-function run(list: Op[], visible: (d: unknown) => boolean = () => true): GeometryStats {
-  const r = extractGeometry({ fnArray: list.map(([n]) => OPS[n] as number), argsArray: list.map(([, a]) => a), ops: OPS, isLayerVisible: visible });
+/** `measureArcs`: true (predefinito in queste prove), false, o null = campo non passato. */
+function run(list: Op[], visible: (d: unknown) => boolean = () => true, measureArcs: boolean | null = true): GeometryStats {
+  const r = extractGeometry({ fnArray: list.map(([n]) => OPS[n] as number), argsArray: list.map(([, a]) => a), ops: OPS, isLayerVisible: visible, ...(measureArcs === null ? {} : { measureArcs }) });
   if (!r.ok) throw new Error(r.reason);
   return r.stats;
 }
@@ -136,6 +137,49 @@ describe('archi esatti di sole cubiche: raggio e angolo noti entro lo scostament
     expect(idx(330, 4)).toBe(4);
     expect(idx(360, 4)).toBe(5);
     expect(ANGLE_MARGIN).toBe(0.5);
+  });
+});
+
+describe('la misura degli archi e\' spenta di serie (l\'editor non la chiede e non ne paga il costo)', () => {
+  const list: Op[] = [
+    path('stroke', chainCmds(arcChain(300, 400, 40, 0, 360, 4), true)),
+    path('stroke', chainCmds(arcChain(100, 100, 30, 0, 150, 2))),
+    path('stroke', polyCmds(polygonOnCircle(300, 400, 60, 20), true)),
+    path('fillStroke', cat(M(0, 0), Lt(5, 5), C(6, 6, 7, 7, 8, 8), Z)),
+    path('stroke', chainCmds(arcChain(300, 400, 40, 0, 320, 9))),
+  ];
+  const strip = (s: GeometryStats): unknown => JSON.parse(JSON.stringify(s, (k, v) => (k === 'arcs' ? undefined : v)));
+  it('senza `measureArcs` (o con false) le statistiche `arcs` restano vuote e tutte le altre sono identiche a quelle con la misura accesa', () => {
+    const off = run(list, undefined, null);
+    const off2 = run(list, undefined, false);
+    const on = run(list);
+    for (const s of [off, off2]) {
+      for (const g of [s.shapesAll, s.shapesCand]) {
+        expect(only(g.arcs.cubicOpen)).toHaveLength(0);
+        expect(only(g.arcs.cubicClosed)).toHaveLength(0);
+        expect(only(g.arcs.poly)).toHaveLength(0);
+        expect(g.arcs.cubicOpenSkipped).toEqual({ subpaths: 0, units: 0 });
+        expect(g.arcs.cubicClosedSkipped).toEqual({ subpaths: 0, units: 0 });
+        expect(g.arcs.polySkipped).toEqual({ subpaths: 0, units: 0 });
+        expect(g.arcs.polyVertices).toBe(0);
+      }
+      expect(strip(s)).toEqual(strip(on));
+    }
+    expect(only(on.shapesCand.arcs.cubicClosed).length + only(on.shapesCand.arcs.cubicOpen).length + only(on.shapesCand.arcs.poly).length).toBeGreaterThan(0);
+  });
+  it('le primitive memorizzate sono le stesse con la misura accesa o spenta', () => {
+    const mk = (measureArcs: boolean) => {
+      const r = extractGeometry({ fnArray: list.map(([n]) => OPS[n] as number), argsArray: list.map(([, a]) => a), ops: OPS, isLayerVisible: () => true, measureArcs });
+      if (!r.ok) throw new Error(r.reason);
+      return r.geometry;
+    };
+    const a = mk(false);
+    const b = mk(true);
+    expect(a.bytes).toBe(b.bytes);
+    expect(Array.from(a.cubicXY)).toEqual(Array.from(b.cubicXY));
+    expect(Array.from(a.lineXY)).toEqual(Array.from(b.lineXY));
+    expect(a.nCubics).toBe(b.nCubics);
+    expect(a.nLines).toBe(b.nLines);
   });
 });
 
