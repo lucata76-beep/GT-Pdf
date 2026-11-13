@@ -1,6 +1,20 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7d: integrata su `main`, provata dall'utente il 13/11/2026; sotto, quelle di CP7c, CP7b e CP7a).
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7e: misura degli archi, integrata su `main`, non ancora provata dall'utente; sotto, quelle di CP7d, CP7c, CP7b e CP7a).
+
+## Provare CP7e sul PC (misura degli archi)
+
+Sul PC con il mouse, **sul sito**, come le altre schede. **Controlla di avere la build giusta**: in *App > Versione* del pannello a destra l'hash deve essere uguale ai primi 7 caratteri dell'hash di `main` (lo scrive Code nel resoconto dell'integrazione); se è diverso, ricarica la pagina e controlla di nuovo, e se resta diverso dillo prima di rispondere ai punti.
+
+I PDF non escono dal computer. Questa tappa **non cambia l'editor**: aggiunge righe nuove alla scheda *Geometria PDF* di *File > Diagnostica*, che misurano quanto i sottopercorsi di **sole cubiche** (da 1 a 8 cubiche, aperti e chiusi) e i **poligoni fitti** (da 12 a 256 vertici) del tuo PDF somigliano a un cerchio. È **solo misura**: nessuna tolleranza decisa, nessuna riga dice che qualcosa «è» un arco o un cerchio. Servono a decidere, con i numeri, che cosa fare di Centro, Quadrante e Tangente sul PDF. Per ogni punto rispondi con la risposta predefinita (in **grassetto**) oppure dici che cosa cambieresti.
+
+1. **Le righe nuove.** In *File > Diagnostica* apri il tuo PDF **vettoriale** (*Apri PDF…*) e premi *Misura questa pagina*: sotto le righe di prima compaiono righe che cominciano con **«archi»** (quattro di definizioni, poi i sottopercorsi aperti e chiusi di sole cubiche, i poligoni fitti e i conti). Risposta: **ci sono** / no (scrivi che cosa manca o non si legge).
+2. **Copiare la misura.** Premi *Copia misura* e incolla **tutto il testo** in chat (*Copia misura* non contiene il nome del file; *Copia registro* sì). Le righe nuove dicono, per ogni numero di cubiche e per i poligoni, quanto i punti si scostano dal cerchio, che raggio e che angolo coprono, e quanti sono quasi rettilinei. Risposta: **incollata** / no.
+3. **I conti.** Nelle righe nuove cerca «IL CONTO NON TORNA»: non deve comparire (le righe dicono «il conto torna»). Risposta: **non compare** / compare (incolla la riga).
+4. **L'editor è come prima.** Apri lo stesso PDF nell'editor e prova uno snap a tua scelta (per esempio un Estremo o un Punto medio vicino a una linea del disegno): si comporta come prima di questa tappa, e il PDF si apre nello stesso tempo. Risposta: **come prima** / no (scrivi che cosa cambia).
+5. **Il tempo della misura.** Premi *Misura questa pagina* su una pagina fitta e guarda quanto aspetta: la riga «estrazione» dice i millisecondi. Risposta: **va bene così** / no (scrivi quanti secondi e quanto è fitta la pagina).
+
+Che cosa **non** è stato provato: il tuo browser e il tuo sistema (tutte le prove sono su Chromium in un contenitore Linux, con PDF di prova fittizi e PDF sintetici), Safari e iPhone (i tempi e la memoria di Chromium non valgono per l'iPhone), qualunque PDF reale (come altri programmi scrivono archi, raccordi e cerchi: **i numeri veri li dà il tuo PDF**), il tempo della misura su PDF fitti reali, e che cosa siano davvero i sottopercorsi aperti da 1-3 cubiche e i poligoni fitti del tuo PDF: la misura dà numeri, non dice che cosa voleva disegnare l'autore. Le soglie delle classi, i tetti (8 cubiche, 256 vertici) e il limite dei «quasi rettilinei» sono **scelte di Code da confermare**.
 
 ## Provare CP7d sul PC (Intersezione e Perpendicolare sul PDF)
 
