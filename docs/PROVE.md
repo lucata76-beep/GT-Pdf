@@ -1,20 +1,10 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7e: misura degli archi, consegnata su ramo, non integrata su `main`, non ancora provata dall'utente; sotto, quelle di CP7d, CP7c, CP7b e CP7a).
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7e: misura degli archi, integrata su `main`, non ancora provata dall'utente; sotto, quelle di CP7d, CP7c, CP7b e CP7a).
 
 ## Provare CP7e sul PC (misura degli archi)
 
-Sul PC con il mouse. **CP7e non è su `main`** (`main` resta al commit di documenti `fed6111`, con CP7d; il sito si ripubblica a ogni avanzamento di `main`). Finché non avanza, si prova in locale, dalla cartella del progetto (serve Node 22.12 o successivo):
-
-```
-git fetch origin claude/brave-bohr-xr80yt
-git switch claude/brave-bohr-xr80yt
-npm ci
-npm run build
-npm run preview
-```
-
-Poi apri nel browser l'indirizzo che `npm run preview` stampa (di norma `http://localhost:4173/`; il comando resta in esecuzione finché non lo fermi con Ctrl+C). **Controlla di avere la build giusta**: in *App > Versione* del pannello a destra l'hash dice `dev` in locale (il sito mostra i primi 7 caratteri dell'hash di `main`: se CP7e viene integrata, la prova si può rifare sul sito e l'hash deve essere quello che Code scrive nel resoconto dell'integrazione).
+Sul PC con il mouse, **sul sito**, come le altre schede. **Controlla di avere la build giusta**: in *App > Versione* del pannello a destra l'hash deve essere uguale ai primi 7 caratteri dell'hash di `main` (lo scrive Code nel resoconto dell'integrazione); se è diverso, ricarica la pagina e controlla di nuovo, e se resta diverso dillo prima di rispondere ai punti.
 
 I PDF non escono dal computer. Questa tappa **non cambia l'editor**: aggiunge righe nuove alla scheda *Geometria PDF* di *File > Diagnostica*, che misurano quanto i sottopercorsi di **sole cubiche** (da 1 a 8 cubiche, aperti e chiusi) e i **poligoni fitti** (da 12 a 256 vertici) del tuo PDF somigliano a un cerchio. È **solo misura**: nessuna tolleranza decisa, nessuna riga dice che qualcosa «è» un arco o un cerchio. Servono a decidere, con i numeri, che cosa fare di Centro, Quadrante e Tangente sul PDF. Per ogni punto rispondi con la risposta predefinita (in **grassetto**) oppure dici che cosa cambieresti.
 
