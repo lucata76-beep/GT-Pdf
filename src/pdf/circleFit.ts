@@ -42,6 +42,9 @@ export interface ArcMeasure {
   devMid: number;
   /** Angolo coperto in gradi (valore assoluto della somma con segno). */
   angle: number;
+  /** CP7f: angolo (rad) del primo punto visto dal centro, `atan2(y - cy, x - cx)` nelle coordinate dei punti dati, e angolo coperto CON SEGNO (rad; positivo = antiorario nelle stesse coordinate). 0 se non e' un arco. */
+  a0: number;
+  sweep: number;
   /** Solo per i quasi rettilinei: distanza massima dei punti dalla retta ai minimi quadrati divisa per la diagonale del riquadro (0 per gli altri). */
   flat: number;
   /** Scostamento massimo (gradi) delle tangenti dalla tangente del cerchio negli estremi delle cubiche; -1 se non misurato (poligoni, tangenti degeneri). */
@@ -51,7 +54,7 @@ export interface ArcMeasure {
 }
 
 export function newArcMeasure(): ArcMeasure {
-  return { status: 'undetermined', cx: 0, cy: 0, r: 0, dev: 0, devRel: 0, devNodes: 0, devMid: 0, angle: 0, flat: 0, tanDev: -1, jointBreak: -1 };
+  return { status: 'undetermined', cx: 0, cy: 0, r: 0, dev: 0, devRel: 0, devNodes: 0, devMid: 0, angle: 0, a0: 0, sweep: 0, flat: 0, tanDev: -1, jointBreak: -1 };
 }
 
 /** Area di lavoro riusabile (punti, tangenti): dimensionata sul massimo fra le catene e i poligoni. */
@@ -301,11 +304,11 @@ const TA = new Float64Array(2);
 const TB = new Float64Array(2);
 
 /**
- * Angolo coperto: somma con segno degli angoli visti dal centro fra punti consecutivi (ciascun passo ridotto a (-pi, pi]), in gradi e in valore assoluto. `closeLoop` (poligoni): si aggiunge
+ * Angolo coperto: somma con segno degli angoli visti dal centro fra punti consecutivi (ciascun passo ridotto a (-pi, pi]), in radianti e CON SEGNO (CP7f; l'angolo in gradi e' il valore assoluto). `closeLoop` (poligoni): si aggiunge
  * l'ultimo lato verso il primo punto SOLO se, visto dal centro, non e' piu' ampio del lato piu' ampio fra gli altri e ha lo stesso verso della somma: altrimenti e' una corda che chiude
  * un arco (un poligono a «D» copre l'angolo dei suoi vertici, non 0) e non conta.
  */
-function sweepDegrees(xs: ArrayLike<number>, ys: ArrayLike<number>, n: number, cx: number, cy: number, closeLoop: boolean): number {
+function sweepRadians(xs: ArrayLike<number>, ys: ArrayLike<number>, n: number, cx: number, cy: number, closeLoop: boolean): number {
   let sum = 0;
   let maxStep = 0;
   for (let i = 0; i + 1 < n; i++) {
@@ -325,7 +328,7 @@ function sweepDegrees(xs: ArrayLike<number>, ys: ArrayLike<number>, n: number, c
     const step = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
     if (Math.abs(step) <= maxStep * (1 + 1e-9) && step * sum >= 0) sum += step;
   }
-  return Math.abs(sum) * RAD2DEG;
+  return sum;
 }
 
 /** Distanza massima dei punti dalla retta ai minimi quadrati totali (asse principale), divisa per la diagonale `diag` del riquadro. */
@@ -378,7 +381,7 @@ function finish(out: ArcMeasure, n: number, nodeStride: number, closeLoop: boole
   const diag = Math.hypot(maxX - minX, maxY - minY);
   out.status = 'undetermined';
   out.cx = out.cy = out.r = 0;
-  out.dev = out.devRel = out.devNodes = out.devMid = out.angle = out.flat = 0;
+  out.dev = out.devRel = out.devNodes = out.devMid = out.angle = out.flat = out.a0 = out.sweep = 0;
   fitCircle(xs, ys, n, FIT);
   if (!FIT.ok) return;
   out.cx = FIT.cx;
@@ -406,14 +409,17 @@ function finish(out: ArcMeasure, n: number, nodeStride: number, closeLoop: boole
   out.devRel = dev / FIT.r;
   out.devNodes = devNodes;
   out.devMid = devMid;
-  out.angle = sweepDegrees(xs, ys, n, FIT.cx, FIT.cy, closeLoop);
+  out.sweep = sweepRadians(xs, ys, n, FIT.cx, FIT.cy, closeLoop);
+  out.angle = Math.abs(out.sweep) * RAD2DEG;
+  out.a0 = Math.atan2((ys[0] as number) - FIT.cy, (xs[0] as number) - FIT.cx);
 }
 
 /**
  * Misura una catena di `k` cubiche consecutive (1 <= k <= ARC_MAX_CUBICS) memorizzate in `c` come x0, y0, c1x, c1y, c2x, c2y, x1, y1 ciascuna (la fine di una e' l'inizio della
- * successiva). Scrive il risultato in `out`.
+ * successiva). Scrive il risultato in `out`. `tangents` (predefinito true): con false non si misurano le tangenti ne' il salto nei giunti (`tanDev` e `jointBreak` restano -1): serve a chi
+ * vuole solo il cerchio (CP7f, riconoscimento degli anelli del PDF), che non le usa.
  */
-export function measureCubicChain(c: ArrayLike<number>, k: number, out: ArcMeasure): ArcMeasure {
+export function measureCubicChain(c: ArrayLike<number>, k: number, out: ArcMeasure, tangents = true): ArcMeasure {
   const xs = WORK.xs;
   const ys = WORK.ys;
   let n = 0;
@@ -449,7 +455,7 @@ export function measureCubicChain(c: ArrayLike<number>, k: number, out: ArcMeasu
   finish(out, n, SAMPLES_PER_CUBIC, false);
   out.tanDev = -1;
   out.jointBreak = -1;
-  if (out.status !== 'arc') return out;
+  if (out.status !== 'arc' || !tangents) return out;
   // ---- tangenti negli estremi di ogni cubica (rispetto al cerchio adattato) e salto nei giunti
   let tanDev = -1;
   let joint = -1;

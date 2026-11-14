@@ -16,7 +16,7 @@
 // node_modules/pdfjs-dist/legacy/build/pdf.mjs (riga 6377), e NON esportata (letto a runtime: 'DrawOPS' in pdfjs e' false). Quindi sono ricopiati qui.
 // Se un aggiornamento di PDF.js cambia il formato, i test di src/pdf/geometry.test.ts ("sentinella") falliscono con "aggiornare src/pdf/geometry.ts".
 
-import { type ArcStats, addArcMeasure, newArcStats, vertexBucket } from './arcStats';
+import { ANGLE_MARGIN, type ArcStats, addArcMeasure, newArcStats, vertexBucket } from './arcStats';
 import { ARC_MAX_CUBICS, ARC_MAX_VERTICES, measureCubicChain, measurePolygon, newArcMeasure } from './circleFit';
 
 /** DrawOPS di PDF.js 6.5.438 (ricopiati: la costante NON e' esportata). */
@@ -69,6 +69,13 @@ export interface ExtractInput {
    * statistiche `arcs` restano vuote e il resto dell'estrazione e' quello di CP7d).
    */
   measureArcs?: boolean;
+  /**
+   * CP7f (V3.3a): riconoscimento degli anelli (archi e cerchi) per Centro e Quadrante sul PDF: i sottopercorsi di SOLE cubiche (da 1 a ARC_MAX_CUBICS, aperti o chiusi) dei percorsi CANDIDATI
+   * (stroke e fillStroke) con raggio determinato (`status === 'arc'`) e dentro il riferimento di CP7a (`withinCp7aTolerance`) entrano in `PdfGeometry.rings` (centro, raggio, angolo di
+   * partenza e angolo coperto nello spazio utente, cerchio intero o no, percorso). SPENTA se non e' `true`: la accende `loadPdfSnap` (src/pdf/snapPage.ts), non la scheda di Diagnostica;
+   * spenta, `PdfGeometry.rings` non c'e' e il resto e' identico a prima. Con `measureArcs` acceso insieme, una sola misura serve a tutti e due.
+   */
+  recognizeArcs?: boolean;
 }
 
 /** Conte per tipo di operazione (sempre su TUTTA la pagina, anche se il limite scatta). */
@@ -238,9 +245,26 @@ export interface PdfGeometry {
   /** x0, y0, c1x, c1y, c2x, c2y, x1, y1 per cubica (le quadratiche sono convertite in cubiche esatte). */
   cubicXY: Float32Array;
   cubicPath: Uint32Array;
-  /** Byte occupati dai sei array. */
+  /** Byte occupati dai sei array (NON comprende `rings`, che ha i suoi in `rings.bytes`). */
+  bytes: number;
+  /** CP7f: gli anelli riconosciuti (solo con `ExtractInput.recognizeArcs`; assente altrimenti). */
+  rings?: RingData;
+}
+
+/** Anelli (archi e cerchi) riconosciuti nel disegno del PDF (CP7f): un anello e' un sottopercorso di sole cubiche con raggio determinato e dentro il riferimento di CP7a. Spazio UTENTE. */
+export interface RingData {
+  n: number;
+  /** cx, cy, r, a0, sweep per anello: centro e raggio (unita' utente), angolo di partenza `atan2(y - cy, x - cx)` e angolo coperto CON SEGNO (rad; positivo = antiorario con Y verso l'alto). */
+  xy: Float64Array;
+  /** 1 = cerchio intero (catena chiusa e angolo coperto entro ANGLE_MARGIN gradi da 360), 0 = arco. */
+  full: Uint8Array;
+  /** Indice del percorso candidato (come `cubicPath`): serve a escludere i livelli spenti con `pathVisible`. */
+  path: Uint32Array;
+  /** Byte dei tre array. */
   bytes: number;
 }
+/** Numeri per anello in `RingData.xy`. */
+export const RING_STRIDE = 5;
 
 export type ExtractResult = { ok: true; geometry: PdfGeometry; stats: GeometryStats } | { ok: false; reason: string };
 
@@ -451,6 +475,13 @@ function grow32(a: Float32Array<ArrayBuffer>, need: number): Float32Array<ArrayB
   b.set(a);
   return b;
 }
+function grow64(a: Float64Array<ArrayBuffer>, need: number): Float64Array<ArrayBuffer> {
+  let cap = Math.max(a.length, RING_STRIDE);
+  while (cap < need) cap *= 2;
+  const b = new Float64Array(cap);
+  b.set(a);
+  return b;
+}
 function growU32(a: Uint32Array<ArrayBuffer>, need: number): Uint32Array<ArrayBuffer> {
   let cap = a.length;
   while (cap < need) cap *= 2;
@@ -484,8 +515,9 @@ function extract(input: ExtractInput): ExtractResult {
   const { fnArray, argsArray, ops, isLayerVisible } = input;
   const limit = input.maxCoords ?? DEFAULT_MAX_COORDS;
   const arcsOn = input.measureArcs === true;
-  /** Cubiche per sottopercorso che si tengono nel buffer: 4 (regola del cerchio di CP7a) o ARC_MAX_CUBICS con la misura degli archi accesa. */
-  const cubCap = arcsOn ? ARC_MAX_CUBICS : 4;
+  const ringsOn = input.recognizeArcs === true;
+  /** Cubiche per sottopercorso che si tengono nel buffer: 4 (regola del cerchio di CP7a) o ARC_MAX_CUBICS con la misura (CP7e) o il riconoscimento (CP7f) degli archi accesi. */
+  const cubCap = arcsOn || ringsOn ? ARC_MAX_CUBICS : 4;
   const nOps = fnArray.length;
   if (nOps !== argsArray.length) return { ok: false, reason: `Elenco di operazioni incoerente: ${nOps} codici e ${argsArray.length} argomenti (${FIX}).` };
   for (const name of REQUIRED) {
@@ -587,6 +619,11 @@ function extract(input: ExtractInput): ExtractResult {
   let nPaths = 0;
   let nLines = 0;
   let nCubics = 0;
+  // CP7f: gli anelli riconosciuti (vuoti se il riconoscimento e' spento)
+  let ringXY = new Float64Array(ringsOn ? RING_STRIDE * 64 : 0);
+  let ringFull = new Uint8Array(ringsOn ? 64 : 0);
+  let ringPath = new Uint32Array(ringsOn ? 64 : 0);
+  let nRings = 0;
 
   // ---- stato grafico
   const ctm: Mat = [1, 0, 0, 1, 0, 0];
@@ -856,23 +893,42 @@ function extract(input: ExtractInput): ExtractResult {
               }
             }
           }
-          // ---- CP7e (V3.2c, SOLA MISURA, solo con `measureArcs`): sole cubiche (aperte o chiuse, stessa definizione di sopra) fino a ARC_MAX_CUBICS, e poligoni fitti fino a ARC_MAX_VERTICES
-          // vertici. Si misura una volta sola e si somma ai gruppi (tutti i percorsi; candidati).
-          if (!arcsOn) {
-            // spenta: niente
+          // ---- CP7e (V3.2c, SOLA MISURA, solo con `measureArcs`) e CP7f (V3.3a, riconoscimento degli anelli, solo con `recognizeArcs`): sole cubiche (aperte o chiuse, stessa definizione
+          // di sopra) fino a ARC_MAX_CUBICS, e poligoni fitti fino a ARC_MAX_VERTICES vertici (solo la misura). Si misura UNA volta sola e il risultato serve alla misura (tutti i percorsi;
+          // candidati) e al riconoscimento (solo i candidati).
+          if (!arcsOn && !ringsOn) {
+            // spente: niente
           } else if (subCubics > 0 && subLines === 0 && subQuads === 0) {
             if (subCubics <= ARC_MAX_CUBICS) {
-              measureCubicChain(cub, subCubics, arc);
-              const within = withinCp7aTolerance(arc.status === 'arc', arc.r, arc.devNodes, arc.devMid);
-              for (const g of groups) addArcMeasure(closed ? g.arcs.cubicClosed : g.arcs.cubicOpen, subCubics - 1, arc, subCubics, within);
-            } else {
+              if (arcsOn || cand) {
+                measureCubicChain(cub, subCubics, arc, arcsOn); // senza la misura le tangenti non servono
+                const within = withinCp7aTolerance(arc.status === 'arc', arc.r, arc.devNodes, arc.devMid);
+                if (arcsOn) for (const g of groups) addArcMeasure(closed ? g.arcs.cubicClosed : g.arcs.cubicOpen, subCubics - 1, arc, subCubics, within);
+                if (ringsOn && cand && within) {
+                  if (nRings + 1 > ringFull.length) {
+                    ringXY = grow64(ringXY, (nRings + 1) * RING_STRIDE);
+                    ringFull = growU8(ringFull, nRings + 1);
+                    ringPath = growU32(ringPath, nRings + 1);
+                  }
+                  const o = nRings * RING_STRIDE;
+                  ringXY[o] = arc.cx;
+                  ringXY[o + 1] = arc.cy;
+                  ringXY[o + 2] = arc.r;
+                  ringXY[o + 3] = arc.a0;
+                  ringXY[o + 4] = arc.sweep;
+                  ringFull[nRings] = closed && Math.abs(arc.angle - 360) <= ANGLE_MARGIN ? 1 : 0;
+                  ringPath[nRings] = pathIdx;
+                  nRings++;
+                }
+              }
+            } else if (arcsOn) {
               for (const g of groups) {
                 const sk = closed ? g.arcs.cubicClosedSkipped : g.arcs.cubicOpenSkipped;
                 sk.subpaths++;
                 sk.units += subCubics;
               }
             }
-          } else if (closed && subCubics === 0 && subQuads === 0 && subLines >= DENSE_POLYGON_LINETO) {
+          } else if (arcsOn && closed && subCubics === 0 && subQuads === 0 && subLines >= DENSE_POLYGON_LINETO) {
             // vertici: punto iniziale e estremi dei lineTo, senza l'ultimo se coincide con il primo (closePath o coincidenza)
             const nv = subLines + 1 - (Math.hypot(lx - sx, ly - sy) <= CLOSE_COINCIDENCE ? 1 : 0);
             if (nv <= ARC_MAX_VERTICES) {
@@ -1109,6 +1165,11 @@ function extract(input: ExtractInput): ExtractResult {
     cubicPath: cubicPath.slice(0, nCubics),
     bytes: 0,
   };
+  if (ringsOn) {
+    const rings: RingData = { n: nRings, xy: ringXY.slice(0, nRings * RING_STRIDE), full: ringFull.slice(0, nRings), path: ringPath.slice(0, nRings), bytes: 0 };
+    rings.bytes = rings.xy.byteLength + rings.full.byteLength + rings.path.byteLength;
+    geometry.rings = rings;
+  }
   geometry.bytes = geometry.pathPaint.byteLength + geometry.pathVisible.byteLength + geometry.lineXY.byteLength + geometry.linePath.byteLength + geometry.cubicXY.byteLength + geometry.cubicPath.byteLength;
   return { ok: true, geometry, stats };
 }
