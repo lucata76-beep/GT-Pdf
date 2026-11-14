@@ -1,6 +1,6 @@
 # Prove delle tappe (schede)
 
-Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7e: misura degli archi, integrata su `main`, non ancora provata dall'utente; sotto, quelle di CP7d, CP7c, CP7b e CP7a).
+Le schede "Provare ..." delle tappe chiuse (sul PC con il mouse da CP6a in poi; su iPhone prima), spostate qui dal README senza cambiare una parola; PIANO.md e i registri le citano per titolo. In cima la scheda della tappa in corso (CP7e: misura degli archi, integrata su `main`, file di «Copia misura» consegnato dall'utente il 14/11/2026 (decisione 127), punti della scheda non risposti a parole; sotto, quelle di CP7d, CP7c, CP7b e CP7a).
 
 ## Provare CP7e sul PC (misura degli archi)
 
