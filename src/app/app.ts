@@ -345,6 +345,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       origin: model.origin(pageNo),
       pdf: ps?.kind === 'ready' ? ps.source : null,
       pdfSegments: ps?.kind === 'ready' ? (ps.scene ?? null) : null, // i tratti del PDF per Intersezione e Perpendicolare (assenti se la scena e' fitta)
+      pdfRings: ps?.kind === 'ready' ? (ps.rings ?? null) : null, // CP7f: Centro e Quadrante degli archi e cerchi del PDF (stesso interruttore «PDF»)
     });
   }
 
@@ -2621,7 +2622,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
           st === null || st === 'busy'
             ? st
             : st.kind === 'ready'
-              ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene }
+              ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene, ringStats: st.ringStats ?? null, ringBytes: st.ringBytes ?? 0 }
               : st;
         return { on: pdfSnapOn, cap: SNAP_MAX_SEGMENTS, page: pageNo, cached: pdfSnapCache.pages(), busy: [...pdfSnapBusy], said: [...pdfSnapSaid], logged: [...pdfSnapLogged], state: summarize(pdfSnapStateOf(pageNo)) };
       },
@@ -2629,23 +2630,23 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
        * Rilegge i punti del PDF di una pagina con `loadPdfSnap` (la stessa funzione dell'app) e ne dice lo stato e il tempo totale; `maxSegments` e `maxCoords` cambiano i limiti
        * (misure del tetto: scripts/perf-cp7b.cjs e scripts/perf-cp7c.cjs); con `store` il risultato va nella cache e lo snap lo usa.
        */
-      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; maxSceneRefs?: number; store?: boolean; clear?: boolean } = {}) => {
+      pdfSnapLoad: async (n: number, o: { maxSegments?: number; maxCoords?: number; maxSceneRefs?: number; recognizeArcs?: boolean; store?: boolean; clear?: boolean } = {}) => {
         const doc = pdf;
         const info = doc?.pages[n - 1];
         if (!doc || !info) throw new Error('nessun documento o pagina inesistente');
         const sheet = new PageGeometry({ view: info.view, rotate: info.rotate, userUnit: info.userUnit });
         if (o.clear) pdfSnapCache.clear(); // per misurare la memoria di una lettura senza quella gia' in cache
         const t0 = performance.now();
-        const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords, maxSceneRefs: o.maxSceneRefs });
+        const st = await loadPdfSnap(await opsDocument(doc), n, sheet, { maxSegments: o.maxSegments, maxCoords: o.maxCoords, maxSceneRefs: o.maxSceneRefs, recognizeArcs: o.recognizeArcs });
         const wallMs = performance.now() - t0;
         if (o.store) pdfSnapCache.set(n, st);
-        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene } : st };
+        return { wallMs, state: st.kind === 'ready' ? { kind: 'ready', segments: st.segments, curves: st.curves ?? 0, hidden: st.hiddenSegments, nEnd: st.nEnd, endsFromCurves: st.endsFromCurves ?? 0, nMid: st.nMid, bytes: st.bytes, timings: st.timings, cellPt: st.source.cellPt, cells: st.source.nx * st.source.ny, gridBytes: st.source.bytes, sceneStats: st.sceneStats ?? null, hasScene: !!st.scene, ringStats: st.ringStats ?? null, ringBytes: st.ringBytes ?? 0 } : st };
       },
       /**
        * Prestazioni di `findSnap` con i punti del PDF della pagina corrente (che devono essere pronti): `index` usa la griglia, `linear` la scansione lineare di tutti i punti
        * (solo come confronto). Come `snapRun`: tempo di lotti di `batch` chiamate e di `singles` chiamate una per una.
        */
-      snapRunPdf: (objects: PageObject[], raws: UserPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>>; anchor?: UserPoint | null }) => {
+      snapRunPdf: (objects: PageObject[], raws: UserPoint[], radius: number, o: { mode: 'index' | 'linear'; batch: number; batches: number; singles?: number; kinds?: Partial<Record<SnapSwitch, boolean>>; anchor?: UserPoint | null; rings?: boolean }) => {
         const info = pdf?.pages[pageNo - 1];
         const st = pdfSnapCache.peek(pageNo);
         if (!info || !st || st.kind !== 'ready') throw new Error('i punti del PDF della pagina corrente non sono pronti');
@@ -2658,7 +2659,8 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
         const sceneGrid = st.scene ?? null;
         const segSource = !sceneGrid ? null : o.mode === 'index' ? sceneGrid : { forEachNear: (x: number, y: number, r: number, max: number, emit: (id: number, path: number, x1: number, y1: number, x2: number, y2: number) => void) => scanSegmentsNear(sceneGrid.xy, sceneGrid.path, sceneGrid.n, x, y, r, max, emit) };
         const calc = !!(kinds.intersection || kinds.perpendicular || kinds.quadrant || kinds.tangent);
-        const extra = { pdf: source, pdfSegments: segSource, anchor: o.anchor ?? null, scene: calc ? buildSnapScene(objects, g) : undefined };
+        // CP7f: con `rings` diverso da false anche gli anelli del PDF (Centro e Quadrante), se la pagina ne ha: con l'indice dei punti (in `linear` si misura comunque quello)
+        const extra = { pdf: source, pdfSegments: segSource, pdfRings: o.rings === false ? null : (st.rings ?? null), anchor: o.anchor ?? null, scene: calc ? buildSnapScene(objects, g) : undefined };
         let hits = 0;
         let calls = 0;
         const batchMs: number[] = [];

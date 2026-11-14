@@ -1,4 +1,4 @@
-// Snap sul PDF, per pagina (V3.1, CP7b; Estremo delle curve V3.2a, CP7c; Intersezione e Perpendicolare sui tratti V3.2b, CP7d): lettura asincrona dei tratti rettilinei e delle curve di UNA
+// Snap sul PDF, per pagina (V3.1, CP7b; Estremo delle curve V3.2a, CP7c; Intersezione e Perpendicolare sui tratti V3.2b, CP7d; Centro e Quadrante degli anelli V3.3a, CP7f): lettura asincrona dei tratti rettilinei e delle curve di UNA
 // pagina (`getOperatorList`, `getOptionalContentConfig`), estrazione (src/pdf/geometry.ts), punti di snap (src/pdf/snapPoints.ts), indice spaziale dei punti (src/pdf/pointIndex.ts) e, dal
 // CP7d, scena dei tratti con il suo indice (src/pdf/segmentIndex.ts), con lo STATO della pagina, i messaggi e la cache delle ultime N pagine.
 //
@@ -11,6 +11,7 @@ import { OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { type OpsTable, extractGeometry } from './geometry';
 import { PointGrid } from './pointIndex';
+import { type RingPointStats, RingSource, buildRingPoints, ringCount } from './ringPoints';
 import { SEGMENT_GRID_MAX_CELL_PT, type SegmentGrid, type SegmentSceneStats, buildSegmentScene } from './segmentIndex';
 import { type SheetMap, buildSnapPoints, visibleCubicCount, visibleLineCount } from './snapPoints';
 
@@ -35,6 +36,8 @@ export interface SnapLoadTimings {
   indexMs: number;
   /** CP7d: costruzione della scena dei tratti (ritaglio, conteggio, indice); assente se non e' stata costruita (nessun tratto visibile). */
   sceneMs?: number;
+  /** CP7f: punti Centro e Quadrante degli anelli e loro indice; assente se non e' stato riconosciuto nessun anello. */
+  ringsMs?: number;
 }
 
 /** Perche' una pagina non ha tratti ne' curve da agganciare. */
@@ -63,6 +66,13 @@ export type PdfSnapState =
        */
       scene?: SegmentGrid;
       sceneStats?: SegmentSceneStats;
+      /**
+       * CP7f: Centro e Quadrante degli ANELLI (archi e cerchi di sole cubiche riconosciuti con il riferimento di CP7a): la sorgente per `findSnap` (`SnapExtra.pdfRings`), i conti e i byte
+       * (anelli, punti e indice; NON compresi in `bytes`). Assenti se il riconoscimento era spento o non c'e' nessun anello (visibile o in un livello spento).
+       */
+      rings?: RingSource;
+      ringStats?: RingPointStats;
+      ringBytes?: number;
     }
   /** Nessun tratto e nessuna curva visibile: scansione o immagine (`image`), tratti e curve solo in livelli spenti (`hidden`), solo testo o riempimenti (`none`). `curves` solo se ci sono cubiche (visibili o no). */
   | { kind: 'absent'; why: AbsentWhy; segments: number; curves?: number }
@@ -82,6 +92,8 @@ export interface SnapLoadDeps {
   now?: () => number;
   /** Cede il controllo al browser fra una fase e l'altra (predefinito: un giro del ciclo degli eventi). */
   yieldToUi?: () => Promise<void>;
+  /** CP7f: riconoscimento degli anelli (Centro e Quadrante degli archi e cerchi); predefinito: acceso. `false` serve alle misure di costo e alle prove (come prima di CP7f). */
+  recognizeArcs?: boolean;
 }
 
 const errText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
@@ -109,6 +121,7 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
       ops: deps.ops ?? (OPS as unknown as OpsTable),
       isLayerVisible: (data) => config.isVisible(data as never),
       maxCoords: deps.maxCoords ?? SNAP_MAX_COORDS,
+      ...(deps.recognizeArcs === false ? {} : { recognizeArcs: true }),
     });
     const t3 = now();
     // Il documento e' dedicato alle letture dello snap (non e' quello del visore): l'elenco di operazioni, finito il suo lavoro, si libera (memoria). I punti sono nella nostra cache.
@@ -131,11 +144,23 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
     const t4 = now();
     const pts = buildSnapPoints(g, sheet, { curves: true });
     const t5 = now();
-    if (pts.nEnd + pts.nMid === 0) return g.nCubics > 0 ? { kind: 'absent', why: 'none', segments: g.nLines, curves: g.nCubics } : { kind: 'absent', why: 'none', segments: g.nLines }; // tutti i punti fuori dal foglio
+    // CP7f: Centro e Quadrante degli anelli (solo se ne sono stati riconosciuti): i punti nel foglio nella fase dei punti, l'indice in quella dell'indice (nessun cedimento in piu')
+    const tr0 = now();
+    const rp = ringCount(g) > 0 ? buildRingPoints(g, sheet) : null;
+    let ringsMs = now() - tr0;
+    const ringPoints = rp ? rp.stats.centers + rp.stats.quadrants : 0;
+    if (pts.nEnd + pts.nMid === 0 && ringPoints === 0) return g.nCubics > 0 ? { kind: 'absent', why: 'none', segments: g.nLines, curves: g.nCubics } : { kind: 'absent', why: 'none', segments: g.nLines }; // tutti i punti fuori dal foglio
     await pause();
     const t6 = now();
     const grid = new PointGrid(pts);
     const t7 = now();
+    let ringState: { source: RingSource; stats: RingPointStats; bytes: number } | null = null;
+    if (rp) {
+      const tr1 = now();
+      const rgrid = new PointGrid(rp.points);
+      ringState = { source: new RingSource(rgrid), stats: rp.stats, bytes: rp.stats.ringBytes + rp.bytes + rgrid.bytes };
+      ringsMs += now() - tr1;
+    }
     // CP7d: la scena dei tratti (solo se ce ne sono di visibili: con sole curve non c'e' nulla da confrontare)
     let sceneRes: ReturnType<typeof buildSegmentScene> | null = null;
     let sceneMs: number | undefined;
@@ -155,8 +180,16 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
       endsFromCurves: pts.curves?.endsFromCurves ?? 0,
       nMid: pts.nMid,
       bytes: pts.bytes + grid.bytes,
-      timings: sceneMs === undefined ? { opListMs: t1 - t0, extractMs: t3 - t2, pointsMs: t5 - t4, indexMs: t7 - t6 } : { opListMs: t1 - t0, extractMs: t3 - t2, pointsMs: t5 - t4, indexMs: t7 - t6, sceneMs },
+      timings: {
+        opListMs: t1 - t0,
+        extractMs: t3 - t2,
+        pointsMs: t5 - t4,
+        indexMs: t7 - t6,
+        ...(sceneMs === undefined ? {} : { sceneMs }),
+        ...(ringState ? { ringsMs } : {}),
+      },
       ...(sceneRes ? { sceneStats: sceneRes.stats, ...(sceneRes.grid ? { scene: sceneRes.grid } : {}) } : {}),
+      ...(ringState ? { rings: ringState.source, ringStats: ringState.stats, ringBytes: ringState.bytes } : {}),
     };
   } catch (e) {
     return { kind: 'unavailable', reason: errText(e) };
@@ -211,7 +244,13 @@ export function pdfSnapLogLine(state: PdfSnapState, pageNo: number): string {
         : sc.dense
           ? `; scena dei tratti: spenta (${n0(sc.kept)} tratti, ${n0(sc.refs)} voci di indice con celle da ${SEGMENT_GRID_MAX_CELL_PT} pt, tetto ${n0(sc.maxRefs)})`
           : `; scena dei tratti: ${n0(sc.kept)} tratti (${n0(sc.clipped)} ritagliati sul foglio, ${n0(sc.outside)} fuori dal foglio), celle da ${sc.cellPt} pt, ${n0(sc.refs)} voci, ${(sc.bytes / 1048576).toFixed(2)} MB, ${(t.sceneMs ?? 0).toFixed(0)} ms`;
-      return `Snap PDF, pagina ${pageNo}: pronto, ${n0(lineEnds)} estremi e ${n0(state.nMid)} punti medi da ${n0(state.segments)} tratti${curveText} (${(state.bytes / 1048576).toFixed(2)} MB; lettura ${t.opListMs.toFixed(0)} ms, estrazione ${t.extractMs.toFixed(0)} ms, punti ${t.pointsMs.toFixed(0)} ms, indice ${t.indexMs.toFixed(0)} ms)${sceneText}`;
+      // CP7f: gli anelli (archi e cerchi riconosciuti per Centro e Quadrante), solo se ce n'e' almeno uno (visibile o in un livello spento): i numeri da confrontare con il calcolo atteso
+      const rs = state.ringStats;
+      const ringText =
+        rs && rs.rings + rs.hiddenRings > 0
+          ? `; anelli: ${n0(rs.rings)} riconosciuti (${n0(rs.circles)} cerchi, ${n0(rs.arcs)} archi), ${n0(rs.centers)} centri e ${n0(rs.quadrants)} quadranti nel foglio${rs.hiddenRings > 0 ? `, ${n0(rs.hiddenRings)} in livelli spenti` : ''} (${((state.ringBytes ?? 0) / 1048576).toFixed(2)} MB, ${(t.ringsMs ?? 0).toFixed(0)} ms)`
+          : '';
+      return `Snap PDF, pagina ${pageNo}: pronto, ${n0(lineEnds)} estremi e ${n0(state.nMid)} punti medi da ${n0(state.segments)} tratti${curveText} (${(state.bytes / 1048576).toFixed(2)} MB; lettura ${t.opListMs.toFixed(0)} ms, estrazione ${t.extractMs.toFixed(0)} ms, punti ${t.pointsMs.toFixed(0)} ms, indice ${t.indexMs.toFixed(0)} ms)${sceneText}${ringText}`;
     }
     case 'absent':
       return `Snap PDF, pagina ${pageNo}: assente (${state.why === 'image' ? 'immagine' : state.why === 'hidden' ? 'solo livelli spenti' : 'nessun tratto né curva'}; tratti letti ${n0(state.segments)}${state.curves ? `, cubiche lette ${n0(state.curves)}` : ''})`;
