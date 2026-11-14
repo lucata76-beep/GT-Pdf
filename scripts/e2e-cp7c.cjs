@@ -46,6 +46,20 @@ async function desktop(browser, w = 1280, h = 900) {
   await page.addStyleTag({ content: '.float-zoom{display:none!important}' });
   return { ctx, page, errors };
 }
+/**
+ * CP7f: Centro e Quadrante si SPENGONO nelle serie sugli Estremi e sui Punti medi dei cerchi del PDF: dal CP7f i cerchi del disegno hanno un Centro e quattro Quadranti calcolati dal cerchio adattato,
+ * a 0.001-0.03 pt dagli Estremi (i nodi delle cubiche) e dal punto medio degli assi; a quelle distanze decide il piu' vicino al cursore e il marcatore puo' essere «Quadrante» o «Centro» invece di
+ * «Estremo» o «Punto medio». Centro e Quadrante del PDF sono provati in e2e-cp7f.cjs. Su un build che non li ha (prima di CP7f) spegnerli non cambia nulla.
+ */
+async function ringTypesOff(page) {
+  for (const id of ['center', 'quadrant']) {
+    const b = page.locator(`.panel-toggle[data-panel-toggle="${id}"]`);
+    if ((await b.count()) && (await b.getAttribute('aria-pressed')) === 'true') {
+      await b.click();
+      await page.waitForTimeout(60);
+    }
+  }
+}
 async function phone(browser, w = 390, h = 780) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: UA });
   const page = await ctx.newPage();
@@ -219,6 +233,7 @@ const SHEET_BOXES = {
 async function circlesSuite(browser) {
   setSection('punti dei cerchi, mouse 1280x900');
   const { ctx, page, errors } = await desktop(browser);
+  await ringTypesOff(page); // CP7f
   const doIt = async (title, box, pageNo, tag) => {
     const st = await openDoc(page, title, pageNo);
     await tool(page, 'Retta');
@@ -276,6 +291,7 @@ async function circlesSuite(browser) {
 async function negativesSuite(browser) {
   setSection('nessun aggancio dove non c\'e\' un estremo');
   const { ctx, page, errors } = await desktop(browser);
+  await ringTypesOff(page); // CP7f
   await openDoc(page, 'A4 vettoriale');
   await tool(page, 'Retta');
   const box = SHEET_BOXES['A4 vettoriale'];
@@ -319,6 +335,7 @@ async function quoteSuite(browser) {
   for (const [title, box] of Object.entries(SHEET_BOXES)) {
     if (title === 'A4 con annotazioni') continue;
     const { ctx, page, errors } = await desktop(browser);
+    await ringTypesOff(page); // CP7f
     await openDoc(page, title);
     const c = circles(...box);
     const pts = circlePoints(box);
@@ -376,6 +393,7 @@ async function quoteSuite(browser) {
 async function togglesSuite(browser) {
   setSection('interruttori PDF ed Estremo sui punti dei cerchi');
   const { ctx, page, errors } = await desktop(browser);
+  await ringTypesOff(page); // CP7f
   await openDoc(page, 'A4 vettoriale');
   await tool(page, 'Retta');
   const box = SHEET_BOXES['A4 vettoriale'];
@@ -469,6 +487,7 @@ const circleEnds = (x, y, r) => [P(x + r, y), P(x, y + r), P(x - r, y), P(x, y -
 async function onlyCurvesSuite(browser) {
   setSection('pagina di sole curve');
   const { ctx, page, errors } = await desktop(browser);
+  await ringTypesOff(page); // CP7f
   const bytes = await onlyCirclesPdf();
   await loadNamed(page, 'sole-curve.pdf', bytes);
   const note = await status(page); // il messaggio della pagina (prima di scegliere uno strumento)
@@ -520,6 +539,7 @@ async function diagLog(page) {
 async function layersSuite(browser) {
   setSection('curve in livelli spenti');
   const { ctx, page, errors } = await desktop(browser);
+  await ringTypesOff(page); // CP7f
   // livello acceso: cerchio A; spento: cerchio B; fuori dai livelli: cerchio C; spento dentro acceso: D; acceso dentro spento: E
   const A = [150, 600, 50];
   const B = [150, 400, 50];
@@ -558,6 +578,7 @@ async function layersSuite(browser) {
 
   // curve SOLO in un livello spento: stato "assente" per livelli spenti, con il messaggio che lo dice
   const c2 = await desktop(browser);
+  await ringTypesOff(c2.page); // CP7f
   await loadNamed(c2.page, 'solo-spento.pdf', await contentPdf(`/OC /Off BDC ${circleOps(...B)} EMC`, { layers: true }));
   const note = await status(c2.page);
   const st2 = await showFit(c2.page);
