@@ -290,8 +290,9 @@ async function crossingsSuite(browser) {
     // con tutti i tipi accesi: nei punti in cui l'incontro coincide con un Estremo o un Punto medio del PDF c'e' un marcatore nel punto giusto; QUALE dei due (Estremo o Punto medio contro Intersezione)
     // dipende dal Float32 di PDF.js: i punti distano meno di 1e-4 pt, non esattamente zero, e a distanze diverse vince il piu' vicino. La priorita' a parita' ESATTA e' provata dagli unitari e da «croci».
     await allOn(page);
-    let e = await hoverAnyOf(page, 'centro degli assi, tutti i tipi', sc.out['assi (centro)'], ['mid', 'intersection']);
-    check(`${title}: con tutti i tipi accesi, dove gli assi si incrociano c'e' un marcatore nel punto giusto: Punto medio o Intersezione (stessa posizione entro 1e-4 pt)`, e === null, e || '');
+    // CP7f: nell'incrocio degli assi c'e' anche il Centro del cerchio disegnato li' (a circa 0.002 pt dal punto medio): e' ammesso anche «Centro»
+    let e = await hoverAnyOf(page, 'centro degli assi, tutti i tipi', sc.out['assi (centro)'], ['mid', 'intersection', 'center']);
+    check(`${title}: con tutti i tipi accesi, dove gli assi si incrociano c'e' un marcatore nel punto giusto: Punto medio, Intersezione o Centro (stessa posizione entro 1e-4 pt)`, e === null, e || '');
     e = await hoverAnyOf(page, 'estremo della quota, tutti i tipi', sc.out['quota, estremo destro'], ['end', 'mid', 'intersection']);
     check(`${title}: con tutti i tipi accesi, dove la tacca incontra la quota c'e' un marcatore nel punto giusto: Estremo, Punto medio o Intersezione`, e === null, e || '');
     // Estremo e Punto medio spenti, Intersezione accesa: la stessa cosa
