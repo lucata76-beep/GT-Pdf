@@ -153,6 +153,59 @@ describe('anelli riconosciuti: centro, raggio e quadranti attesi (calcolati nel 
       });
     }
   }
+  // I quadranti che coincidono con un ESTREMO dell'arco (arco da 0 a 90 gradi, da 90 a 180, ...): con i nodi arrotondati a Float32 l'angolo di un estremo dal centro adattato puo' cadere di
+  // pochi milionesimi di radiante fuori dall'arco; `RING_ANGLE_EPS` (1e-4 rad) lo evita. Gli attesi vengono dal campionamento dell'arco vero (che include l'estremo), non dal codice.
+  const aligned: Spec[] = [
+    { cx: 300, cy: 400, r: 40, start: 0, sweep: 90, parts: 1 },
+    { cx: 300, cy: 400, r: 40, start: 90, sweep: 90, parts: 1 },
+    { cx: 300, cy: 400, r: 40, start: 180, sweep: 90, parts: 1 },
+    { cx: 300, cy: 400, r: 40, start: 270, sweep: 90, parts: 1 },
+    { cx: 300, cy: 400, r: 40, start: 0, sweep: 90, parts: 2 },
+    { cx: 300, cy: 400, r: 40, start: 0, sweep: 180, parts: 2 },
+    { cx: 300, cy: 400, r: 40, start: 90, sweep: 180, parts: 2 },
+    { cx: 300, cy: 400, r: 40, start: 270, sweep: 180, parts: 2 },
+    { cx: 300, cy: 400, r: 40, start: 0, sweep: 270, parts: 3 },
+    { cx: 300, cy: 400, r: 2, start: 90, sweep: -90, parts: 1 }, // orario, raggio piccolo
+    { cx: 300, cy: 400, r: 2, start: 180, sweep: -180, parts: 2 },
+  ];
+  for (const [pname, spec] of pages) {
+    for (const s of aligned) {
+      it(`${pname}: arco da ${s.start} gradi, ${s.sweep} gradi in ${s.parts} cubica/che, r ${s.r}: i quadranti sugli estremi ci sono`, () => {
+        const chain = arcChain(s.cx, s.cy, s.r, s.start, s.sweep, s.parts);
+        const { g } = extract([path('stroke', chainCmds(chain))]);
+        expect(ringCount(g)).toBe(1);
+        const rp = buildRingPoints(g, sheetOf(spec));
+        const exp = expected(s, spec);
+        // un arco di 90 gradi ha 2 quadranti (i due estremi), di 180 ne ha 3, di 270 ne ha 4 (se gli estremi sono sui quadranti)
+        expect(exp.quadrants.size).toBe(Math.abs(s.sweep) / 90 + 1);
+        expectPoints(rp, exp, tolFor(s, chain, spec.userUnit), pname);
+      });
+    }
+  }
+  it('quadranti sugli estremi con i nodi Float32 (3000 archi allineati a caso, raggio 5, 40 e 300 pt, centri fino a 1600 pt): nessuno manca, nessuno in piu\' (senza il margine angolare ne mancano)', () => {
+    let seed = 42;
+    const rnd = (): number => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+    const big: PageSpec = { view: [0, 0, 2000, 2000], rotate: 0, userUnit: 1 };
+    let wrong = 0;
+    let rings = 0;
+    for (let i = 0; i < 3000; i++) {
+      const choice = [[1, 90], [2, 90], [3, 90], [2, 180], [3, 180], [3, 270]][Math.floor(rnd() * 6)] as [number, number];
+      const start = 90 * Math.floor(rnd() * 4);
+      const r = [5, 40, 300][Math.floor(rnd() * 3)] as number;
+      const { g } = extract([path('stroke', chainCmds(arcChain(400 + rnd() * 1200, 400 + rnd() * 1200, r, start, choice[1], choice[0])))]);
+      if (ringCount(g) !== 1) continue;
+      rings++;
+      if (buildRingPoints(g, sheetOf(big)).stats.quadrants !== choice[1] / 90 + 1) wrong++;
+    }
+    expect(rings).toBeGreaterThan(2900); // tutti gli archi di questa prova sono archi standard: uno da 90 gradi in una cubica o da 30 a 90 gradi per cubica
+    expect(wrong).toBe(0);
+  });
+  it('un arco che comincia 0.05 gradi DOPO un quadrante (8.7e-4 rad, oltre il margine angolare di 1e-4 rad): quel quadrante non c\'e\'', () => {
+    const chain = arcChain(300, 400, 40, 0.05, 90, 2);
+    const rp = buildRingPoints(extract([path('stroke', chainCmds(chain))]).g, sheetOf(A));
+    // da 0.05 a 90.05 gradi: contiene 90, non contiene 0 (0.05 gradi = 8.7e-4 rad, oltre RING_ANGLE_EPS = 1e-4 rad)
+    expect(rp.stats.quadrants).toBe(1);
+  });
   it('un arco da 10 a 100 gradi ha solo il quadrante a 90; un cerchio intero ne ha 4 (a ogni raggio)', () => {
     const arc = arcChain(300, 400, 25, 10, 90, 1);
     const rp1 = buildRingPoints(extract([path('stroke', chainCmds(arc))]).g, sheetOf(A));
