@@ -270,7 +270,9 @@ async function checkSheetPoints(page, name, box, tag = name) {
  * Perpendicolare sul PDF sono provate in e2e-cp7d.cjs. Su un build che li ha gia' (interruttori da CP6f) non cambia altro.
  */
 async function calcTypesOff(page) {
-  for (const id of ['intersection', 'perpendicular']) {
+  // CP7f: anche Centro e Quadrante (dal CP7f i cerchi del disegno hanno un Centro e quattro Quadranti calcolati dal cerchio adattato, a 0.001-0.03 pt dal punto medio degli assi e dagli estremi dei cerchi:
+  // a quelle distanze decide il piu' vicino al cursore e il marcatore puo' essere «Centro» o «Quadrante» invece di «Punto medio» o «Estremo»); sono provati in e2e-cp7f.cjs
+  for (const id of ['intersection', 'perpendicular', 'center', 'quadrant']) {
     const b = panelToggle(page, id);
     if ((await b.count()) && (await b.getAttribute('aria-pressed')) === 'true') {
       await b.click();
