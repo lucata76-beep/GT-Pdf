@@ -286,8 +286,9 @@ async function constructionSuite(browser) {
 
   // Linea in costruzione
   setSection('con una Linea in costruzione');
-  // snap spenti: i punti si indicano dove si clicca (altrimenti lo snap su un estremo degli oggetti disegnati sposta il punto e il confronto con il foglio non vale)
-  for (const t of ['end', 'mid', 'center']) {
+  // snap spenti: i punti si indicano dove si clicca (altrimenti lo snap su un estremo degli oggetti disegnati sposta il punto e il confronto con il foglio non vale); dopo CP7f anche lo snap sul PDF
+  // (senza, il terzo punto veniva spostato di circa 13 pt da un aggancio sul disegno del PDF)
+  for (const t of ['end', 'mid', 'center', 'pdf']) {
     const b = page.locator(`.st-toggle[data-toggle="${t}"]`);
     if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
   }
