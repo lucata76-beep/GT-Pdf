@@ -54,7 +54,10 @@ describe('stato con gli anelli', () => {
     expect(s.ringStats).toMatchObject({ rings: 2, circles: 1, arcs: 1, hiddenRings: 0, centers: 2 });
     // l'arco da 20 a 170 gradi (antiorario): quadrante a 90 (utente: alto) e nessun altro; nel foglio y e' rovesciato ma il conto dei quadranti e' lo stesso
     expect(s.ringStats?.quadrants).toBe(4 + 1);
-    expect(s.ringBytes).toBeGreaterThan(0);
+    // la memoria che resta: i punti (16 byte l'uno) e l'indice; i buffer di estrazione (`ringStats.ringBytes`) si liberano con la geometria e non sono contati
+    const pointsBytes = ((s.ringStats?.centers ?? 0) + (s.ringStats?.quadrants ?? 0)) * 16;
+    expect(s.ringBytes).toBe(pointsBytes + (s.rings?.grid.bytes ?? 0));
+    expect(s.ringStats?.ringBytes).toBeGreaterThan(0);
     expect(s.timings.ringsMs).toBeGreaterThanOrEqual(0);
     // il Centro del cerchio: utente (100, 700) -> foglio (100, 800 - 700); vicino al punto, entro 0.05 pt
     const c = ringsAt(s, 100, 100, 3);

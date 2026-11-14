@@ -67,8 +67,9 @@ export type PdfSnapState =
       scene?: SegmentGrid;
       sceneStats?: SegmentSceneStats;
       /**
-       * CP7f: Centro e Quadrante degli ANELLI (archi e cerchi di sole cubiche riconosciuti con il riferimento di CP7a): la sorgente per `findSnap` (`SnapExtra.pdfRings`), i conti e i byte
-       * (anelli, punti e indice; NON compresi in `bytes`). Assenti se il riconoscimento era spento o non c'e' nessun anello (visibile o in un livello spento).
+       * CP7f: Centro e Quadrante degli ANELLI (archi e cerchi di sole cubiche riconosciuti con il riferimento di CP7a): la sorgente per `findSnap` (`SnapExtra.pdfRings`), i conti e i byte che
+       * restano in memoria (punti e indice degli anelli; NON compresi in `bytes`; i buffer usati durante l'estrazione, `ringStats.ringBytes`, si liberano). Assenti se il riconoscimento era
+       * spento o non c'e' nessun anello (visibile o in un livello spento).
        */
       rings?: RingSource;
       ringStats?: RingPointStats;
@@ -158,7 +159,7 @@ export async function loadPdfSnap(doc: PDFDocumentProxy, pageNo: number, sheet: 
     if (rp) {
       const tr1 = now();
       const rgrid = new PointGrid(rp.points);
-      ringState = { source: new RingSource(rgrid), stats: rp.stats, bytes: rp.stats.ringBytes + rp.bytes + rgrid.bytes };
+      ringState = { source: new RingSource(rgrid), stats: rp.stats, bytes: rp.bytes + rgrid.bytes }; // come `bytes`: solo cio' che resta in memoria (i buffer di estrazione degli anelli, `stats.ringBytes`, si liberano con la geometria)
       ringsMs += now() - tr1;
     }
     // CP7d: la scena dei tratti (solo se ce ne sono di visibili: con sole curve non c'e' nulla da confrontare)
