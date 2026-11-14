@@ -21,6 +21,8 @@
 // tipo nuovo ne' un interruttore di `SnapKind`: l'interruttore «PDF» e' dell'app, che passa o no la sorgente.
 // CP7d (V3.2b): `extra.pdfSegments` aggiunge Intersezione e Perpendicolare sui TRATTI rettilinei del PDF (src/pdf/segmentIndex.ts): con gli interruttori Intersezione e Perpendicolare gia'
 // esistenti e con «PDF» acceso; i candidati sono quelli di `extraCandidates` (snapExtra.ts), emessi dopo quelli degli oggetti.
+// CP7f (V3.3a): `extra.pdfRings` aggiunge Centro e Quadrante degli ANELLI del PDF (archi e cerchi di sole cubiche riconosciuti con il riferimento di CP7a: src/pdf/ringPoints.ts): stessi tipi,
+// stesse etichette e stessi marcatori, con gli interruttori Centro e Quadrante gia' esistenti e con «PDF» acceso; considerati per ultimi, quindi a parita' di distanza e di tipo vince l'oggetto disegnato.
 // A parita' di distanza (1e-9 pt) vince il tipo con priorita' piu' alta: Estremo, Punto medio, Centro, Origine, Intersezione, Quadrante, Perpendicolare, Tangente (i punti gia'
 // presenti negli oggetti prima di quelli calcolati).
 import type { PageObject } from '../model/model';
@@ -58,6 +60,15 @@ export interface PdfSnapSource {
   forEachNear(x: number, y: number, radius: number, end: boolean, mid: boolean, emit: (x: number, y: number, kind: 'end' | 'mid') => void): void;
 }
 
+/**
+ * Sorgente di Centro e Quadrante di anelli che NON sono oggetti del modello: gli archi e i cerchi del disegno del PDF riconosciuti (V3.3a, CP7f: `RingSource` di src/pdf/ringPoints.ts, su una
+ * `PointGrid`). `forEachNear` chiama `emit` per ogni punto dei tipi richiesti entro `radius` pt del foglio (bordo compreso) da (x, y), nel foglio, in un ordine stabile (prima i Centri, poi i
+ * Quadranti, nell'ordine degli anelli). Non e' un oggetto: non si seleziona, non si cancella, non entra nel modello ne' nel file progetto.
+ */
+export interface PdfRingSource {
+  forEachNear(x: number, y: number, radius: number, center: boolean, quadrant: boolean, emit: (x: number, y: number, kind: 'center' | 'quadrant') => void): void;
+}
+
 /** Dati in piu' di `findSnap` per i tipi di CP6f (tutti facoltativi). */
 export interface SnapExtra {
   /** La scena della pagina (`buildSnapScene`), da rifare quando cambiano gli oggetti o la pagina; se manca ma serve, `findSnap` la costruisce a ogni chiamata. */
@@ -78,6 +89,12 @@ export interface SnapExtra {
    * vince il candidato di un oggetto disegnato. Assente: il risultato e' quello di prima.
    */
   pdfSegments?: PdfSegmentSource | null;
+  /**
+   * Gli anelli del disegno del PDF (V3.3a, CP7f) per Centro e Quadrante: stessi tipi, stesse etichette e stessi marcatori degli oggetti, e gli interruttori Centro e Quadrante (con uno spento
+   * non c'e' quel tipo sul PDF). Considerati dopo gli oggetti, i punti del PDF e le costruzioni: a parita' di distanza e di tipo vince il candidato di un oggetto disegnato. Assente: il risultato
+   * e' quello di prima.
+   */
+  pdfRings?: PdfRingSource | null;
 }
 
 export interface SnapHit {
@@ -245,5 +262,8 @@ export function findSnap(objects: readonly PageObject[], geom: PageGeometry, raw
     const scene = extra?.scene ?? buildSnapScene(objects, geom);
     extraCandidates(scene, raw, radius, kinds, extra?.anchor ? geom.userToSheet(extra.anchor) : null, consider, extra?.pdfSegments);
   }
+  // CP7f: gli anelli del PDF per ultimi (anche dopo i Quadranti degli oggetti): a parita' di distanza e di tipo `consider` tiene il primo, quindi vince l'oggetto disegnato; fra tipi diversi
+  // decide la priorita', non l'ordine di arrivo
+  if (extra?.pdfRings && (kinds.center || kinds.quadrant)) extra.pdfRings.forEachNear(raw.x, raw.y, radius, !!kinds.center, !!kinds.quadrant, consider);
   return found ? { point: { x: bestX, y: bestY }, kind: bestKind } : null;
 }
