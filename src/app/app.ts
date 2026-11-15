@@ -89,6 +89,7 @@ import { PdfViewer, type ViewerMode } from '../ui/viewer';
 import { type AngularMode, Construction, type ConstructionTool, type TransformTool, isTransformTool } from './construction';
 import { OUTSIDE_MESSAGE, SHELL_MAX_LENGTH, parseShellPoint, parseShellRadius } from './shell';
 import { UI_SIZES, loadUiSize, saveUiSize } from './uiSize';
+import { APP_VERSION } from './version';
 
 // Percorsi relativi alla pagina: l'app sta sotto /GT-Pdf/ su GitHub Pages.
 const assetUrl = (path: string): string => new URL(path, document.baseURI).href;
@@ -183,11 +184,7 @@ const PDF_SNAP_MESSAGE = {
   reading: 'PDF attivo: il disegno di questa pagina è in lettura, l\'aggancio compare tra un momento',
 };
 
-export interface AppOptions {
-  openDiagnostics: () => void;
-}
-
-export function mountApp(root: HTMLElement, opts: AppOptions): void {
+export function mountApp(root: HTMLElement): void {
   // ---------- Stato della sessione ----------
   let pdf: OpenedPdf | null = null;
   let pageNo = 1;
@@ -605,8 +602,6 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
     { label: 'Salva con nome…', disabled: !pdf, onSelect: () => void saveFlow() },
     { label: 'Esporta PDF…', disabled: !pdf, onSelect: () => void exportFlow() },
     { label: 'Chiudi', disabled: !pdf, onSelect: () => void closeFlow() },
-    'separator',
-    { label: 'Diagnostica', onSelect: opts.openDiagnostics },
   ];
   const editMenu = (): MenuEntry[] => {
     // Le voci sulla selezione (CP6e) valgono con lo strumento Seleziona e almeno un oggetto selezionato; la Rotazione anche solo con mouse o trackpad (l'angolo si digita).
@@ -668,7 +663,7 @@ export function mountApp(root: HTMLElement, opts: AppOptions): void {
       }),
       h('span', { class: 'sr-only' }, 'GT-Pdf'),
     ),
-    h('nav', { class: 'menus', 'aria-label': 'Menu' }, menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Origine', originMenu), menuButton('Zoom', zoomMenu)),
+    h('nav', { class: 'menus', 'aria-label': 'Menu' }, h('span', { class: 'app-version', title: `Versione ${APP_VERSION} · build ${__BUILD_ID__}` }, APP_VERSION), menuButton('File', fileMenu), menuButton('Modifica', editMenu), menuButton('Inserisci', insertMenu), menuButton('Origine', originMenu), menuButton('Zoom', zoomMenu)),
     docName,
     h('div', { class: 'bar-right' }, h('div', { class: 'undo-ctl' }, undoBtn, redoBtn), h('div', { class: 'size-ctl' }, sizeDown, sizeUp), h('div', { class: 'zoom-ctl' }, zoomOutBtn, zoomLabel, zoomInBtn), inspectorBtn),
   );

@@ -4,8 +4,8 @@ import './styles/base.css';
 import './styles/app.css';
 import { mountApp } from './app/app';
 
-// Due schermate nella stessa pagina: l'app (predefinita) e la diagnostica (#diag).
-// Restano entrambe montate, cosi' passare dall'una all'altra non perde il documento aperto.
+// Due schermate nella stessa pagina: l'app (predefinita) e la diagnostica (#diag). La diagnostica NON ha piu' una voce nel menu (decisione 131): si raggiunge solo
+// scrivendo #diag nell'indirizzo. Restano entrambe montate, cosi' passare dall'una all'altra non perde il documento aperto.
 const root = document.getElementById('app');
 if (!root) throw new Error('Elemento #app mancante');
 
@@ -28,6 +28,6 @@ const showDiag = (on: boolean): void => {
 };
 const route = (): void => showDiag(location.hash === '#diag');
 
-mountApp(appRoot, { openDiagnostics: () => (location.hash = '#diag') });
+mountApp(appRoot);
 window.addEventListener('hashchange', route);
 route();

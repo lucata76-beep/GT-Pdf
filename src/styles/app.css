@@ -120,6 +120,17 @@ body.app-mode {
   display: flex;
   align-items: center;
 }
+/* Versione dell'app (src/app/version.ts): prima voce della riga dei menu, quindi accanto al logo sul PC e sulla riga dei menu sul telefono (cosi' la riga del logo, del nome
+   del file e dei pulsanti resta come prima). Non e' un pulsante: niente bordo, niente sfondo. */
+.app-version {
+  flex: none;
+  align-self: center;
+  padding: 0 0.375rem 0 0.125rem;
+  color: var(--cad-text-secondary);
+  font: 600 0.75rem/1rem var(--font-ui);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
 .sr-only {
   position: absolute;
   width: 1px;
